@@ -1,0 +1,18 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+evidence-store/
+
+# Capacitor generated web bundle + built APK
+apk-www/
+Asset360-Field.apk
+android/app/src/main/assets/public/
+
+# Generated exports
+exports/

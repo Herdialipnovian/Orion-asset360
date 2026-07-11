@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Sistem Manajemen Aset",
+  "description": "Platform manajemen siklus hidup aset end-to-end terintegrasi berbasis flowchart, memudahkan visualisasi, pelacakan real-time, kontrol inventory, deployment, audit, hingga pemeliharaan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

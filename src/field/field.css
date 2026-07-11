@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/*
+ * ORIGIN Asset360 — Field PWA. Commits to a single dark, high-contrast world:
+ * this is an outdoor/warehouse tool used one-handed in glare, so large tap
+ * targets + dark ground are a deliberate product choice (not an omission).
+ */
+:root {
+  --bg: #080c17;
+  --surface: #0f1728;
+  --surface-2: #141d31;
+  --line: #1e2b45;
+  --ink: #e8eef7;
+  --ink-2: #9fb0c6;
+  --ink-3: #62728c;
+  --accent: #4d8bff;
+  --spark: #ffcd00;
+  color-scheme: dark;
+}
+
+html {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  overscroll-behavior-y: none;
+}
+
+/* Field targets: never smaller than a gloved fingertip. */
+button,
+a,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+.tap {
+  min-height: 52px;
+}
+
+.no-tap-callout {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@keyframes fieldPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.pulse {
+  animation: fieldPulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse { animation: none; }
+}
+
+/* Scanner viewport reticle */
+.reticle {
+  box-shadow: 0 0 0 100vmax rgba(4, 8, 16, 0.72);
+  border-radius: 22px;
+}
+
+/*
+ * Glove / outdoor mode: larger rem-scaled type, bigger tap targets, and a
+ * brighter ground for sunlight readability + gloved fingers. Toggled from Profile.
+ */
+html.glove {
+  font-size: 118%;
+}
+html.glove body {
+  --ink: #ffffff;
+}
+.glove .tap {
+  min-height: 62px;
+}
+.glove button {
+  font-weight: 700;
+}

@@ -17,6 +17,7 @@ export interface AuthUser {
   name: string;
   role: Role;
   client?: string | null; // set for PIC / Merchandiser (client-scoped); null for Admin / Logistik
+  area?: string | null; // optional Area scope (PIC Area / Merchandiser per-area, distribution)
 }
 export interface AuthedReq extends Request {
   user?: AuthUser;
@@ -26,7 +27,7 @@ export const hashPassword = (p: string) => bcrypt.hash(p, 10);
 export const verifyPassword = (p: string, hash: string) => bcrypt.compare(p, hash);
 
 export const signToken = (u: AuthUser) =>
-  jwt.sign({ sub: String(u.id), username: u.username, name: u.name, role: u.role, client: u.client ?? null }, SECRET, { expiresIn: "12h" });
+  jwt.sign({ sub: String(u.id), username: u.username, name: u.name, role: u.role, client: u.client ?? null, area: u.area ?? null }, SECRET, { expiresIn: "12h" });
 
 export function requireAuth(req: AuthedReq, res: Response, next: NextFunction) {
   const header = req.headers.authorization || "";
@@ -34,7 +35,7 @@ export function requireAuth(req: AuthedReq, res: Response, next: NextFunction) {
   if (!token) return res.status(401).json({ error: "Token tidak ada." });
   try {
     const p = jwt.verify(token, SECRET) as any;
-    req.user = { id: Number(p.sub), username: p.username, name: p.name, role: p.role, client: p.client ?? null };
+    req.user = { id: Number(p.sub), username: p.username, name: p.name, role: p.role, client: p.client ?? null, area: p.area ?? null };
     next();
   } catch {
     return res.status(401).json({ error: "Sesi tidak valid / kedaluwarsa. Silakan login ulang." });
@@ -50,7 +51,7 @@ export function requireAuthFlexible(req: AuthedReq, res: Response, next: NextFun
   if (!token) return res.status(401).json({ error: "Token tidak ada." });
   try {
     const p = jwt.verify(token, SECRET) as any;
-    req.user = { id: Number(p.sub), username: p.username, name: p.name, role: p.role, client: p.client ?? null };
+    req.user = { id: Number(p.sub), username: p.username, name: p.name, role: p.role, client: p.client ?? null, area: p.area ?? null };
     next();
   } catch {
     return res.status(401).json({ error: "Sesi tidak valid / kedaluwarsa." });

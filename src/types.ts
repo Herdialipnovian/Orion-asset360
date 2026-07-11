@@ -63,7 +63,13 @@ export interface Asset {
   serialNumber?: string;
   fisik?: string; // "Baru" | "Second"
   tglBeli?: string; // purchase date, YYYY-MM-DD
-  
+  // Ownership & nature (Phase 0 foundation for multi-pattern deployment)
+  owner?: "Origin" | "Client"; // who owns it — drives depreciation (Origin) vs client billing
+  usageType?: "Reusable" | "Consumable"; // reusable cycles back (Fase 9); consumable ends at disposal (Fase 10)
+  // Deployment context: the Proyek/Episode this asset is currently deployed under (drives the
+  // context-aware Fase 6/7/9 behaviour — Internal custodian vs Event venue vs Distribusi toko).
+  projectId?: number | null;
+
   // Specific Stage Documents & Output Data
   stageDetails: {
     request: {
@@ -137,6 +143,60 @@ export interface Asset {
       }[];
       installedQty?: number; // = sum(doneQty) across ALL assignments
       fullyInstalled?: boolean; // installedQty >= asset.quantity (advisory only)
+
+      // ── Multi-pattern deployment context (Fase 1/2/3). `mode` picks which structure below is live.
+      mode?: "Internal" | "Event" | "Distribusi";
+      projectId?: number; // the Proyek/Campaign this deployment belongs to
+      projectName?: string;
+
+      // Internal / Fixed — serah-terima ke Karyawan (custodian) + BAST.
+      custodianId?: number; // employees.id
+      custodianName?: string;
+      custodianDept?: string;
+      handoverDate?: string;
+      handoverSignature?: string; // BAST TTD (dataURL)
+      handoverNote?: string;
+
+      // Event / Roadshow — asset(-package) deployed at a Venue as a Leg; roadshow = ordered legs.
+      legs?: {
+        locationId: number;
+        venue: string; // resolved name
+        area?: string;
+        pic?: string; // PIC per-leg (changes each venue)
+        seq: number; // order in the roadshow (1,2,3…)
+        status: "planned" | "active" | "done"; // planned→active(setup)→done(relocated/returned)
+        setupDate?: string;
+        teardownDate?: string;
+        signature?: string;
+        note?: string;
+      }[];
+      currentLegSeq?: number; // which leg the asset is physically at now
+
+      // Distribusi — fan-out placement per toko (GPS + foto), driven by merchandisers.
+      placements?: {
+        locationId: number;
+        toko: string; // resolved name
+        area?: string;
+        merchandiserId?: number;
+        merchandiser?: string;
+        qty: number; // planned units at this toko
+        doneQty?: number; // 0..qty installed
+        status: "pending" | "partial" | "done";
+        gpsLat?: number;
+        gpsLng?: number;
+        placedAt?: string;
+        signature?: string;
+        note?: string;
+        audited?: boolean; // marked when sampled in a Fase-7 audit
+        auditCompliant?: boolean;
+      }[];
+      coverage?: {
+        totalToko: number;
+        auditedToko: number;
+        compliantToko: number;
+        coveragePct: number;
+        compliancePct: number;
+      };
     };
     audit: {
       lastAuditDate: string;

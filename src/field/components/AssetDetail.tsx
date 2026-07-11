@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import React from "react";
-import { ArrowLeft, ChevronRight, MapPin, History, Lock, Camera, CloudUpload, AlertTriangle, Wrench } from "lucide-react";
+import { ArrowLeft, ChevronRight, MapPin, History, Lock, Camera, CloudUpload, AlertTriangle, Wrench, Compass } from "lucide-react";
 import type { Asset, ActivityLog } from "../../types";
 import type { AuthUser } from "../fieldApi";
 import type { CommitRecord } from "../outbox";
 import { Users } from "lucide-react";
-import { eligibleActions, handoffActions, myInstallTask, canAssignInstall, STAGE_FULL, STAGE_LABELS } from "../lifecycle";
+import { eligibleActions, handoffActions, myInstallTask, myPlacementTasks, canAssignInstall, canDeployVenue, currentLeg, STAGE_FULL, STAGE_LABELS } from "../lifecycle";
 import { StageBadge, ROLE_SHORT } from "../ui";
 
 function Field({ label, value }: { label: string; value?: string | number }) {
@@ -28,25 +28,35 @@ export default function AssetDetail({
   user,
   activity,
   pending,
+  pendingLocs,
   onBack,
   onAction,
   onInstallTask,
   onAssign,
+  onPlacement,
+  onVenue,
   onOpenSync
 }: {
   asset: Asset;
   user: AuthUser;
   activity: ActivityLog[];
   pending?: CommitRecord;
+  pendingLocs?: Set<number>;
   onBack: () => void;
   onAction: (target: number) => void;
   onInstallTask: () => void;
   onAssign: () => void;
+  onPlacement: () => void;
+  onVenue: () => void;
   onOpenSync: () => void;
 }) {
   const actions = eligibleActions(asset.currentStage, user.role);
   const handoffs = handoffActions(asset.currentStage, user.role);
   const installTask = myInstallTask(asset, user.id);
+  // Exclude toko whose placement is already queued offline (per-toko lock, not whole-asset).
+  const placementTasks = myPlacementTasks(asset, user.id).filter(p => !(pendingLocs?.has(p.locationId)));
+  const canVenue = canDeployVenue(asset, user);
+  const leg = currentLeg(asset);
   const canAssign = canAssignInstall(asset, user) && !(asset.stageDetails as any)?.deployment?.fullyInstalled;
   const logs = React.useMemo(
     () => activity.filter(l => l.assetId === asset.id).slice(0, 8),
@@ -123,6 +133,32 @@ export default function AssetDetail({
             <ChevronRight className="h-5 w-5 shrink-0 text-emerald-300" />
           </button>
         )}
+        {placementTasks.length > 0 && !pending && (
+          <button
+            onClick={onPlacement}
+            className="tap flex w-full items-center gap-3 rounded-2xl border border-teal-500/40 bg-teal-500/10 px-4 py-3 text-left transition active:scale-[0.99]"
+          >
+            <MapPin className="h-5 w-5 shrink-0 text-teal-300" />
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-white">Pasang di Toko</div>
+              <div className="text-xs text-slate-400">{placementTasks.length} toko belum selesai · foto + GPS</div>
+            </div>
+            <ChevronRight className="h-5 w-5 shrink-0 text-teal-300" />
+          </button>
+        )}
+        {canVenue && !pending && (
+          <button
+            onClick={onVenue}
+            className="tap flex w-full items-center gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-left transition active:scale-[0.99]"
+          >
+            <Compass className="h-5 w-5 shrink-0 text-amber-300" />
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-white">Pindah Venue (Roadshow)</div>
+              <div className="text-xs text-slate-400">{leg ? `Sekarang: ${leg.venue} (leg ${leg.seq}) · pindah ke venue berikutnya` : "Setup di venue berikutnya"}</div>
+            </div>
+            <ChevronRight className="h-5 w-5 shrink-0 text-amber-300" />
+          </button>
+        )}
         {pending ? (
           <div className={`flex flex-col gap-3 rounded-2xl border px-4 py-3 ${pending.status === "conflict" || pending.status === "error" ? "border-rose-500/30 bg-rose-500/[0.07]" : "border-amber-500/30 bg-amber-500/[0.07]"}`}>
             <div className="flex items-start gap-3">
@@ -145,7 +181,7 @@ export default function AssetDetail({
             </button>
           </div>
         ) : actions.length === 0 && handoffs.length === 0 ? (
-          !installTask && !canAssign && (
+          !installTask && !canAssign && !canVenue && placementTasks.length === 0 && (
             <div className="rounded-xl border border-[#1e2b45] bg-[#0f1728] px-4 py-3 text-sm text-slate-400">
               Tidak ada aksi lapangan untuk aset di fase ini{user.role !== "Admin" ? ` bagi role ${ROLE_SHORT[user.role]}` : ""}.
             </div>

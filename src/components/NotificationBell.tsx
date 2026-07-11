@@ -35,8 +35,14 @@ export default function NotificationBell() {
 
   React.useEffect(() => {
     load();
-    const t = setInterval(load, 30000);
-    return () => clearInterval(t);
+    const t = setInterval(load, 30000); // fallback poll if SSE is down
+    // Instant reload when the server pushes a notification over SSE (via App).
+    const onPush = () => load();
+    window.addEventListener("asset360:notif", onPush);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("asset360:notif", onPush);
+    };
   }, [load]);
 
   React.useEffect(() => {

@@ -6,7 +6,7 @@ import React from "react";
 import { Search, ChevronRight, ClipboardList, Boxes, RefreshCw, Clock } from "lucide-react";
 import type { Asset } from "../../types";
 import type { AuthUser } from "../fieldApi";
-import { eligibleActions, myInstallTask } from "../lifecycle";
+import { eligibleActions, myInstallTask, myPlacementTasks, canDeployVenue } from "../lifecycle";
 import { StageBadge, EmptyState, Spinner, ROLE_SHORT } from "../ui";
 
 // Inner content of an asset row (kept as a helper so `key` sits on the
@@ -40,6 +40,7 @@ export default function Home({
   user,
   loading,
   pendingIds,
+  pendingPlacements,
   onOpen,
   onRefresh
 }: {
@@ -47,6 +48,7 @@ export default function Home({
   user: AuthUser;
   loading: boolean;
   pendingIds: Set<string>;
+  pendingPlacements?: Map<string, Set<number>>;
   onOpen: (id: string) => void;
   onRefresh: () => void;
 }) {
@@ -60,11 +62,16 @@ export default function Home({
           const it = myInstallTask(a, user.id);
           const labels = [] as string[];
           if (it) labels.push(`Pasang ${it.remaining} unit`);
+          const pl = pendingPlacements?.get(a.id);
+          myPlacementTasks(a, user.id)
+            .filter(p => !pl?.has(p.locationId))
+            .forEach(p => labels.push(`Pasang di ${p.toko} (${p.remaining} unit)`));
+          if (canDeployVenue(a, user)) labels.push("Pindah venue (roadshow)");
           labels.push(...actions.map(x => x.verb));
           return { a, labels };
         })
         .filter(x => x.labels.length > 0 && !pendingIds.has(x.a.id)),
-    [assets, user.role, user.id, pendingIds]
+    [assets, user.role, user.id, pendingIds, pendingPlacements]
   );
 
   const query = qStr.trim().toLowerCase();

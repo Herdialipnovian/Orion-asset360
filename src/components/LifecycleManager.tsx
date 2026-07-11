@@ -26,11 +26,17 @@ import {
   AlertTriangle,
   Check,
   Play,
-  RefreshCw
+  RefreshCw,
+  Building,
+  UserCheck
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
 import { api } from "../api";
 import { installedOf } from "../installProgress";
+
+// Code-split: Leaflet (+ its CSS) only loads when the operator opens the distribusi map.
+const TokoMap = React.lazy(() => import("./TokoMap"));
+const ReportDistribusi = React.lazy(() => import("./ReportDistribusi"));
 import { SAMPLE_CLIENTS } from "../data/initialData";
 
 const STAGE_ICONS: { [key: number]: any } = {
@@ -248,9 +254,32 @@ const REDEPLOY_GATE: { stageKey: string; title: string; fields: FieldDef[] } = {
   ]
 };
 
+// Internal (Fase 1) Fase-7 audit = stock-opname: is the asset physically there, with the
+// right custodian, in good condition? Same shape as GATE_FORMS[7] so submit logic is reused.
+const INTERNAL_AUDIT_GATE: { stageKey: string; title: string; fields: FieldDef[] } = {
+  stageKey: "audit",
+  title: "Stock Opname / Audit Aset Internal",
+  fields: [
+    { key: "auditorName", label: "Nama Auditor", type: "text", required: true },
+    { key: "lastAuditDate", label: "Tanggal Opname", type: "date", required: true },
+    {
+      key: "checklist",
+      label: "Checklist Stock Opname (skor & status otomatis)",
+      type: "checklist",
+      full: true,
+      options: ["Barang fisik ada di tangan custodian", "Custodian sesuai catatan", "Kondisi fisik baik (tanpa kerusakan)", "Kelengkapan / aksesori lengkap", "Masih berfungsi normal"]
+    },
+    { key: "recommendation", label: "Rekomendasi / Catatan", type: "textarea", full: true }
+  ]
+};
+
+// Is this asset being deployed as an INTERNAL (custodian) asset?
+const isInternalDeploy = (asset?: Asset | null) => (asset?.stageDetails as any)?.deployment?.mode === "Internal";
+
 // Pick the gate config for a transition into Fase 6 (source-aware):
 //  5→6 = POD receipt · 6 in-place = assignment gate · 7/8/9→6 = redeploy.
-const gateFor = (target: number, current: number) => {
+const gateFor = (target: number, current: number, asset?: Asset | null) => {
+  if (target === 7 && isInternalDeploy(asset)) return INTERNAL_AUDIT_GATE;
   if (target === 6) {
     if (current === 5) return POD_GATE;
     if (current === 6) return GATE_FORMS[6];
@@ -259,7 +288,8 @@ const gateFor = (target: number, current: number) => {
   return GATE_FORMS[target];
 };
 // Button/label verb, source-aware.
-const verbFor = (target: number, current: number) => {
+const verbFor = (target: number, current: number, asset?: Asset | null) => {
+  if (target === 7 && isInternalDeploy(asset)) return "Stock Opname / Audit Internal";
   if (target === 6 && current === 5) return "Konfirmasi Penerimaan (POD)";
   if (target === 6 && current !== 6) return "Pasang Kembali (Redeploy)";
   return TRANSITION_VERB[target];
@@ -293,6 +323,11 @@ interface LifecycleManagerProps {
   ) => Promise<{ ok: boolean; error?: string }>;
   onShipAsset: (assetId: string, updatedDetails: any, meta?: { logAction?: string; operator?: string }) => Promise<{ ok: boolean; error?: string }>;
   onAssignInstall: (assetId: string, assignments: { merchandiserId: number; qty: number }[], baseUpdatedAt?: string) => Promise<{ ok: boolean; error?: string }>;
+  onHandoverInternal?: (assetId: string, p: { custodianId: number; handoverDate?: string; signatureBase64?: string; note?: string; projectId?: number | null }) => Promise<{ ok: boolean; error?: string }>;
+  onDeployVenue?: (assetId: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null }) => Promise<{ ok: boolean; error?: string }>;
+  onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
+  onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
+  onAuditSample?: (assetId: string, samples: { locationId: number; compliant: boolean }[]) => Promise<{ ok: boolean; error?: string }>;
   initialStageFilter?: number | string;
 }
 
@@ -378,6 +413,11 @@ export default function LifecycleManager({
   onUpdateAssetStage,
   onShipAsset,
   onAssignInstall,
+  onHandoverInternal,
+  onDeployVenue,
+  onDistribute,
+  onPlaceToko,
+  onAuditSample,
   initialStageFilter = "ALL"
 }: LifecycleManagerProps) {
   const catOpts = categoryOptions && categoryOptions.length ? categoryOptions : CATEGORY_OPTIONS;
@@ -422,6 +462,116 @@ export default function LifecycleManager({
 
   const [formError, setFormError] = React.useState<string | null>(null);
 
+  // Fase 1 Internal — Karyawan (custodian) master + serah-terima modal state.
+  const [employees, setEmployees] = React.useState<{ id: number; name: string; department: string | null }[]>([]);
+  React.useEffect(() => {
+    api.getEmployees().then(es => setEmployees(es.filter(e => e.active).map(e => ({ id: e.id, name: e.name, department: e.department })))).catch(() => {});
+  }, []);
+  const [handoverOpen, setHandoverOpen] = React.useState(false);
+  const [handoverForm, setHandoverForm] = React.useState<{ custodianId: string; handoverDate: string; signature: string; note: string }>({ custodianId: "", handoverDate: "", signature: "", note: "" });
+  const [handoverBusy, setHandoverBusy] = React.useState(false);
+  const [handoverError, setHandoverError] = React.useState<string | null>(null);
+
+  // Fase 2 Event — projects (to derive mode) + venue locations + venue-deploy modal state.
+  const [projects, setProjects] = React.useState<{ id: number; name: string; mode: string }[]>([]);
+  React.useEffect(() => {
+    api.getProjects().then(ps => setProjects(ps.map(p => ({ id: p.id, name: p.name, mode: p.mode })))).catch(() => {});
+  }, []);
+  const [venues, setVenues] = React.useState<{ id: number; name: string; area: string | null }[]>([]);
+  const loadVenues = React.useCallback(async (client?: string | null) => {
+    try {
+      const vs = await api.getLocations({ type: "Venue", ...(client ? { client } : {}) });
+      setVenues(vs.map(v => ({ id: v.id, name: v.name, area: v.area })));
+    } catch { setVenues([]); }
+  }, []);
+  const [venueOpen, setVenueOpen] = React.useState(false);
+  const [venueForm, setVenueForm] = React.useState<{ locationId: string; pic: string; setupDate: string; note: string; signature: string }>({ locationId: "", pic: "", setupDate: "", note: "", signature: "" });
+  const [venueBusy, setVenueBusy] = React.useState(false);
+  const [venueError, setVenueError] = React.useState<string | null>(null);
+  // The deployment mode for an asset: explicit (post-deploy) or inferred from its project.
+  const projectModeOf = React.useCallback((asset?: Asset | null): string | null => {
+    if (!asset) return null;
+    const dm = (asset.stageDetails as any)?.deployment?.mode;
+    if (dm) return dm;
+    const p = asset.projectId != null ? projects.find(x => x.id === asset.projectId) : null;
+    return p?.mode || null;
+  }, [projects]);
+
+  // Fase 3 Distribusi — toko locations + distribute modal + sampling-audit modal state.
+  const [tokos, setTokos] = React.useState<{ id: number; name: string; area: string | null; gpsLat: number | null; gpsLng: number | null }[]>([]);
+  const loadTokos = React.useCallback(async (client?: string | null) => {
+    try {
+      const ts = await api.getLocations({ type: "Toko", ...(client ? { client } : {}) });
+      setTokos(ts.map(t => ({ id: t.id, name: t.name, area: t.area, gpsLat: t.gpsLat, gpsLng: t.gpsLng })));
+    } catch { setTokos([]); }
+  }, []);
+  // Fallback GPS per toko (used by the map when a placement has no captured coordinate yet).
+  const locGps = React.useMemo(() => {
+    const m: Record<number, { lat: number; lng: number }> = {};
+    for (const t of tokos) if (t.gpsLat != null && t.gpsLng != null) m[t.id] = { lat: t.gpsLat, lng: t.gpsLng };
+    return m;
+  }, [tokos]);
+  const [mapOpen, setMapOpen] = React.useState(false);
+  const openMap = async () => { if (detailAsset) await loadTokos(detailAsset.client); setMapOpen(true); };
+  const [reportOpen, setReportOpen] = React.useState(false);
+  const [reportEvidence, setReportEvidence] = React.useState<any[]>([]);
+  const openReport = async () => {
+    if (!detailAsset) return;
+    await loadTokos(detailAsset.client);
+    try { setReportEvidence(await api.getEvidence(detailAsset.id)); } catch { setReportEvidence([]); }
+    setReportOpen(true);
+  };
+  const [distOpen, setDistOpen] = React.useState(false);
+  const [distRows, setDistRows] = React.useState<{ locationId: string; merchandiserId: string; qty: string }[]>([]);
+  const [distBusy, setDistBusy] = React.useState(false);
+  const [distError, setDistError] = React.useState<string | null>(null);
+  const [sampleOpen, setSampleOpen] = React.useState(false);
+  const [sampleSel, setSampleSel] = React.useState<Record<number, "compliant" | "issue" | undefined>>({});
+  const [sampleBusy, setSampleBusy] = React.useState(false);
+  const [sampleError, setSampleError] = React.useState<string | null>(null);
+
+  const openDistribute = () => {
+    if (!detailAsset) return;
+    void loadTokos(detailAsset.client);
+    void loadDirectory(detailAsset.client);
+    const pls: any[] = (detailAsset.stageDetails as any)?.deployment?.placements || [];
+    setDistRows(pls.length ? pls.map(p => ({ locationId: String(p.locationId), merchandiserId: p.merchandiserId ? String(p.merchandiserId) : "", qty: String(p.qty) })) : [{ locationId: "", merchandiserId: "", qty: String(detailAsset.quantity || 1) }]);
+    setDistError(null);
+    setDistOpen(true);
+  };
+  const submitDistribute = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailAsset || !onDistribute) return;
+    const rows = distRows.filter(r => r.locationId).map(r => ({ locationId: Number(r.locationId), merchandiserId: r.merchandiserId ? Number(r.merchandiserId) : undefined, qty: Number(r.qty) || 0 }));
+    if (!rows.length) return setDistError("Pilih minimal 1 toko.");
+    const ids = rows.map(r => r.locationId);
+    if (new Set(ids).size !== ids.length) return setDistError("Ada toko yang dobel.");
+    const tot = rows.reduce((s, r) => s + r.qty, 0);
+    if (tot > (detailAsset.quantity || 0)) return setDistError(`Total (${tot}) melebihi qty aset (${detailAsset.quantity}). Boleh kurang.`);
+    setDistBusy(true); setDistError(null);
+    const res = await onDistribute(detailAsset.id, rows, detailAsset.projectId ?? undefined);
+    setDistBusy(false);
+    if (!res.ok) return setDistError(res.error || "Gagal distribusi.");
+    setDistOpen(false);
+  };
+
+  const openSample = () => {
+    setSampleSel({});
+    setSampleError(null);
+    setSampleOpen(true);
+  };
+  const submitSample = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailAsset || !onAuditSample) return;
+    const samples = Object.entries(sampleSel).filter(([, v]) => v).map(([lid, v]) => ({ locationId: Number(lid), compliant: v === "compliant" }));
+    if (!samples.length) return setSampleError("Pilih minimal 1 toko sampel + status.");
+    setSampleBusy(true); setSampleError(null);
+    const res = await onAuditSample(detailAsset.id, samples);
+    setSampleBusy(false);
+    if (!res.ok) return setSampleError(res.error || "Gagal audit sampling.");
+    setSampleOpen(false);
+  };
+
   React.useEffect(() => {
     if (initialStageFilter !== undefined) setFilterStage(initialStageFilter);
   }, [initialStageFilter]);
@@ -430,6 +580,55 @@ export default function LifecycleManager({
     () => assets.find(a => a.id === detailAssetId) || null,
     [assets, detailAssetId]
   );
+
+  const openHandover = () => {
+    setHandoverForm({ custodianId: "", handoverDate: new Date().toISOString().slice(0, 10), signature: "", note: "" });
+    setHandoverError(null);
+    setHandoverOpen(true);
+  };
+  const submitHandover = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailAsset || !onHandoverInternal) return;
+    if (!handoverForm.custodianId) return setHandoverError("Pilih karyawan (custodian) dulu.");
+    setHandoverBusy(true);
+    setHandoverError(null);
+    const res = await onHandoverInternal(detailAsset.id, {
+      custodianId: Number(handoverForm.custodianId),
+      handoverDate: handoverForm.handoverDate || undefined,
+      signatureBase64: handoverForm.signature || undefined,
+      note: handoverForm.note || undefined,
+      projectId: detailAsset.projectId ?? undefined
+    });
+    setHandoverBusy(false);
+    if (!res.ok) return setHandoverError(res.error || "Gagal serah-terima.");
+    setHandoverOpen(false);
+  };
+
+  const openVenue = () => {
+    if (!detailAsset) return;
+    void loadVenues(detailAsset.client);
+    setVenueForm({ locationId: "", pic: "", setupDate: new Date().toISOString().slice(0, 10), note: "", signature: "" });
+    setVenueError(null);
+    setVenueOpen(true);
+  };
+  const submitVenue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailAsset || !onDeployVenue) return;
+    if (!venueForm.locationId) return setVenueError("Pilih venue dulu.");
+    setVenueBusy(true);
+    setVenueError(null);
+    const res = await onDeployVenue(detailAsset.id, {
+      locationId: Number(venueForm.locationId),
+      pic: venueForm.pic || undefined,
+      setupDate: venueForm.setupDate || undefined,
+      note: venueForm.note || undefined,
+      signatureBase64: venueForm.signature || undefined,
+      projectId: detailAsset.projectId ?? undefined
+    });
+    setVenueBusy(false);
+    if (!res.ok) return setVenueError(res.error || "Gagal setup venue.");
+    setVenueOpen(false);
+  };
 
   const [newForm, setNewForm] = React.useState({
     name: "",
@@ -553,7 +752,7 @@ export default function LifecycleManager({
   const openGate = (target: number) => {
     if (!detailAsset) return;
     void loadDirectory(detailAsset.client); // populate PIC/Merchandiser dropdowns for this client
-    const cfg = gateFor(target, detailAsset.currentStage);
+    const cfg = gateFor(target, detailAsset.currentStage, detailAsset);
     const existing = (detailAsset.stageDetails as any)[cfg.stageKey] || {};
     const init: Record<string, any> = {};
     cfg.fields.forEach(f => {
@@ -587,7 +786,7 @@ export default function LifecycleManager({
   const submitGate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!detailAsset || transitionTarget == null) return;
-    const cfg = gateFor(transitionTarget, detailAsset.currentStage);
+    const cfg = gateFor(transitionTarget, detailAsset.currentStage, detailAsset);
 
     // Validation
     for (const f of cfg.fields) {
@@ -1531,6 +1730,112 @@ export default function LifecycleManager({
                   );
                 })() : null}
 
+                {/* Internal (Fase 1) — custodian handover panel */}
+                {isInternalDeploy(detailAsset) && detailAsset.stageDetails?.deployment?.custodianName && (() => {
+                  const d: any = detailAsset.stageDetails.deployment;
+                  return (
+                    <div className="rounded-xl p-4 space-y-2 border border-slate-300 bg-slate-50">
+                      <div className="flex items-center gap-2">
+                        <span className="bg-slate-800 text-white p-1.5 rounded-lg"><UserCheck className="h-3.5 w-3.5" /></span>
+                        <div>
+                          <p className="text-xs font-extrabold text-slate-800">Serah-Terima Internal (Custodian)</p>
+                          <p className="text-[10px] text-slate-500">
+                            Dipegang: <strong className="text-slate-700">{d.custodianName}</strong>
+                            {d.custodianDept ? ` · ${d.custodianDept}` : ""}{d.handoverDate ? ` · ${d.handoverDate}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      {d.projectName && <p className="text-[10px] text-slate-500">Proyek: <strong className="text-slate-700">{d.projectName}</strong></p>}
+                      {d.handoverNote && <p className="text-[10px] text-slate-500 italic">"{d.handoverNote}"</p>}
+                      {d.handoverSignature && <img src={d.handoverSignature} alt="TTD BAST serah-terima" className="h-16 bg-white border border-slate-200 rounded" />}
+                    </div>
+                  );
+                })()}
+
+                {/* Event (Fase 2) — roadshow timeline (ordered venue legs) */}
+                {Array.isArray(detailAsset.stageDetails?.deployment?.legs) && (detailAsset.stageDetails?.deployment?.legs?.length || 0) > 0 && (() => {
+                  const d: any = detailAsset.stageDetails.deployment;
+                  const legs = [...d.legs].sort((a: any, b: any) => (a.seq || 0) - (b.seq || 0));
+                  return (
+                    <div className="rounded-xl p-4 space-y-3 border border-amber-200 bg-amber-50/60">
+                      <div className="flex items-center gap-2">
+                        <span className="bg-amber-500 text-white p-1.5 rounded-lg"><Compass className="h-3.5 w-3.5" /></span>
+                        <div>
+                          <p className="text-xs font-extrabold text-slate-800">Roadshow / Venue Timeline</p>
+                          <p className="text-[10px] text-slate-500">{legs.length} venue · sekarang di <strong className="text-amber-700">leg {d.currentLegSeq || legs[legs.length - 1]?.seq}</strong></p>
+                        </div>
+                      </div>
+                      <div className="space-y-2 relative pl-4 border-l-2 border-amber-200">
+                        {legs.map((lg: any) => {
+                          const tone = lg.status === "active" ? "bg-amber-500 text-white border-amber-500" : lg.status === "done" ? "bg-white text-slate-400 border-slate-200" : "bg-white text-amber-600 border-amber-300";
+                          const badge = lg.status === "active" ? "Aktif" : lg.status === "done" ? "Selesai" : "Rencana";
+                          return (
+                            <div key={lg.seq} className="relative">
+                              <span className={`absolute -left-[1.15rem] top-1 h-3 w-3 rounded-full border-2 ${lg.status === "active" ? "bg-amber-500 border-amber-500" : lg.status === "done" ? "bg-slate-300 border-slate-300" : "bg-white border-amber-400"}`} />
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-400">#{lg.seq}</span>
+                                <span className="text-xs font-bold text-slate-800">{lg.venue}</span>
+                                {lg.area && <span className="text-[10px] text-slate-500">· {lg.area}</span>}
+                                <span className={`ml-auto text-[9px] font-bold px-2 py-0.5 rounded-full border ${tone}`}>{badge}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-500">
+                                {lg.pic ? `PIC: ${lg.pic}` : "PIC: —"}{lg.setupDate ? ` · setup ${lg.setupDate}` : ""}{lg.teardownDate ? ` → bongkar ${lg.teardownDate}` : ""}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Distribusi (Fase 3) — placement monitor + coverage */}
+                {Array.isArray(detailAsset.stageDetails?.deployment?.placements) && (detailAsset.stageDetails?.deployment?.placements?.length || 0) > 0 && (() => {
+                  const d: any = detailAsset.stageDetails.deployment;
+                  const pls: any[] = d.placements;
+                  const installed = pls.reduce((s, p) => s + (Number(p.doneQty) || 0), 0);
+                  const cov = d.coverage;
+                  return (
+                    <div className="rounded-xl p-4 space-y-3 border border-teal-200 bg-teal-50/60">
+                      <div className="flex items-center gap-2">
+                        <span className="bg-teal-600 text-white p-1.5 rounded-lg"><MapPin className="h-3.5 w-3.5" /></span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-extrabold text-slate-800">Distribusi Toko</p>
+                          <p className="text-[10px] text-slate-500">{pls.length} toko · terpasang <strong className="text-teal-700">{installed}/{detailAsset.quantity}</strong> unit{cov ? ` · audit ${cov.auditedToko}/${cov.totalToko} (${cov.compliancePct}% patuh)` : ""}</p>
+                        </div>
+                        <div className="ml-auto shrink-0 flex items-center gap-1.5">
+                          <button onClick={openMap} className="flex items-center gap-1 text-[11px] font-bold text-teal-700 bg-white hover:bg-teal-50 border border-teal-300 rounded-lg px-2.5 py-1.5">
+                            <MapPin className="h-3.5 w-3.5" /> Peta Sebaran
+                          </button>
+                          <button onClick={openReport} className="flex items-center gap-1 text-[11px] font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5">
+                            <FileText className="h-3.5 w-3.5" /> Laporan Klien
+                          </button>
+                        </div>
+                      </div>
+                      <div className="h-1.5 w-full bg-white rounded-full overflow-hidden border border-teal-100">
+                        <div className="h-full bg-teal-500" style={{ width: `${Math.min(100, Math.round((installed / (detailAsset.quantity || 1)) * 100))}%` }} />
+                      </div>
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                        {pls.map((p: any) => {
+                          const dq = Number(p.doneQty) || 0;
+                          const done = dq >= (Number(p.qty) || 0), partial = dq > 0 && !done;
+                          const pill = done ? "bg-emerald-100 text-emerald-700" : partial ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500";
+                          return (
+                            <div key={p.locationId} className="flex items-center gap-2 bg-white border border-slate-100 rounded-lg px-2.5 py-1.5">
+                              <MapPin className={`h-3 w-3 shrink-0 ${p.gpsLat != null ? "text-teal-500" : "text-slate-300"}`} />
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-[11px] font-bold text-slate-800 truncate">{p.toko}{p.area ? <span className="font-normal text-slate-400"> · {p.area}</span> : null}</span>
+                                <span className="block text-[9px] text-slate-400">{p.merchandiser || "—"}{p.audited ? (p.auditCompliant ? " · ✓ patuh" : " · ✗ temuan") : ""}</span>
+                              </span>
+                              <span className={`shrink-0 text-[9px] font-bold px-2 py-0.5 rounded-full ${pill}`}>{done ? "Selesai" : partial ? `${dq}/${p.qty}` : "Menunggu"}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {detailAsset.stageDetails?.audit?.lastAuditDate ? (() => {
                   const au: any = detailAsset.stageDetails.audit;
                   const st = au.complianceStatus || (au.scoring >= 90 ? "PATUH" : au.scoring >= 70 ? "PERLU PERBAIKAN" : "TIDAK PATUH");
@@ -1570,7 +1875,69 @@ export default function LifecycleManager({
                     </div>
                   </div>
 
-                  {detailAsset.currentStage === 6 && !detailAsset.stageDetails?.deployment?.fullyInstalled && (() => {
+                  {/* Fase 1 Internal — serah-terima aset Origin ke Karyawan (custodian). Gudang→dipegang karyawan. */}
+                  {onHandoverInternal && detailAsset.owner === "Origin" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 5 && !detailAsset.stageDetails?.deployment?.custodianName && (
+                    <button
+                      onClick={openHandover}
+                      className="w-full flex items-center gap-2 text-left bg-slate-800 hover:bg-slate-900 text-white border border-slate-800 rounded-lg px-3 py-2.5 transition shadow-sm"
+                    >
+                      <Building className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-[11px] font-bold leading-tight">Serah-Terima ke Karyawan (Internal)</span>
+                        <span className="block text-[9px] text-slate-300 leading-tight">Aset Origin dipegang karyawan (custodian) + BAST — langsung ke Fase 6</span>
+                      </span>
+                    </button>
+                  )}
+
+                  {/* Fase 2 Event — setup / relocate asset at a venue (roadshow). */}
+                  {onDeployVenue && projectModeOf(detailAsset) === "Event" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 6 && (() => {
+                    const hasLegs = (detailAsset.stageDetails?.deployment?.legs?.length || 0) > 0;
+                    return (
+                      <button
+                        onClick={openVenue}
+                        className="w-full flex items-center gap-2 text-left bg-amber-500 hover:bg-amber-600 text-white border border-amber-500 rounded-lg px-3 py-2.5 transition shadow-sm"
+                      >
+                        <Compass className="h-4 w-4 shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-bold leading-tight">{hasLegs ? "Relokasi ke Venue Berikutnya" : "Setup di Venue (Event)"}</span>
+                          <span className="block text-[9px] text-amber-50 leading-tight">{hasLegs ? "Tutup venue aktif & buka leg venue berikutnya (roadshow)" : "Pasang paket aset di venue + PIC per-leg (tetap Fase 6)"}</span>
+                        </span>
+                      </button>
+                    );
+                  })()}
+
+                  {/* Fase 3 Distribusi — fan-out placement per toko. */}
+                  {onDistribute && projectModeOf(detailAsset) === "Distribusi" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 6 && (() => {
+                    const hasPls = (detailAsset.stageDetails?.deployment?.placements?.length || 0) > 0;
+                    return (
+                      <button
+                        onClick={openDistribute}
+                        className="w-full flex items-center gap-2 text-left bg-teal-600 hover:bg-teal-700 text-white border border-teal-600 rounded-lg px-3 py-2.5 transition shadow-sm"
+                      >
+                        <MapPin className="h-4 w-4 shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-bold leading-tight">{hasPls ? "Kelola Distribusi Toko" : "Distribusi ke Toko"}</span>
+                          <span className="block text-[9px] text-teal-50 leading-tight">{hasPls ? "Tambah / ubah pembagian per-toko (progres aman)" : "Bagi qty ke toko + merchandiser; mereka pasang di lapangan"}</span>
+                        </span>
+                      </button>
+                    );
+                  })()}
+
+                  {/* Fase 3 Distribusi — sampling audit (subset toko). */}
+                  {onAuditSample && projectModeOf(detailAsset) === "Distribusi" && (detailAsset.stageDetails?.deployment?.placements?.length || 0) > 0 && detailAsset.currentStage >= 6 && detailAsset.currentStage <= 7 && (
+                    <button
+                      onClick={openSample}
+                      className="w-full flex items-center gap-2 text-left bg-white hover:bg-teal-50 text-teal-700 border border-teal-300 rounded-lg px-3 py-2.5 transition"
+                    >
+                      <ShieldCheck className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-[11px] font-bold leading-tight">Audit Sampling Toko</span>
+                        <span className="block text-[9px] text-teal-600 leading-tight">Cek sebagian toko (10–20%) → coverage &amp; kepatuhan</span>
+                      </span>
+                    </button>
+                  )}
+
+                  {detailAsset.currentStage === 6 && !detailAsset.stageDetails?.deployment?.fullyInstalled && !isInternalDeploy(detailAsset) && projectModeOf(detailAsset) !== "Event" && projectModeOf(detailAsset) !== "Distribusi" && (() => {
                     const hasAsg = (detailAsset.stageDetails?.deployment?.assignments?.length || 0) > 0;
                     return (
                       <button
@@ -1607,7 +1974,7 @@ export default function LifecycleManager({
                               <Icon className="h-4 w-4" />
                             </span>
                             <span className="min-w-0">
-                              <span className="block text-[11px] font-bold leading-tight text-slate-800 group-hover:text-white">{verbFor(t, detailAsset.currentStage)}</span>
+                              <span className="block text-[11px] font-bold leading-tight text-slate-800 group-hover:text-white">{verbFor(t, detailAsset.currentStage, detailAsset)}</span>
                               <span className="block text-[9px] leading-tight text-slate-400 group-hover:text-blue-100">
                                 {installPartial ? `⚠ baru ${installed}/${detailAsset.quantity} terpasang` : `Fase ${t} · ${cleanLabel(t)}`}
                               </span>
@@ -1781,7 +2148,7 @@ export default function LifecycleManager({
                 <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block flex items-center gap-1">
                   Fase {detailAsset.currentStage} <ArrowRight className="h-3 w-3" /> Fase {transitionTarget}
                 </span>
-                <h3 className="text-base font-bold text-slate-950">{gateFor(transitionTarget, detailAsset.currentStage).title}</h3>
+                <h3 className="text-base font-bold text-slate-950">{gateFor(transitionTarget, detailAsset.currentStage, detailAsset).title}</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>
               </div>
               <button onClick={closeGate} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition">
@@ -1790,7 +2157,7 @@ export default function LifecycleManager({
             </div>
 
             <form onSubmit={submitGate} className="p-5 space-y-4">
-              <div className="grid grid-cols-2 gap-4">{gateFor(transitionTarget, detailAsset.currentStage).fields.map(renderField)}</div>
+              <div className="grid grid-cols-2 gap-4">{gateFor(transitionTarget, detailAsset.currentStage, detailAsset).fields.map(renderField)}</div>
 
               {gateError && (
                 <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 text-xs font-semibold">
@@ -1816,6 +2183,206 @@ export default function LifecycleManager({
             </form>
           </div>
         </div>
+      )}
+
+      {/* MODAL 4: INTERNAL HANDOVER (serah-terima ke Karyawan/custodian) */}
+      {detailAsset && handoverOpen && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest block flex items-center gap-1">Serah-Terima Internal <ArrowRight className="h-3 w-3" /> Fase 6</span>
+                <h3 className="text-base font-bold text-slate-950">Serahkan ke Karyawan (Custodian)</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name} · {detailAsset.quantity} unit</p>
+              </div>
+              <button onClick={() => setHandoverOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <form onSubmit={submitHandover} className="p-5 space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Karyawan Penerima (Custodian) <span className="text-rose-500">*</span></label>
+                <select value={handoverForm.custodianId} onChange={e => setHandoverForm({ ...handoverForm, custodianId: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                  <option value="">— pilih karyawan —</option>
+                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}{e.department ? ` · ${e.department}` : ""}</option>)}
+                </select>
+                {employees.length === 0 && <p className="text-[10px] text-amber-600">Belum ada karyawan. Tambahkan dulu di menu Organisasi → Karyawan.</p>}
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Tanggal Serah-Terima</label>
+                <input type="date" value={handoverForm.handoverDate} onChange={e => setHandoverForm({ ...handoverForm, handoverDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Catatan (opsional)</label>
+                <textarea value={handoverForm.note} onChange={e => setHandoverForm({ ...handoverForm, note: e.target.value })} rows={2} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 resize-none" placeholder="cth. Laptop Lenovo + charger + tas" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Tanda Tangan BAST (opsional)</label>
+                <SignaturePad value={handoverForm.signature} onChange={v => setHandoverForm({ ...handoverForm, signature: v })} />
+              </div>
+              {handoverError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{handoverError}</span></div>}
+              <div className="p-2.5 bg-slate-50 border border-slate-200/70 rounded-lg text-[10.5px] text-slate-500 flex items-start gap-2">
+                <FileText className="h-3.5 w-3.5 text-slate-500 flex-shrink-0 mt-0.5" />
+                <span>Aset akan pindah ke <strong className="text-slate-700">Fase 6 · Terpasang/Dipakai</strong> dengan custodian tercatat (skip surat jalan/transit untuk aset internal).</span>
+              </div>
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setHandoverOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
+                <button type="submit" disabled={handoverBusy} className="bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><UserCheck className="h-4 w-4" />Serah-Terima</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: EVENT VENUE SETUP / RELOCATE (roadshow leg) */}
+      {detailAsset && venueOpen && (() => {
+        const hasLegs = (detailAsset.stageDetails?.deployment?.legs?.length || 0) > 0;
+        return (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest block">Event / Roadshow</span>
+                <h3 className="text-base font-bold text-slate-950">{hasLegs ? "Relokasi ke Venue Berikutnya" : "Setup di Venue"}</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>
+              </div>
+              <button onClick={() => setVenueOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <form onSubmit={submitVenue} className="p-5 space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Venue <span className="text-rose-500">*</span></label>
+                <select value={venueForm.locationId} onChange={e => setVenueForm({ ...venueForm, locationId: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 cursor-pointer">
+                  <option value="">— pilih venue —</option>
+                  {venues.map(v => <option key={v.id} value={v.id}>{v.name}{v.area ? ` · ${v.area}` : ""}</option>)}
+                </select>
+                {venues.length === 0 && <p className="text-[10px] text-amber-600">Belum ada venue untuk client ini. Tambahkan dulu di Proyek &amp; Lokasi (tipe Venue).</p>}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">PIC di Venue</label><input value={venueForm.pic} onChange={e => setVenueForm({ ...venueForm, pic: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500" placeholder="PIC per-leg" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Tanggal Setup</label><input type="date" value={venueForm.setupDate} onChange={e => setVenueForm({ ...venueForm, setupDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500" /></div>
+              </div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={venueForm.note} onChange={e => setVenueForm({ ...venueForm, note: e.target.value })} rows={2} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 resize-none" placeholder="cth. Tenda + sound + booth" /></div>
+              {venueError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{venueError}</span></div>}
+              <div className="p-2.5 bg-amber-50 border border-amber-200/70 rounded-lg text-[10.5px] text-amber-700 flex items-start gap-2">
+                <Compass className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                <span>{hasLegs ? "Venue aktif ditutup & venue baru dibuka sebagai leg berikutnya. Aset tetap Fase 6." : "Aset dipasang di venue sebagai leg #1 (aset pindah ke Fase 6)."}</span>
+              </div>
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setVenueOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
+                <button type="submit" disabled={venueBusy} className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Compass className="h-4 w-4" />{hasLegs ? "Relokasi" : "Setup Venue"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* MODAL 6: DISTRIBUSI — fan-out placement per toko */}
+      {detailAsset && distOpen && (() => {
+        const tot = distRows.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+        return (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest block">Distribusi ke Toko</span>
+                <h3 className="text-base font-bold text-slate-950">Bagi {detailAsset.quantity} unit ke toko</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>
+              </div>
+              <button onClick={() => setDistOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <form onSubmit={submitDistribute} className="p-5 space-y-3 text-xs">
+              {tokos.length === 0 && <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Belum ada toko untuk client ini. Tambahkan di Proyek &amp; Lokasi (tipe Toko), atau merchandiser bisa tambah di lapangan.</p>}
+              <div className="space-y-2">
+                {distRows.map((r, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center">
+                    <select value={r.locationId} onChange={e => setDistRows(rows => rows.map((x, j) => j === i ? { ...x, locationId: e.target.value } : x))} className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer min-w-0">
+                      <option value="">— toko —</option>
+                      {tokos.map(t => <option key={t.id} value={t.id}>{t.name}{t.area ? ` · ${t.area}` : ""}</option>)}
+                    </select>
+                    <select value={r.merchandiserId} onChange={e => setDistRows(rows => rows.map((x, j) => j === i ? { ...x, merchandiserId: e.target.value } : x))} className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer min-w-0">
+                      <option value="">— merchandiser —</option>
+                      {merchDir.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                    <input type="number" min={0} value={r.qty} onChange={e => setDistRows(rows => rows.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} className="w-16 bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg outline-none focus:ring-1 focus:ring-teal-500" placeholder="Qty" />
+                    <button type="button" onClick={() => setDistRows(rows => rows.length > 1 ? rows.filter((_, j) => j !== i) : rows)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => setDistRows(rows => [...rows, { locationId: "", merchandiserId: "", qty: "1" }])} className="flex items-center gap-1 text-[11px] text-teal-700 font-bold hover:text-teal-800"><Plus className="h-3.5 w-3.5" /> Tambah Toko</button>
+              <div className={`text-[11px] font-bold ${tot > (detailAsset.quantity || 0) ? "text-rose-600" : "text-slate-500"}`}>Total dibagi: {tot} / {detailAsset.quantity} unit{tot < (detailAsset.quantity || 0) ? " (boleh kurang — bertahap)" : ""}</div>
+              {distError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{distError}</span></div>}
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setDistOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
+                <button type="submit" disabled={distBusy} className="bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><MapPin className="h-4 w-4" />Simpan Distribusi</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* MODAL 7: SAMPLING AUDIT — mark a subset of toko audited + compliant */}
+      {detailAsset && sampleOpen && (() => {
+        const pls: any[] = (detailAsset.stageDetails as any)?.deployment?.placements || [];
+        const picked = Object.values(sampleSel).filter(Boolean).length;
+        return (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest block">Audit Sampling</span>
+                <h3 className="text-base font-bold text-slate-950">Cek sebagian toko</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Pilih ~10–20% toko · {picked} dipilih</p>
+              </div>
+              <button onClick={() => setSampleOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <form onSubmit={submitSample} className="p-5 space-y-3 text-xs">
+              <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                {pls.map((p: any) => {
+                  const sel = sampleSel[p.locationId];
+                  return (
+                    <div key={p.locationId} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
+                      <span className="min-w-0 flex-1 text-[11px] font-bold text-slate-700 truncate">{p.toko}{p.audited ? <span className="font-normal text-teal-500"> · sudah</span> : null}</span>
+                      <button type="button" onClick={() => setSampleSel(s => ({ ...s, [p.locationId]: sel === "compliant" ? undefined : "compliant" }))} className={`text-[10px] font-bold px-2 py-1 rounded-md border ${sel === "compliant" ? "bg-emerald-500 text-white border-emerald-500" : "bg-white text-emerald-600 border-emerald-200"}`}>Patuh</button>
+                      <button type="button" onClick={() => setSampleSel(s => ({ ...s, [p.locationId]: sel === "issue" ? undefined : "issue" }))} className={`text-[10px] font-bold px-2 py-1 rounded-md border ${sel === "issue" ? "bg-rose-500 text-white border-rose-500" : "bg-white text-rose-600 border-rose-200"}`}>Temuan</button>
+                    </div>
+                  );
+                })}
+              </div>
+              {sampleError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{sampleError}</span></div>}
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setSampleOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
+                <button type="submit" disabled={sampleBusy} className="bg-teal-600 hover:bg-teal-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><ShieldCheck className="h-4 w-4" />Simpan Audit</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* MODAL 8: DISTRIBUSI MAP — toko pins (lazy-loaded Leaflet) */}
+      {mapOpen && detailAsset && (
+        <React.Suspense fallback={<div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm grid place-items-center text-white text-sm">Memuat peta…</div>}>
+          <TokoMap
+            placements={(detailAsset.stageDetails as any)?.deployment?.placements || []}
+            locGps={locGps}
+            quantity={detailAsset.quantity || 0}
+            onClose={() => setMapOpen(false)}
+          />
+        </React.Suspense>
+      )}
+
+      {/* MODAL 9: CLIENT REPORT — per-toko coverage + geo + foto (printable) */}
+      {reportOpen && detailAsset && (
+        <React.Suspense fallback={<div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm grid place-items-center text-white text-sm">Menyiapkan laporan…</div>}>
+          <ReportDistribusi
+            asset={detailAsset}
+            evidence={reportEvidence}
+            locGps={locGps}
+            company={settings?.company_name}
+            today={new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })}
+            onClose={() => setReportOpen(false)}
+          />
+        </React.Suspense>
       )}
     </div>
   );

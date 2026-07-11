@@ -16,7 +16,9 @@ export function myInstallTask(
   userId: number
 ): { merchandiserId: number; merchandiser: string; qty: number; doneQty: number; remaining: number } | null {
   if (asset?.currentStage !== 6) return null;
-  const asg = (asset?.stageDetails as any)?.deployment?.assignments;
+  const dep = (asset?.stageDetails as any)?.deployment;
+  if (dep?.mode === "Distribusi") return null; // distribusi uses per-toko placements, not install assignments
+  const asg = dep?.assignments;
   if (!Array.isArray(asg)) return null;
   const a = asg.find((x: any) => Number(x.merchandiserId) === Number(userId));
   if (!a) return null;
@@ -25,9 +27,45 @@ export function myInstallTask(
   return { merchandiserId: a.merchandiserId, merchandiser: a.merchandiser, qty: Number(a.qty), doneQty: done, remaining: Number(a.qty) - done };
 }
 
+// A merchandiser's OWN unfinished Distribusi placements on a Fase-6 asset (one row per toko).
+// Reads deployment.placements (NOT .assignments) and only when mode === "Distribusi".
+export function myPlacementTasks(
+  asset: Asset,
+  userId: number
+): { locationId: number; toko: string; qty: number; doneQty: number; remaining: number }[] {
+  if (asset?.currentStage !== 6) return [];
+  const dep = (asset?.stageDetails as any)?.deployment;
+  if (dep?.mode !== "Distribusi" || !Array.isArray(dep?.placements)) return [];
+  return dep.placements
+    .filter((p: any) => p?.merchandiserId != null && Number(p.merchandiserId) === Number(userId))
+    .map((p: any) => {
+      const done = Number(p.doneQty ?? (p.status === "done" ? p.qty : 0)) || 0;
+      return { locationId: Number(p.locationId), toko: p.toko, qty: Number(p.qty), doneQty: done, remaining: Number(p.qty) - done };
+    })
+    .filter((p: { remaining: number }) => p.remaining > 0);
+}
+
 // Can this user assign/manage install tasks on this asset? (Admin any, PIC own client, Fase 6.)
 export function canAssignInstall(asset: Asset, user: { role: Role; client?: string | null }): boolean {
   if (asset?.currentStage !== 6) return false;
+  if (user.role === "Admin") return true;
+  if (user.role === "PIC") return (user.client || null) === (asset.client || null);
+  return false;
+}
+
+// The active roadshow leg (or null) + total legs — for the mobile venue action's context.
+export function currentLeg(asset: Asset): { venue: string; area?: string; seq: number; count: number } | null {
+  const legs = (asset?.stageDetails as any)?.deployment?.legs;
+  if (!Array.isArray(legs) || !legs.length) return null;
+  const active = legs.find((l: any) => l.status === "active") || [...legs].sort((a: any, b: any) => (b.seq || 0) - (a.seq || 0))[0];
+  return active ? { venue: active.venue, area: active.area, seq: active.seq, count: legs.length } : null;
+}
+
+// Can this user set up / relocate a venue leg from the field? Event roadshow in progress
+// (deployment.mode === "Event"), Fase 6, PIC (own client) or Admin. First leg starts in the CMS.
+export function canDeployVenue(asset: Asset, user: { role: Role; client?: string | null }): boolean {
+  if (asset?.currentStage !== 6) return false;
+  if ((asset?.stageDetails as any)?.deployment?.mode !== "Event") return false;
   if (user.role === "Admin") return true;
   if (user.role === "PIC") return (user.client || null) === (asset.client || null);
   return false;

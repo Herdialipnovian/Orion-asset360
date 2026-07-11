@@ -16,6 +16,7 @@ export interface AuthUser {
   name: string;
   role: Role;
   client?: string | null;
+  area?: string | null;
 }
 
 export interface NotifItem {
@@ -193,6 +194,18 @@ export const fieldApi = {
     if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
     return req(`/assets/${encodeURIComponent(assetId)}/install/complete`, { method: "POST", headers, body: JSON.stringify(body) });
   },
+  // Merchandiser reports a Distribusi placement at THEIR assigned toko (doneQty + GPS,
+  // signature optional; before/after photos uploaded separately). Idempotency-Key makes
+  // offline replay safe.
+  async placeAtToko(
+    assetId: string,
+    body: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string },
+    idempotencyKey?: string
+  ): Promise<{ asset: Asset; installedQty: number; fullyInstalled: boolean }> {
+    const headers: Record<string, string> = {};
+    if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+    return req(`/assets/${encodeURIComponent(assetId)}/place`, { method: "POST", headers, body: JSON.stringify(body) });
+  },
   // PIC assigns / re-assigns install portions (online-only for now).
   async assignInstall(assetId: string, body: { assignments: { merchandiserId: number; qty: number }[]; baseUpdatedAt?: string }): Promise<any> {
     return req(`/assets/${encodeURIComponent(assetId)}/install/assign`, { method: "POST", body: JSON.stringify(body) });
@@ -200,6 +213,15 @@ export const fieldApi = {
   // Merchandisers of a client (assign dropdown source).
   async usersDirectory(role: "PIC" | "Merchandiser", client?: string): Promise<{ id: number; name: string; client: string | null }[]> {
     return req(`/users/directory?role=${encodeURIComponent(role)}${client ? `&client=${encodeURIComponent(client)}` : ""}`);
+  },
+  // Locations (Venue / Toko / Internal) — dropdown source for the mobile venue-leg flow.
+  async locations(params: { type?: string; client?: string } = {}): Promise<{ id: number; name: string; area: string | null }[]> {
+    const qs = new URLSearchParams(params as any).toString();
+    return req(`/locations${qs ? "?" + qs : ""}`);
+  },
+  // PIC sets up / relocates a venue leg (Fase 2 Event roadshow) from the field (online-only).
+  async deployVenue(assetId: string, body: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string }): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(assetId)}/deploy-venue`, { method: "POST", body: JSON.stringify(body) });
   },
   // In-app notifications.
   async notifications(): Promise<{ items: NotifItem[]; unread: number }> {

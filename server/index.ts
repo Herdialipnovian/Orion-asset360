@@ -9,7 +9,7 @@ import type { Response, NextFunction } from "express";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { q, getAssets, getAsset, insertAsset, insertLog, updateAssetStageRow, getLogs, tx, genAssetId, genSplitId, updateAssetCore, deleteAsset, logHash } from "./db";
+import { q, getAssets, getAsset, insertAsset, insertLog, updateAssetStageRow, getLogs, tx, genAssetId, genSplitId, updateAssetCore, deleteAsset, setAssetProject, logHash } from "./db";
 import { requireAuth, requireAuthFlexible, requireRole, signToken, verifyPassword, hashPassword, STAGE_ROLE, type AuthedReq } from "./auth";
 import { migrate, SEED_SETTINGS } from "./migrate";
 import { computeLocation, DEFAULT_LOG, TRANSITIONS, isLegalTransition, EVIDENCE_REQUIRED } from "./lifecycle";
@@ -21,6 +21,7 @@ import fs from "node:fs";
 import type { Asset, ActivityLog } from "../src/types";
 import { recomputeInstall, statusOf } from "../src/installProgress";
 import { listNotifications, unreadCount, markRead, markAllRead, notifyNewAssignments, notifyInstallCompleted } from "./notifications";
+import { addClient, removeClient, assetChanged } from "./sse";
 
 const app = express();
 app.use(cors());
@@ -53,7 +54,7 @@ app.post(
     if (!u || !(await verifyPassword(password, u.password_hash))) {
       return res.status(401).json({ error: "Username atau password salah." });
     }
-    const user = { id: u.id, username: u.username, name: u.name, role: u.role, client: u.client ?? null };
+    const user = { id: u.id, username: u.username, name: u.name, role: u.role, client: u.client ?? null, area: u.area ?? null };
     res.json({ token: signToken(user), user });
   })
 );
@@ -93,7 +94,7 @@ app.get(
   requireAuth,
   requireRole("Admin"),
   wrap(async (_req, res) => {
-    const { rows } = await q(`select id, username, name, role, client, created_at from users order by id`);
+    const { rows } = await q(`select id, username, name, role, client, area, created_at from users order by id`);
     res.json(rows);
   })
 );
@@ -122,18 +123,20 @@ app.post(
   requireAuth,
   requireRole("Admin"),
   wrap(async (req, res) => {
-    const { username, name, role, password, client } = req.body || {};
+    const { username, name, role, password, client, area } = req.body || {};
     if (!username || !name || !role || !password) return res.status(400).json({ error: "username, name, role, password wajib diisi." });
     if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: "Role tidak valid." });
     if (String(password).length < 6) return res.status(400).json({ error: "Password minimal 6 karakter." });
     const cli = CLIENT_SCOPED.includes(role) ? String(client || "").trim() : null;
     if (CLIENT_SCOPED.includes(role) && !cli) return res.status(400).json({ error: `Role ${role} wajib ditetapkan ke satu Client.` });
+    // Area scope is optional; only meaningful for client-scoped roles (PIC Area / Merchandiser per-area).
+    const ar = CLIENT_SCOPED.includes(role) ? String(area || "").trim() || null : null;
     try {
       const hash = await hashPassword(password);
       const { rows } = await q(
-        `insert into users (username, name, password_hash, role, client) values ($1,$2,$3,$4,$5)
-         returning id, username, name, role, client, created_at`,
-        [String(username).trim(), String(name).trim(), hash, role, cli]
+        `insert into users (username, name, password_hash, role, client, area) values ($1,$2,$3,$4,$5,$6)
+         returning id, username, name, role, client, area, created_at`,
+        [String(username).trim(), String(name).trim(), hash, role, cli, ar]
       );
       res.status(201).json(rows[0]);
     } catch (e: any) {
@@ -150,7 +153,7 @@ app.patch(
   requireRole("Admin"),
   wrap(async (req, res) => {
     const id = Number(req.params.id);
-    const { name, role, password, client } = req.body || {};
+    const { name, role, password, client, area } = req.body || {};
     const { rows } = await q(`select * from users where id = $1`, [id]);
     const target = rows[0];
     if (!target) return res.status(404).json({ error: "User tidak ditemukan." });
@@ -164,20 +167,23 @@ app.patch(
 
     const newName = name?.trim() || target.name;
     const newRole = role || target.role;
-    // Client scope follows the (new) role: required for PIC/Merchandiser, cleared otherwise.
+    // Client + Area scope follow the (new) role: required client for PIC/Merchandiser, cleared otherwise.
     const newClient = CLIENT_SCOPED.includes(newRole)
       ? (client !== undefined ? String(client || "").trim() : target.client) || ""
       : null;
     if (CLIENT_SCOPED.includes(newRole) && !newClient) return res.status(400).json({ error: `Role ${newRole} wajib ditetapkan ke satu Client.` });
+    const newArea = CLIENT_SCOPED.includes(newRole)
+      ? (area !== undefined ? String(area || "").trim() || null : target.area)
+      : null;
 
     if (password) {
       if (String(password).length < 6) return res.status(400).json({ error: "Password minimal 6 karakter." });
       const hash = await hashPassword(password);
-      await q(`update users set name=$2, role=$3, client=$4, password_hash=$5 where id=$1`, [id, newName, newRole, newClient, hash]);
+      await q(`update users set name=$2, role=$3, client=$4, area=$5, password_hash=$6 where id=$1`, [id, newName, newRole, newClient, newArea, hash]);
     } else {
-      await q(`update users set name=$2, role=$3, client=$4 where id=$1`, [id, newName, newRole, newClient]);
+      await q(`update users set name=$2, role=$3, client=$4, area=$5 where id=$1`, [id, newName, newRole, newClient, newArea]);
     }
-    const { rows: out } = await q(`select id, username, name, role, client, created_at from users where id=$1`, [id]);
+    const { rows: out } = await q(`select id, username, name, role, client, area, created_at from users where id=$1`, [id]);
     res.json(out[0]);
   })
 );
@@ -229,6 +235,12 @@ function buildImportedAsset(id: string, row: any): Asset {
     serialNumber: String(row.serialNumber || "").trim(),
     fisik: String(row.fisik || "").trim(),
     tglBeli: tgl,
+    owner: /klien|client/i.test(String(row.owner || "")) ? "Client" : "Origin",
+    usageType:
+      /consumable|habis/i.test(String(row.usageType || "")) ||
+      /stiker|sticker|banner|poster|spanduk|flyer/i.test(String(row.name || ""))
+        ? "Consumable"
+        : "Reusable",
     stageDetails: {
       request: { reqId: `REQ-${id}`, timelineWeeks: 0, specsRequired: "Registrasi aset fisik (master data)", vendorName: "-", picName: "-", approvalDate: tgl || now.slice(0, 10) },
       production: { prodLead: "-", qcInspector: "-", qcScore: 100, productionReportCode: "-", evidencePhoto: "", readyDate: tgl || "" },
@@ -268,7 +280,12 @@ app.post(
   requireRole("Logistik"),
   wrap(async (req, res) => {
     const a = req.body as Asset;
-    if (!a || !a.name || !a.client) return res.status(400).json({ error: "Nama & client aset wajib diisi." });
+    if (!a || !a.name) return res.status(400).json({ error: "Nama aset wajib diisi." });
+    // Internal Origin-owned assets have no external client → default to "Origin".
+    if (!a.client) {
+      if (a.owner === "Origin") a.client = "Origin";
+      else return res.status(400).json({ error: "Client aset wajib diisi." });
+    }
     if (a.category) await q(`insert into categories (name) values ($1) on conflict (name) do nothing`, [a.category]);
     await q(`insert into clients (name) values ($1) on conflict (name) do nothing`, [a.client]);
     a.id = await genAssetId(a.client);
@@ -289,6 +306,7 @@ app.post(
       type: "success"
     };
     await insertLog(log);
+    assetChanged(a.id);
     res.status(201).json({ asset: await getAsset(a.id), log });
   })
 );
@@ -316,10 +334,13 @@ app.patch(
       serialNumber: p.serialNumber ?? asset.serialNumber,
       fisik: p.fisik ?? asset.fisik,
       tglBeli: p.tglBeli ?? asset.tglBeli,
+      owner: p.owner ?? asset.owner,
+      usageType: p.usageType ?? asset.usageType,
       specs: { ...asset.specs, brand: p.merk ?? asset.specs?.brand },
       financials: { ...asset.financials, purchaseCost: p.harga != null ? Number(p.harga) : asset.financials.purchaseCost }
     };
     await updateAssetCore(id, merged);
+    assetChanged(id);
     res.json({ asset: await getAsset(id) });
   })
 );
@@ -344,6 +365,7 @@ app.delete(
       operator: req.user!.name,
       type: "error"
     });
+    assetChanged(id);
     res.json({ ok: true, id });
   })
 );
@@ -381,6 +403,7 @@ app.post(
       }
       return { added, categories: cats.size, clients: clis.size };
     });
+    assetChanged();
     res.json({ ok: true, mode, ...result });
   })
 );
@@ -486,6 +509,7 @@ app.patch(
 
     const out = { asset: await getAsset(id), log };
     await saveIdempotent(idemKey, `stage:${id}`, out);
+    assetChanged(id);
     res.json(out);
   })
 );
@@ -529,6 +553,7 @@ app.post(
         action: meta?.logAction || `Surat Jalan terbit: ${shipQty} unit dikirim.`, operator, type: "success"
       };
       await insertLog(log);
+      assetChanged(id);
       return res.json({ mode: "full", original: await getAsset(id), child: null });
     }
 
@@ -577,6 +602,7 @@ app.post(
     };
     await insertLog(splitLog);
 
+    assetChanged(id);
     res.json({ mode: "split", original: await getAsset(id), child: await getAsset(childId) });
   })
 );
@@ -654,6 +680,7 @@ app.post(
     const added = merged.filter(a => !existingById.has(a.merchandiserId)).map(a => ({ merchandiserId: a.merchandiserId, qty: a.qty }));
     await notifyNewAssignments(added, { id, name: asset.name });
 
+    assetChanged(id);
     res.json({ asset: await getAsset(id), installedQty, fullyInstalled });
   })
 );
@@ -748,6 +775,7 @@ app.post(
 
     const out = { asset: await getAsset(id), installedQty: r.installedQty, fullyInstalled: r.fullyInstalled };
     await saveIdempotent(idemKey, `install:${id}`, out);
+    assetChanged(id);
     res.json(out);
   })
 );
@@ -766,6 +794,29 @@ app.post("/api/notifications/read-all", requireAuthFlexible, wrap(async (req: Au
   await markAllRead(req.user!.id);
   res.json({ ok: true, unread: 0 });
 }));
+
+// --- Live updates (SSE) — long-lived stream, NOT wrap()ped (it never ends) ---
+app.get("/api/events", requireAuthFlexible, (req: AuthedReq, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // don't let a reverse proxy buffer the stream
+  (res as any).flushHeaders?.();
+  res.write(`event: hello\ndata: {"ok":true}\n\n`);
+  const client = addClient(req.user!.id, res);
+  // Comment heartbeat every 25s keeps the connection alive through idle proxies.
+  const hb = setInterval(() => {
+    try {
+      res.write(`: ping\n\n`);
+    } catch {
+      /* stream gone */
+    }
+  }, 25000);
+  req.on("close", () => {
+    clearInterval(hb);
+    removeClient(client);
+  });
+});
 
 // --- Master data: categories & clients (GET for any authed user; mutations Admin) ---
 function registerMaster(pathName: string, table: string, assetCol: string) {
@@ -835,6 +886,541 @@ function registerMaster(pathName: string, table: string, assetCol: string) {
 }
 registerMaster("categories", "categories", "category");
 registerMaster("clients", "clients", "client");
+
+// --- Areas master (geographic zones; PIC/Merchandiser scope to Client + Area) ---
+// GET any authed (dropdown source); mutations Admin. In-use check is against users.area.
+app.get("/api/areas", requireAuth, wrap(async (_req, res) => {
+  const { rows } = await q(`select id, name from areas order by name`);
+  res.json(rows);
+}));
+app.post("/api/areas", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Nama area wajib diisi." });
+  try {
+    const { rows } = await q(`insert into areas (name) values ($1) returning id, name`, [name]);
+    res.status(201).json(rows[0]);
+  } catch (e: any) {
+    if (e?.code === "23505") return res.status(409).json({ error: "Area sudah terdaftar." });
+    throw e;
+  }
+}));
+app.patch("/api/areas/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const name = String(req.body?.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Nama area wajib diisi." });
+  const { rows } = await q(`select name from areas where id=$1`, [id]);
+  if (!rows[0]) return res.status(404).json({ error: "Area tidak ditemukan." });
+  try {
+    await tx(async c => {
+      await c.query(`update areas set name=$1 where id=$2`, [name, id]);
+      await c.query(`update users set area=$1 where area=$2`, [name, rows[0].name]); // cascade to scoped users
+    });
+  } catch (e: any) {
+    if (e?.code === "23505") return res.status(409).json({ error: "Area sudah terdaftar." });
+    throw e;
+  }
+  res.json({ id, name });
+}));
+app.delete("/api/areas/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows } = await q(`select name from areas where id=$1`, [id]);
+  if (!rows[0]) return res.status(404).json({ error: "Area tidak ditemukan." });
+  const { rows: used } = await q(`select count(*)::int as n from users where area=$1`, [rows[0].name]);
+  if (used[0].n > 0) return res.status(409).json({ error: `Tidak bisa dihapus — masih dipakai ${used[0].n} user.` });
+  await q(`delete from areas where id=$1`, [id]);
+  res.json({ ok: true, id });
+}));
+
+// --- Employees / Karyawan master (internal-asset custodians; NOT login users) ---
+function empRow(r: any) {
+  return { id: Number(r.id), code: r.code, name: r.name, department: r.department, position: r.position, active: r.active };
+}
+app.get("/api/employees", requireAuth, wrap(async (_req, res) => {
+  const { rows } = await q(`select id, code, name, department, position, active from employees order by name`);
+  res.json(rows.map(empRow));
+}));
+app.post("/api/employees", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Nama karyawan wajib diisi." });
+  const { rows } = await q(
+    `insert into employees (code, name, department, position) values ($1,$2,$3,$4)
+     returning id, code, name, department, position, active`,
+    [String(b.code || "").trim() || null, name, String(b.department || "").trim() || null, String(b.position || "").trim() || null]
+  );
+  res.status(201).json(empRow(rows[0]));
+}));
+app.patch("/api/employees/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows: ex } = await q(`select * from employees where id=$1`, [id]);
+  if (!ex[0]) return res.status(404).json({ error: "Karyawan tidak ditemukan." });
+  const b = req.body || {};
+  const t = ex[0];
+  const name = b.name !== undefined ? String(b.name || "").trim() || t.name : t.name;
+  const { rows } = await q(
+    `update employees set code=$2, name=$3, department=$4, position=$5, active=$6 where id=$1
+     returning id, code, name, department, position, active`,
+    [
+      id,
+      b.code !== undefined ? String(b.code || "").trim() || null : t.code,
+      name,
+      b.department !== undefined ? String(b.department || "").trim() || null : t.department,
+      b.position !== undefined ? String(b.position || "").trim() || null : t.position,
+      b.active !== undefined ? !!b.active : t.active
+    ]
+  );
+  res.json(empRow(rows[0]));
+}));
+app.delete("/api/employees/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rowCount } = await q(`delete from employees where id=$1`, [id]);
+  if (!rowCount) return res.status(404).json({ error: "Karyawan tidak ditemukan." });
+  res.json({ ok: true, id });
+}));
+
+// --- Clients (rich): name + deployment-type tags + store-list flag. GET any authed; mutations Admin.
+// A client may run SEVERAL patterns (Event AND Distribusi), so deploymentTypes is a multi-value tag,
+// not a single category. /api/master/clients stays as the name-only source for dropdowns/filter.
+const VALID_DEPLOY_TYPES = ["Internal", "Event", "Distribusi"];
+const cleanTypes = (v: any) => (Array.isArray(v) ? [...new Set(v.map(String))].filter(t => VALID_DEPLOY_TYPES.includes(t)) : []);
+function clientRow(r: any) {
+  return { id: Number(r.id), name: r.name, deploymentTypes: r.deployment_types ?? [], hasStoreList: !!r.has_store_list };
+}
+app.get("/api/clients", requireAuth, wrap(async (_req, res) => {
+  const { rows } = await q(`select id, name, deployment_types, has_store_list from clients order by name`);
+  res.json(rows.map(clientRow));
+}));
+app.post("/api/clients", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Nama client wajib diisi." });
+  try {
+    const { rows } = await q(
+      `insert into clients (name, deployment_types, has_store_list) values ($1,$2,$3)
+       returning id, name, deployment_types, has_store_list`,
+      [name, cleanTypes(b.deploymentTypes), !!b.hasStoreList]
+    );
+    res.status(201).json(clientRow(rows[0]));
+  } catch (e: any) {
+    if (e?.code === "23505") return res.status(409).json({ error: "Client sudah terdaftar." });
+    throw e;
+  }
+}));
+app.patch("/api/clients/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows: ex } = await q(`select name, deployment_types, has_store_list from clients where id=$1`, [id]);
+  if (!ex[0]) return res.status(404).json({ error: "Client tidak ditemukan." });
+  const b = req.body || {};
+  const oldName = ex[0].name;
+  const name = b.name !== undefined ? String(b.name || "").trim() || oldName : oldName;
+  const types = b.deploymentTypes !== undefined ? cleanTypes(b.deploymentTypes) : ex[0].deployment_types ?? [];
+  const storeList = b.hasStoreList !== undefined ? !!b.hasStoreList : !!ex[0].has_store_list;
+  try {
+    await tx(async c => {
+      await c.query(`update clients set name=$1, deployment_types=$2, has_store_list=$3 where id=$4`, [name, types, storeList, id]);
+      if (name !== oldName) await c.query(`update assets set client=$1 where client=$2`, [name, oldName]); // cascade rename
+    });
+  } catch (e: any) {
+    if (e?.code === "23505") return res.status(409).json({ error: "Client sudah terdaftar." });
+    throw e;
+  }
+  res.json({ id, name, deploymentTypes: types, hasStoreList: storeList });
+}));
+app.delete("/api/clients/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows } = await q(`select name from clients where id=$1`, [id]);
+  if (!rows[0]) return res.status(404).json({ error: "Client tidak ditemukan." });
+  const { rows: used } = await q(`select count(*)::int as n from assets where client=$1`, [rows[0].name]);
+  if (used[0].n > 0) return res.status(409).json({ error: `Tidak bisa dihapus — masih dipakai ${used[0].n} aset.` });
+  await q(`delete from clients where id=$1`, [id]);
+  res.json({ ok: true, id });
+}));
+
+// ── Deployment foundation: Proyek/Campaign + Lokasi (Venue/Toko/Internal target). ──
+// Both are operational planning → Admin + Logistik manage from the CMS; GET for any authed
+// (dropdown sources). Field staff (PIC/Merchandiser) can ADD a location on the spot (mobile).
+const VALID_MODES = ["Internal", "Event", "Distribusi"];
+const VALID_LOC_TYPES = ["Venue", "Toko", "Internal"];
+function projRow(r: any) {
+  return { id: Number(r.id), name: r.name, client: r.client, mode: r.mode, status: r.status, area: r.area, startDate: r.start_date, endDate: r.end_date, notes: r.notes, assetCount: r.asset_count != null ? Number(r.asset_count) : undefined };
+}
+function locRow(r: any) {
+  return { id: Number(r.id), name: r.name, type: r.type, client: r.client, area: r.area, address: r.address, gpsLat: r.gps_lat, gpsLng: r.gps_lng, pic: r.pic, code: r.code, source: r.source, active: r.active };
+}
+
+// Projects
+app.get("/api/projects", requireAuth, wrap(async (req, res) => {
+  const { client, mode } = req.query as any;
+  const where: string[] = [], args: any[] = [];
+  if (client) { args.push(client); where.push(`p.client = $${args.length}`); }
+  if (mode) { args.push(mode); where.push(`p.mode = $${args.length}`); }
+  const { rows } = await q(
+    `select p.*, (select count(*) from assets a where a.project_id = p.id)::int as asset_count
+     from projects p ${where.length ? "where " + where.join(" and ") : ""} order by p.created_at desc`,
+    args
+  );
+  res.json(rows.map(projRow));
+}));
+app.post("/api/projects", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Nama proyek wajib diisi." });
+  const mode = VALID_MODES.includes(b.mode) ? b.mode : "Distribusi";
+  const { rows } = await q(
+    `insert into projects (name, client, mode, status, area, start_date, end_date, notes)
+     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+    [name, b.client ? String(b.client).trim() : null, mode, b.status === "done" ? "done" : "active",
+     b.area ? String(b.area).trim() : null, b.startDate || null, b.endDate || null, b.notes ? String(b.notes).trim() : null]
+  );
+  res.status(201).json(projRow(rows[0]));
+}));
+app.patch("/api/projects/:id", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows: ex } = await q(`select * from projects where id=$1`, [id]);
+  if (!ex[0]) return res.status(404).json({ error: "Proyek tidak ditemukan." });
+  const t = ex[0], b = req.body || {};
+  const name = b.name !== undefined ? String(b.name || "").trim() || t.name : t.name;
+  const mode = b.mode !== undefined ? (VALID_MODES.includes(b.mode) ? b.mode : t.mode) : t.mode;
+  const status = b.status !== undefined ? (b.status === "done" ? "done" : "active") : t.status;
+  const { rows } = await q(
+    `update projects set name=$2, client=$3, mode=$4, status=$5, area=$6, start_date=$7, end_date=$8, notes=$9 where id=$1 returning *`,
+    [id, name,
+     b.client !== undefined ? (b.client ? String(b.client).trim() : null) : t.client,
+     mode, status,
+     b.area !== undefined ? (b.area ? String(b.area).trim() : null) : t.area,
+     b.startDate !== undefined ? (b.startDate || null) : t.start_date,
+     b.endDate !== undefined ? (b.endDate || null) : t.end_date,
+     b.notes !== undefined ? (b.notes ? String(b.notes).trim() : null) : t.notes]
+  );
+  res.json(projRow(rows[0]));
+}));
+app.delete("/api/projects/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows: used } = await q(`select count(*)::int as n from assets where project_id=$1`, [id]);
+  if (used[0].n > 0) return res.status(409).json({ error: `Tidak bisa dihapus — masih dipakai ${used[0].n} aset.` });
+  const { rowCount } = await q(`delete from projects where id=$1`, [id]);
+  if (!rowCount) return res.status(404).json({ error: "Proyek tidak ditemukan." });
+  res.json({ ok: true, id });
+}));
+
+// Locations (Venue / Toko / Internal target)
+app.get("/api/locations", requireAuth, wrap(async (req, res) => {
+  const { client, type, area } = req.query as any;
+  const where: string[] = [], args: any[] = [];
+  if (client) { args.push(client); where.push(`client = $${args.length}`); }
+  if (type) { args.push(type); where.push(`type = $${args.length}`); }
+  if (area) { args.push(area); where.push(`area = $${args.length}`); }
+  const { rows } = await q(`select * from locations ${where.length ? "where " + where.join(" and ") : ""} order by name`, args);
+  res.json(rows.map(locRow));
+}));
+// Field staff may add a location on the spot → requireAuthFlexible (mobile token) + broad roles.
+app.post("/api/locations", requireAuthFlexible, requireRole("Admin", "Logistik", "PIC", "Merchandiser"), wrap(async (req: AuthedReq, res) => {
+  const b = req.body || {};
+  const name = String(b.name || "").trim();
+  if (!name) return res.status(400).json({ error: "Nama lokasi wajib diisi." });
+  const type = VALID_LOC_TYPES.includes(b.type) ? b.type : "Toko";
+  const fieldAdded = req.user!.role === "PIC" || req.user!.role === "Merchandiser";
+  const { rows } = await q(
+    `insert into locations (name, type, client, area, address, gps_lat, gps_lng, pic, code, source)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+    [name, type, b.client ? String(b.client).trim() : null, b.area ? String(b.area).trim() : null,
+     b.address ? String(b.address).trim() : null,
+     b.gpsLat != null ? Number(b.gpsLat) : null, b.gpsLng != null ? Number(b.gpsLng) : null,
+     b.pic ? String(b.pic).trim() : null, b.code ? String(b.code).trim() : null,
+     fieldAdded ? "field" : "list"]
+  );
+  res.status(201).json(locRow(rows[0]));
+}));
+app.patch("/api/locations/:id", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows: ex } = await q(`select * from locations where id=$1`, [id]);
+  if (!ex[0]) return res.status(404).json({ error: "Lokasi tidak ditemukan." });
+  const t = ex[0], b = req.body || {};
+  const name = b.name !== undefined ? String(b.name || "").trim() || t.name : t.name;
+  const type = b.type !== undefined ? (VALID_LOC_TYPES.includes(b.type) ? b.type : t.type) : t.type;
+  const { rows } = await q(
+    `update locations set name=$2, type=$3, client=$4, area=$5, address=$6, gps_lat=$7, gps_lng=$8, pic=$9, code=$10, active=$11 where id=$1 returning *`,
+    [id, name, type,
+     b.client !== undefined ? (b.client ? String(b.client).trim() : null) : t.client,
+     b.area !== undefined ? (b.area ? String(b.area).trim() : null) : t.area,
+     b.address !== undefined ? (b.address ? String(b.address).trim() : null) : t.address,
+     b.gpsLat !== undefined ? (b.gpsLat != null ? Number(b.gpsLat) : null) : t.gps_lat,
+     b.gpsLng !== undefined ? (b.gpsLng != null ? Number(b.gpsLng) : null) : t.gps_lng,
+     b.pic !== undefined ? (b.pic ? String(b.pic).trim() : null) : t.pic,
+     b.code !== undefined ? (b.code ? String(b.code).trim() : null) : t.code,
+     b.active !== undefined ? !!b.active : t.active]
+  );
+  res.json(locRow(rows[0]));
+}));
+app.delete("/api/locations/:id", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rowCount } = await q(`delete from locations where id=$1`, [id]);
+  if (!rowCount) return res.status(404).json({ error: "Lokasi tidak ditemukan." });
+  res.json({ ok: true, id });
+}));
+
+// Assign / clear an asset's current deployment project.
+app.post("/api/assets/:id/project", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req, res) => {
+  const asset = await getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  const pid = req.body?.projectId;
+  if (pid != null) {
+    const { rows } = await q(`select 1 from projects where id=$1`, [Number(pid)]);
+    if (!rows[0]) return res.status(400).json({ error: "Proyek tidak ditemukan." });
+  }
+  await setAssetProject(asset.id, pid != null ? Number(pid) : null);
+  assetChanged(asset.id);
+  res.json({ ok: true, id: asset.id, projectId: pid != null ? Number(pid) : null });
+}));
+
+// ── Fase 1 Internal: serah-terima aset Origin ke Karyawan (custodian) + BAST. Jumps to Fase 6
+// (internal deploy skips surat-jalan/transit — no venue). Admin + Logistik. ──
+app.post("/api/assets/:id/handover", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req: AuthedReq, res) => {
+  const asset = await getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Serah-terima internal hanya dari Fase 3–6 (gudang → dipegang karyawan)." });
+  const b = req.body || {};
+  const empId = Number(b.custodianId);
+  if (!empId) return res.status(400).json({ error: "Custodian (karyawan) wajib dipilih." });
+  const { rows: er } = await q(`select id, name, department from employees where id=$1 and active=true`, [empId]);
+  if (!er[0]) return res.status(400).json({ error: "Karyawan tidak ditemukan / non-aktif." });
+  const emp = er[0];
+  let projectName: string | null = null, projectId: number | null = null;
+  if (b.projectId != null) {
+    const { rows: pr } = await q(`select id, name from projects where id=$1`, [Number(b.projectId)]);
+    if (pr[0]) { projectName = pr[0].name; projectId = pr[0].id; }
+  }
+  const deployment = {
+    ...((asset.stageDetails as any).deployment || {}),
+    mode: "Internal",
+    projectId: projectId ?? undefined,
+    projectName: projectName ?? undefined,
+    custodianId: emp.id,
+    custodianName: emp.name,
+    custodianDept: emp.department || undefined,
+    handoverDate: b.handoverDate || new Date().toISOString().slice(0, 10),
+    handoverSignature: b.signatureBase64 || undefined,
+    handoverNote: b.note ? String(b.note).trim() : undefined
+  };
+  const stageDetails = { ...asset.stageDetails, deployment };
+  const location = `Custodian: ${emp.name}`;
+  await updateAssetStageRow(asset.id, { currentStage: 6, currentLocation: location, stageDetails });
+  if (projectId != null) await setAssetProject(asset.id, projectId);
+  await insertLog({
+    id: `LOG-HANDOVER-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    assetId: asset.id,
+    assetName: asset.name,
+    stage: 6,
+    action: `Serah-terima internal ke ${emp.name}${emp.department ? ` (${emp.department})` : ""}`,
+    operator: req.user!.name,
+    type: "success"
+  });
+  assetChanged(asset.id);
+  res.json({ asset: await getAsset(asset.id) });
+}));
+
+// ── Fase 2 Event/Roadshow: deploy asset(-package) at a Venue as a Leg. Called again to RELOCATE
+// to the next venue (closes the active leg, opens a new one) — builds the roadshow timeline on
+// one asset. Admin + Logistik + PIC. First call jumps 3–5→6; later calls stay Fase 6. ──
+app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logistik", "PIC"), wrap(async (req: AuthedReq, res) => {
+  const asset = await getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Setup/relokasi venue hanya dari Fase 3–6." });
+  const b = req.body || {};
+  const locId = Number(b.locationId);
+  if (!locId) return res.status(400).json({ error: "Venue wajib dipilih." });
+  const { rows: lr } = await q(`select id, name, area from locations where id=$1`, [locId]);
+  if (!lr[0]) return res.status(400).json({ error: "Venue tidak ditemukan." });
+  const loc = lr[0];
+  const now = new Date().toISOString().slice(0, 10);
+  const dep: any = { ...((asset.stageDetails as any).deployment || {}) };
+  const legs: any[] = Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : [];
+  // Relocate: close the currently-active leg before opening the next.
+  for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
+  const seq = legs.reduce((m, l) => Math.max(m, l.seq || 0), 0) + 1;
+  legs.push({ locationId: loc.id, venue: loc.name, area: loc.area || undefined, pic: b.pic ? String(b.pic).trim() : undefined, seq, status: "active", setupDate: b.setupDate || now, signature: b.signatureBase64 || undefined, note: b.note ? String(b.note).trim() : undefined });
+  dep.legs = legs; dep.currentLegSeq = seq; dep.mode = "Event";
+  let projectId: number | null = null;
+  if (b.projectId != null) {
+    const { rows: pr } = await q(`select id, name from projects where id=$1`, [Number(b.projectId)]);
+    if (pr[0]) { projectId = pr[0].id; dep.projectId = pr[0].id; dep.projectName = pr[0].name; }
+  }
+  const stageDetails = { ...asset.stageDetails, deployment: dep };
+  const location = `Venue: ${loc.name}${loc.area ? ` (${loc.area})` : ""}`;
+  await updateAssetStageRow(asset.id, { currentStage: 6, currentLocation: location, stageDetails });
+  if (projectId != null) await setAssetProject(asset.id, projectId);
+  const isRelocate = seq > 1;
+  await insertLog({
+    id: `LOG-VENUE-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    assetId: asset.id,
+    assetName: asset.name,
+    stage: 6,
+    action: isRelocate ? `Relokasi ke venue ${loc.name} (leg ${seq})` : `Setup di venue ${loc.name}`,
+    operator: req.user!.name,
+    type: "success"
+  });
+  assetChanged(asset.id);
+  res.json({ asset: await getAsset(asset.id) });
+}));
+
+// ── Fase 3 Distribusi helpers + endpoints: fan-out placement per toko, per-toko reporting, sampling audit. ──
+function recomputePlacements(dep: any, quantity: number) {
+  const pls: any[] = Array.isArray(dep.placements) ? dep.placements : [];
+  for (const p of pls) {
+    const dq = Number(p.doneQty) || 0;
+    p.status = dq <= 0 ? "pending" : dq >= (Number(p.qty) || 0) ? "done" : "partial";
+  }
+  dep.installedQty = pls.reduce((s, p) => s + (Number(p.doneQty) || 0), 0);
+  dep.fullyInstalled = dep.installedQty >= quantity;
+  return dep;
+}
+
+// PIC/Admin/Logistik assigns placements (fan-out qty across toko, optional merchandiser per toko).
+// Merges by locationId (preserves doneQty). Σqty ≤ asset.quantity. First call jumps 3–5→6.
+app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logistik", "PIC"), wrap(async (req: AuthedReq, res) => {
+  const asset = await getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Distribusi hanya dari Fase 3–6." });
+  const rows: any[] = Array.isArray(req.body?.placements) ? req.body.placements : [];
+  if (!rows.length) return res.status(400).json({ error: "Minimal 1 toko." });
+  // resolve toko + merchandiser names
+  const locIds = [...new Set(rows.map(r => Number(r.locationId)).filter(Boolean))];
+  const { rows: locs } = locIds.length ? await q(`select id, name, area from locations where id = any($1)`, [locIds]) : { rows: [] };
+  const locMap = new Map(locs.map((l: any) => [l.id, l]));
+  const merchIds = [...new Set(rows.map(r => Number(r.merchandiserId)).filter(Boolean))];
+  const { rows: ms } = merchIds.length ? await q(`select id, name from users where id = any($1) and role='Merchandiser'`, [merchIds]) : { rows: [] };
+  const merchMap = new Map(ms.map((m: any) => [m.id, m.name]));
+
+  const dep: any = { ...((asset.stageDetails as any).deployment || {}) };
+  const existing: any[] = Array.isArray(dep.placements) ? dep.placements.map((p: any) => ({ ...p })) : [];
+  const byLoc = new Map(existing.map(p => [Number(p.locationId), p]));
+  const seen = new Set<number>();
+  let total = 0;
+  for (const r of rows) {
+    const lid = Number(r.locationId);
+    if (!lid || !locMap.has(lid)) return res.status(400).json({ error: "Toko tidak ditemukan." });
+    if (seen.has(lid)) return res.status(400).json({ error: "Toko duplikat dalam satu distribusi." });
+    seen.add(lid);
+    const qty = Math.max(0, Number(r.qty) || 0);
+    total += qty;
+    const loc: any = locMap.get(lid);
+    const prev = byLoc.get(lid);
+    const dq = prev ? Number(prev.doneQty) || 0 : 0;
+    if (qty < dq) return res.status(422).json({ error: `Qty toko ${loc.name} (${qty}) < yang sudah terpasang (${dq}).` });
+    const mid = Number(r.merchandiserId) || undefined;
+    byLoc.set(lid, {
+      ...(prev || {}),
+      locationId: lid, toko: loc.name, area: loc.area || undefined,
+      merchandiserId: mid, merchandiser: mid ? merchMap.get(mid) : undefined,
+      qty, doneQty: dq
+    });
+  }
+  if (total > (asset.quantity || 0)) return res.status(422).json({ error: `Total distribusi (${total}) melebihi qty aset (${asset.quantity}).` });
+  dep.placements = [...byLoc.values()];
+  dep.mode = "Distribusi";
+  recomputePlacements(dep, asset.quantity || 0);
+  let projectId: number | null = null;
+  if (req.body?.projectId != null) {
+    const { rows: pr } = await q(`select id, name from projects where id=$1`, [Number(req.body.projectId)]);
+    if (pr[0]) { projectId = pr[0].id; dep.projectId = pr[0].id; dep.projectName = pr[0].name; }
+  }
+  const stageDetails = { ...asset.stageDetails, deployment: dep };
+  await updateAssetStageRow(asset.id, { currentStage: 6, currentLocation: `Distribusi · ${dep.placements.length} toko`, stageDetails });
+  if (projectId != null) await setAssetProject(asset.id, projectId);
+  await insertLog({ id: `LOG-DIST-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: 6, action: `Distribusi ke ${dep.placements.length} toko (total ${total} unit)`, operator: req.user!.name, type: "success" });
+  assetChanged(asset.id);
+  res.json({ asset: await getAsset(asset.id) });
+}));
+
+// Merchandiser (or PIC/Admin) reports a placement at a toko: doneQty increment + GPS + optional
+// signature. Row-locked (concurrent per-toko reports can't drop an increment) + Idempotency-Key
+// (offline replay safe) + stage guard, mirroring /install/complete.
+app.post("/api/assets/:id/place", requireAuthFlexible, requireRole("Admin", "Logistik", "PIC", "Merchandiser"), wrap(async (req: AuthedReq, res) => {
+  const id = req.params.id;
+  const idemKey = String(req.headers["idempotency-key"] || "");
+  const cached = await getIdempotent(idemKey);
+  if (cached) return res.status(200).json(cached);
+
+  const pre = await getAsset(id);
+  if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  if (pre.currentStage !== 6) return res.status(422).json({ error: `Pemasangan hanya untuk aset di Fase 6. Aset ini di Fase ${pre.currentStage}.` });
+  // Client-scoped roles can only touch their own client's asset.
+  if ((req.user!.role === "PIC" || req.user!.role === "Merchandiser") && (req.user!.client || null) !== (pre.client || null)) {
+    return res.status(403).json({ error: "Aset ini di luar client Anda." });
+  }
+  const lid = Number(req.body?.locationId);
+  if (!Number.isInteger(lid)) return res.status(400).json({ error: "locationId wajib." });
+
+  const result = await tx(async c => {
+    const { rows } = await c.query(`select stage_details, quantity, current_location from assets where id=$1 for update`, [id]);
+    if (!rows.length) return { http: 404, body: { error: "Aset tidak ditemukan." } };
+    const sd: any = rows[0].stage_details || {};
+    const quantity = Number(rows[0].quantity) || 0;
+    const dep: any = sd.deployment || {};
+    const pls: any[] = Array.isArray(dep.placements) ? dep.placements : [];
+    const p = pls.find((x: any) => Number(x.locationId) === lid);
+    if (!p) return { http: 404, body: { error: "Placement toko tidak ditemukan." } };
+    // A Merchandiser may only report a placement that is assigned to THEM (unassigned → deny).
+    if (req.user!.role === "Merchandiser" && Number(p.merchandiserId) !== req.user!.id) {
+      return { http: 403, body: { error: "Placement ini bukan tugas Anda." } };
+    }
+    const cap = Number(p.qty) || 0;
+    const cur = Number(p.doneQty) || 0;
+    const remaining = cap - cur;
+    if (remaining <= 0) return { http: 422, body: { error: "Toko ini sudah selesai." } };
+    const inc = req.body?.doneQty == null ? remaining : Math.floor(Number(req.body.doneQty));
+    if (!Number.isInteger(inc) || inc < 1) return { http: 400, body: { error: "doneQty harus bilangan bulat >= 1." } };
+    const applied = Math.min(inc, remaining);
+
+    const now = new Date().toISOString();
+    p.doneQty = cur + applied;
+    if (req.body?.gpsLat != null && Number.isFinite(Number(req.body.gpsLat))) p.gpsLat = Number(req.body.gpsLat);
+    if (req.body?.gpsLng != null && Number.isFinite(Number(req.body.gpsLng))) p.gpsLng = Number(req.body.gpsLng);
+    if (req.body?.signatureBase64 && String(req.body.signatureBase64).length >= 50) p.signature = String(req.body.signatureBase64);
+    if (req.body?.note) p.note = String(req.body.note).trim();
+    p.placedAt = now;
+    dep.placements = pls;
+    recomputePlacements(dep, quantity);
+    const details = { ...sd, deployment: dep };
+    await c.query(`update assets set stage_details=$2::jsonb, updated_at=now() where id=$1`, [id, JSON.stringify(details)]);
+    return { ok: true, toko: p.toko, applied, newDone: p.doneQty, cap, quantity, installedQty: dep.installedQty, fullyInstalled: dep.fullyInstalled };
+  });
+
+  if ((result as any).http) return res.status((result as any).http).json((result as any).body);
+  const r = result as any;
+  await insertLog({ id: `LOG-PLACE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: id, assetName: pre.name, stage: 6, action: `Pemasangan di ${r.toko}: +${r.applied} unit (${r.newDone}/${r.cap}; total ${r.installedQty}/${r.quantity} terpasang)${r.fullyInstalled ? " — PENUH" : ""}`, operator: req.user!.name, type: "success" });
+  const out = { asset: await getAsset(id), installedQty: r.installedQty, fullyInstalled: r.fullyInstalled };
+  await saveIdempotent(idemKey, `place:${id}`, out);
+  assetChanged(id);
+  res.json(out);
+}));
+
+// Sampling audit (Fase 7): PIC marks a SUBSET of toko audited + compliant. Returns coverage.
+app.post("/api/assets/:id/audit-sample", requireAuth, requireRole("Admin", "Logistik", "PIC"), wrap(async (req: AuthedReq, res) => {
+  const asset = await getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  const dep: any = { ...((asset.stageDetails as any).deployment || {}) };
+  const pls: any[] = Array.isArray(dep.placements) ? dep.placements.map((p: any) => ({ ...p })) : [];
+  if (!pls.length) return res.status(422).json({ error: "Belum ada placement untuk diaudit." });
+  const samples: any[] = Array.isArray(req.body?.samples) ? req.body.samples : [];
+  if (!samples.length) return res.status(400).json({ error: "Minimal 1 toko sampel." });
+  for (const s of samples) {
+    const p = pls.find(x => Number(x.locationId) === Number(s.locationId));
+    if (p) { p.audited = true; p.auditCompliant = !!s.compliant; }
+  }
+  dep.placements = pls;
+  const auditedList = pls.filter(p => p.audited);
+  const compliant = auditedList.filter(p => p.auditCompliant).length;
+  const coverage = { totalToko: pls.length, auditedToko: auditedList.length, compliantToko: compliant, coveragePct: Math.round((auditedList.length / pls.length) * 100), compliancePct: auditedList.length ? Math.round((compliant / auditedList.length) * 100) : 0 };
+  dep.coverage = coverage;
+  const stageDetails = { ...asset.stageDetails, deployment: dep };
+  await updateAssetStageRow(asset.id, { currentStage: asset.currentStage, currentLocation: asset.currentLocation, stageDetails });
+  await insertLog({ id: `LOG-SAMPLE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: 7, action: `Audit sampling ${auditedList.length}/${pls.length} toko · ${coverage.compliancePct}% patuh`, operator: req.user!.name, type: "success" });
+  assetChanged(asset.id);
+  res.json({ asset: await getAsset(asset.id), coverage });
+}));
 
 // Bulk import one master list. mode 'append' = add new only; 'replace' = delete old
 // EXCEPT rows still used by assets (those are kept, to never orphan an asset).

@@ -29,10 +29,11 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
   const [notice, setNotice] = React.useState<string | null>(null);
 
   const [editing, setEditing] = React.useState<UserRow | "new" | null>(null);
-  const [form, setForm] = React.useState({ username: "", name: "", role: "Logistik", password: "", client: "" });
+  const [form, setForm] = React.useState({ username: "", name: "", role: "Logistik", password: "", client: "", area: "" });
   const [formErr, setFormErr] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [confirmDel, setConfirmDel] = React.useState<UserRow | null>(null);
+  const [areas, setAreas] = React.useState<string[]>([]);
 
   const load = React.useCallback(async () => {
     try {
@@ -46,8 +47,10 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
   }, []);
 
   React.useEffect(() => {
-    if (user.role === "Admin") load();
-    else setLoading(false);
+    if (user.role === "Admin") {
+      load();
+      api.getAreas().then(a => setAreas(a.map(x => x.name))).catch(() => setAreas([]));
+    } else setLoading(false);
   }, [user.role, load]);
 
   // Access gate (backend also enforces)
@@ -66,12 +69,12 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
   }
 
   const openNew = () => {
-    setForm({ username: "", name: "", role: "Logistik", password: "", client: "" });
+    setForm({ username: "", name: "", role: "Logistik", password: "", client: "", area: "" });
     setFormErr(null);
     setEditing("new");
   };
   const openEdit = (u: UserRow) => {
-    setForm({ username: u.username, name: u.name, role: u.role, password: "", client: u.client || "" });
+    setForm({ username: u.username, name: u.name, role: u.role, password: "", client: u.client || "", area: u.area || "" });
     setFormErr(null);
     setEditing(u);
   };
@@ -89,11 +92,12 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
     setSaving(true);
     try {
       const client = isClientScoped(form.role) ? form.client : "";
+      const area = isClientScoped(form.role) ? form.area : "";
       if (editing === "new") {
-        await api.createUser({ username: form.username.trim(), name: form.name.trim(), role: form.role, password: form.password, client });
+        await api.createUser({ username: form.username.trim(), name: form.name.trim(), role: form.role, password: form.password, client, area });
         setNotice(`User "${form.username.trim()}" berhasil dibuat.`);
       } else if (editing) {
-        const patch: { name?: string; role?: string; password?: string; client?: string } = { name: form.name.trim(), role: form.role, client };
+        const patch: { name?: string; role?: string; password?: string; client?: string; area?: string } = { name: form.name.trim(), role: form.role, client, area };
         if (form.password) patch.password = form.password;
         await api.updateUser(editing.id, patch);
         setNotice(`User "${editing.username}" berhasil diperbarui.`);
@@ -166,6 +170,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                 <th className="text-left font-extrabold px-5 py-3">Username</th>
                 <th className="text-left font-extrabold px-5 py-3">Role</th>
                 <th className="text-left font-extrabold px-5 py-3">Client</th>
+                <th className="text-left font-extrabold px-5 py-3">Area</th>
                 <th className="text-left font-extrabold px-5 py-3">Dibuat</th>
                 <th className="text-right font-extrabold px-5 py-3">Aksi</th>
               </tr>
@@ -173,13 +178,13 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
+                  <td colSpan={7} className="px-5 py-10 text-center text-slate-400">
                     <Loader2 className="h-5 w-5 animate-spin mx-auto" />
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
+                  <td colSpan={7} className="px-5 py-10 text-center text-slate-400">
                     Belum ada user.
                   </td>
                 </tr>
@@ -211,6 +216,13 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                           <span className="font-semibold text-slate-700">{u.client}</span>
                         ) : (
                           <span className="text-slate-300">— semua —</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 text-slate-600">
+                        {u.area ? (
+                          <span className="inline-flex items-center rounded-full bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 text-[10px] font-bold">{u.area}</span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
                         )}
                       </td>
                       <td className="px-5 py-3 text-slate-500">{fmtDate(u.created_at)}</td>
@@ -292,7 +304,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                 <select
                   name="role"
                   value={form.role}
-                  onChange={e => setForm({ ...form, role: e.target.value, client: isClientScoped(e.target.value) ? form.client : "" })}
+                  onChange={e => setForm({ ...form, role: e.target.value, client: isClientScoped(e.target.value) ? form.client : "", area: isClientScoped(e.target.value) ? form.area : "" })}
                   className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
                 >
                   {ROLES.map(r => (
@@ -326,6 +338,29 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                   </select>
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     {form.role} hanya menangani aset milik client ini (setiap client punya PIC & Merchandiser sendiri).
+                  </p>
+                </div>
+              )}
+
+              {isClientScoped(form.role) && (
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700">
+                    Area <span className="font-normal text-slate-400">(opsional — untuk distribusi/roadshow)</span>
+                  </label>
+                  <select
+                    name="area"
+                    value={form.area}
+                    onChange={e => setForm({ ...form, area: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
+                  >
+                    <option value="">— tanpa area (mis. event) —</option>
+                    {areas.map(a => (
+                      <option key={a} value={a}>{a}</option>
+                    ))}
+                    {form.area && !areas.includes(form.area) && <option value={form.area}>{form.area}</option>}
+                  </select>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Isi kalau {form.role} bertanggung jawab di area tertentu (mis. PIC Area Aceh). Kosongkan untuk event.
                   </p>
                 </div>
               )}

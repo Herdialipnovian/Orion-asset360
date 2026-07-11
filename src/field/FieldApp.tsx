@@ -9,7 +9,7 @@ import React from "react";
 import { Home as HomeIcon, QrCode, User, LogOut, RefreshCw, Wifi, WifiOff, RefreshCcw } from "lucide-react";
 import type { Asset, ActivityLog } from "../types";
 import { Bell } from "lucide-react";
-import { fieldApi, getToken, type AuthUser, type NotifItem, ApiError } from "./fieldApi";
+import { fieldApi, getToken, apiBase, type AuthUser, type NotifItem, ApiError } from "./fieldApi";
 import { subscribe as outboxSubscribe, listCommits, syncAll, isSyncing, discardCommit, type CommitRecord } from "./outbox";
 import { ROLE_SHORT, Spinner, Toast, Brand } from "./ui";
 import FieldLogin from "./components/FieldLogin";
@@ -19,9 +19,11 @@ import AssetDetail from "./components/AssetDetail";
 import ActionScreen from "./components/ActionScreen";
 import InstallTask from "./components/InstallTask";
 import AssignTask from "./components/AssignTask";
+import PlacementTask from "./components/PlacementTask";
+import VenueTask from "./components/VenueTask";
 import Notifications from "./components/Notifications";
 import SyncCenter from "./components/SyncCenter";
-import { myInstallTask, canAssignInstall } from "./lifecycle";
+import { myInstallTask, myPlacementTasks, canAssignInstall, canDeployVenue } from "./lifecycle";
 
 type View =
   | { t: "home" }
@@ -32,6 +34,8 @@ type View =
   | { t: "action"; id: string; target: number }
   | { t: "install"; id: string }
   | { t: "assign"; id: string }
+  | { t: "placement"; id: string }
+  | { t: "venue"; id: string }
   | { t: "notif" };
 
 export default function FieldApp() {
@@ -154,12 +158,66 @@ export default function FieldApp() {
     if (user) load().then(() => doSync());
   }, [user, load, doSync]);
 
-  // Poll notifications every 60s while logged in.
+  // Poll notifications every 60s while logged in (fallback if SSE is down).
   React.useEffect(() => {
     if (!user) return;
     const t = setInterval(() => loadNotifs(), 60000);
     return () => clearInterval(t);
   }, [user, loadNotifs]);
+
+  // Live updates (SSE), hardened for mobile: reconnect on network change + when the
+  // app returns to the foreground (WebViews suspend background connections), and a
+  // fresh "hello" on (re)connect re-syncs anything missed. Closed while offline to
+  // avoid retry churn; the outbox + poll cover the offline window.
+  const [sseLive, setSseLive] = React.useState(false);
+  React.useEffect(() => {
+    if (!user) return;
+    let es: EventSource | null = null;
+    let rT: ReturnType<typeof setTimeout> | null = null;
+    const debouncedLoad = () => {
+      if (rT) clearTimeout(rT);
+      rT = setTimeout(() => load(), 400);
+    };
+    const connect = () => {
+      if (es && es.readyState !== 2) return; // already open/connecting
+      if (es) es.close();
+      const token = getToken();
+      if (!token || !navigator.onLine) return;
+      es = new EventSource(`${apiBase()}/api/events?token=${encodeURIComponent(token)}`);
+      es.addEventListener("hello", () => {
+        setSseLive(true);
+        debouncedLoad();
+      });
+      es.addEventListener("asset", debouncedLoad);
+      es.addEventListener("notif", () => loadNotifs());
+      es.onopen = () => setSseLive(true);
+      es.onerror = () => setSseLive(false); // EventSource retries; foreground/online forces a fresh one
+    };
+    const disconnect = () => {
+      if (es) es.close();
+      es = null;
+      setSseLive(false);
+    };
+    connect();
+    const onOnline = () => connect();
+    const onOffline = () => disconnect();
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        connect();
+        debouncedLoad(); // catch up after being backgrounded
+      }
+    };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      if (rT) clearTimeout(rT);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVis);
+      disconnect();
+    };
+  }, [user, load, loadNotifs]);
 
   // Connectivity: flush the outbox the moment we're back online.
   React.useEffect(() => {
@@ -176,11 +234,24 @@ export default function FieldApp() {
     };
   }, [doSync]);
 
+  // Coarse whole-asset lock — ONLY for stage transitions / install (a placement is per-toko,
+  // so a queued placement must not lock the whole asset or its sibling toko).
   const pendingByAsset = React.useMemo(() => {
     const m = new Map<string, CommitRecord>();
-    for (const c of outbox) if (!m.has(c.assetId)) m.set(c.assetId, c);
+    for (const c of outbox) if (c.kind !== "placement" && !m.has(c.assetId)) m.set(c.assetId, c);
     return m;
   }, [outbox]);
+  // Per-toko pending placements: assetId -> set of locationIds already queued (offline).
+  const pendingPlacements = React.useMemo(() => {
+    const m = new Map<string, Set<number>>();
+    for (const c of outbox) {
+      if (c.kind !== "placement" || c.locationId == null) continue;
+      if (!m.has(c.assetId)) m.set(c.assetId, new Set());
+      m.get(c.assetId)!.add(Number(c.locationId));
+    }
+    return m;
+  }, [outbox]);
+  const noPend = React.useMemo(() => new Set<number>(), []);
 
   const signIn = (u: AuthUser) => {
     setStack([{ t: "home" }]);
@@ -196,7 +267,7 @@ export default function FieldApp() {
   if (!user) return <FieldLogin onLogin={signIn} />;
 
   const detailAsset =
-    view.t === "detail" || view.t === "action" || view.t === "install" || view.t === "assign" ? assets.find(a => a.id === view.id) : undefined;
+    view.t === "detail" || view.t === "action" || view.t === "install" || view.t === "assign" || view.t === "placement" || view.t === "venue" ? assets.find(a => a.id === view.id) : undefined;
 
   const TABS: { t: "home" | "scan" | "sync" | "profile"; label: string; icon: React.ReactNode; badge?: number }[] = [
     { t: "home", label: "Tugas", icon: <HomeIcon className="h-5 w-5" /> },
@@ -212,7 +283,8 @@ export default function FieldApp() {
         <div className="flex items-center gap-3">
           <div className={`flex items-center gap-1.5 text-[11px] font-semibold ${online ? "text-emerald-400" : "text-amber-400"}`}>
             {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-            {online ? "Online" : "Offline"}
+            {online ? (sseLive ? "Live" : "Online") : "Offline"}
+            {online && sseLive && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />}
           </div>
           <button onClick={() => push({ t: "notif" })} aria-label="Notifikasi" className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-[#1e2b45] bg-[#0f1728] text-slate-300 active:scale-95">
             <Bell className="h-4.5 w-4.5" />
@@ -227,7 +299,7 @@ export default function FieldApp() {
 
       <main className="flex-1">
         {view.t === "home" && (
-          <Home assets={assets} user={user} loading={loading} pendingIds={new Set(pendingByAsset.keys())} onOpen={id => push({ t: "detail", id })} onRefresh={load} />
+          <Home assets={assets} user={user} loading={loading} pendingIds={new Set(pendingByAsset.keys())} pendingPlacements={pendingPlacements} onOpen={id => push({ t: "detail", id })} onRefresh={load} />
         )}
         {view.t === "scan" && <Scanner assets={assets} onOpen={id => push({ t: "detail", id })} />}
         {view.t === "sync" && (
@@ -248,10 +320,13 @@ export default function FieldApp() {
               user={user}
               activity={activity}
               pending={pendingByAsset.get(detailAsset.id)}
+              pendingLocs={pendingPlacements.get(detailAsset.id) || noPend}
               onBack={pop}
               onAction={target => push({ t: "action", id: detailAsset.id, target })}
               onInstallTask={() => push({ t: "install", id: detailAsset.id })}
               onAssign={() => push({ t: "assign", id: detailAsset.id })}
+              onPlacement={() => push({ t: "placement", id: detailAsset.id })}
+              onVenue={() => push({ t: "venue", id: detailAsset.id })}
               onOpenSync={() => goTab("sync")}
             />
           ) : (
@@ -300,6 +375,33 @@ export default function FieldApp() {
           ) : (
             <NotFound onBack={pop} />
           ))}
+        {view.t === "venue" &&
+          (detailAsset && canDeployVenue(detailAsset, user) ? (
+            <VenueTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Venue dipindahkan.", tone: "success" }); pop(); await load(); }} />
+          ) : (
+            <NotFound onBack={pop} />
+          ))}
+        {view.t === "placement" &&
+          (() => {
+            const pl = detailAsset ? pendingPlacements.get(detailAsset.id) || noPend : noPend;
+            const tasks = detailAsset ? myPlacementTasks(detailAsset, user.id).filter(t => !pl.has(t.locationId)) : [];
+            return detailAsset && tasks.length ? (
+              <PlacementTask
+                asset={detailAsset}
+                tasks={tasks}
+                user={user}
+                online={online}
+                onBack={pop}
+                onQueued={offline => {
+                  setToast({ msg: offline ? "Disimpan offline — terkirim saat online." : "Laporan diantre & dikirim…", tone: offline ? "info" : "success" });
+                  pop();
+                  doSync();
+                }}
+              />
+            ) : (
+              <NotFound onBack={pop} />
+            );
+          })()}
         {view.t === "notif" && <Notifications items={notifs} onBack={pop} onRead={markNotif} onReadAll={markAllNotifs} onOpen={id => { pop(); push({ t: "detail", id }); }} />}
       </main>
 

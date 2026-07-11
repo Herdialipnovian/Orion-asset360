@@ -26,6 +26,7 @@ import {
   X,
   QrCode,
   Briefcase,
+  Building2,
   User,
   SlidersHorizontal,
   Server,
@@ -52,6 +53,8 @@ import Login from "./components/Login";
 import UserManagement from "./components/UserManagement";
 import NotificationBell from "./components/NotificationBell";
 import AssetMaster from "./components/AssetMaster";
+import Organisasi from "./components/Organisasi";
+import ProjectsLocations from "./components/ProjectsLocations";
 import SystemSettings from "./components/SystemSettings";
 import { api, getToken, type AuthUser } from "./api";
 
@@ -136,6 +139,34 @@ export default function App() {
     if (user) refresh();
   }, [user, refresh]);
 
+  // Live updates (SSE): the server pushes on any data change, so the CMS reflects
+  // work done elsewhere (mobile merchandiser, another operator) without a manual
+  // refresh. Auto-reconnects; a fresh "hello" on (re)connect re-syncs missed changes.
+  const [live, setLive] = React.useState(false);
+  React.useEffect(() => {
+    if (!user) return;
+    const token = getToken();
+    if (!token) return;
+    const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const debouncedRefresh = () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => refresh(), 300); // coalesce bursts into one refetch
+    };
+    es.addEventListener("hello", () => {
+      setLive(true);
+      debouncedRefresh(); // catch up on anything missed while disconnected
+    });
+    es.addEventListener("asset", debouncedRefresh);
+    es.addEventListener("notif", () => window.dispatchEvent(new CustomEvent("asset360:notif")));
+    es.onerror = () => setLive(false); // EventSource retries on its own
+    return () => {
+      if (t) clearTimeout(t);
+      es.close();
+      setLive(false);
+    };
+  }, [user, refresh]);
+
   // Reset demo data (Admin only; server-side re-seed).
   const restoreDefaults = async () => {
     try {
@@ -209,6 +240,58 @@ export default function App() {
     } catch (e: any) {
       return { ok: false, error: e?.message || "Gagal menugaskan pemasangan." };
     }
+  };
+
+  // Fase 1 Internal: serah-terima aset Origin ke Karyawan (custodian). Moves the asset to Fase 6.
+  const handleHandoverInternal = async (
+    assetId: string,
+    p: { custodianId: number; handoverDate?: string; signatureBase64?: string; note?: string; projectId?: number | null }
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      await api.handoverInternal(assetId, p);
+      await refresh();
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || "Gagal serah-terima internal." };
+    }
+  };
+
+  // Fase 2 Event: setup / relocate an asset at a venue leg (roadshow).
+  const handleDeployVenue = async (
+    assetId: string,
+    p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null }
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      await api.deployVenue(assetId, p);
+      await refresh();
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || "Gagal setup venue." };
+    }
+  };
+
+  // Fase 3 Distribusi: fan-out placements / report a toko placement / sampling audit.
+  const handleDistribute = async (
+    assetId: string,
+    placements: { locationId: number; merchandiserId?: number; qty: number }[],
+    projectId?: number | null
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try { await api.distribute(assetId, { placements, projectId }); await refresh(); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal distribusi." }; }
+  };
+  const handlePlaceToko = async (
+    assetId: string,
+    p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try { await api.placeAtToko(assetId, p); await refresh(); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal input pemasangan toko." }; }
+  };
+  const handleAuditSample = async (
+    assetId: string,
+    samples: { locationId: number; compliant: boolean }[]
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try { await api.auditSample(assetId, samples); await refresh(); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal audit sampling." }; }
   };
 
   // Navigates straight to a tab while selecting a stage filter where applicable
@@ -410,7 +493,21 @@ export default function App() {
                   <User className="h-4 w-4 text-slate-500" />
                   <span>User Management</span>
                 </button>
-                <button 
+                <button
+                  onClick={() => { setCurrentTab("organisasi"); setIsMobileSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-2.5 px-3.5 py-2 rounded-md transition text-left ${currentTab === "organisasi" ? "text-white bg-slate-800/70" : "hover:text-white hover:bg-slate-800/25"}`}
+                >
+                  <Building2 className="h-4 w-4 text-slate-500" />
+                  <span>Organisasi</span>
+                </button>
+                <button
+                  onClick={() => { setCurrentTab("proyek"); setIsMobileSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-2.5 px-3.5 py-2 rounded-md transition text-left ${currentTab === "proyek" ? "text-white bg-slate-800/70" : "hover:text-white hover:bg-slate-800/25"}`}
+                >
+                  <Briefcase className="h-4 w-4 text-slate-500" />
+                  <span>Proyek &amp; Lokasi</span>
+                </button>
+                <button
                   onClick={() => { setCurrentTab("settings"); setIsMobileSidebarOpen(false); }}
                   className={`w-full flex items-center gap-2.5 px-3.5 py-2 rounded-md transition text-left ${currentTab === "settings" ? "text-white bg-slate-800/70" : "hover:text-white hover:bg-slate-800/25"}`}
                 >
@@ -606,6 +703,13 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            <span
+              title={live ? "Live — perubahan muncul otomatis" : "Terputus dari server — coba muat ulang"}
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold"
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${live ? "bg-emerald-500 animate-pulse" : "bg-slate-300"}`} />
+              <span className={live ? "text-emerald-600" : "text-slate-400"}>{live ? "LIVE" : "OFFLINE"}</span>
+            </span>
             <NotificationBell />
             {/* Logged-in user chip */}
             <div className="flex items-center gap-2 pr-1">
@@ -683,6 +787,11 @@ export default function App() {
                   onUpdateAssetStage={handleUpdateAssetStage}
                   onShipAsset={handleShipAsset}
                   onAssignInstall={handleAssignInstall}
+                  onHandoverInternal={handleHandoverInternal}
+                  onDeployVenue={handleDeployVenue}
+                  onDistribute={handleDistribute}
+                  onPlaceToko={handlePlaceToko}
+                  onAuditSample={handleAuditSample}
                   initialStageFilter={initialStageFilter}
                 />
               </motion.div>
@@ -721,6 +830,30 @@ export default function App() {
                 transition={{ duration: 0.2 }}
               >
                 <AssetMaster assets={assets} categoryOptions={categoryNames} clientOptions={clientNames} user={user} onChanged={refresh} />
+              </motion.div>
+            )}
+
+            {currentTab === "organisasi" && (
+              <motion.div
+                key="organisasi-tab"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Organisasi user={user} />
+              </motion.div>
+            )}
+
+            {currentTab === "proyek" && (
+              <motion.div
+                key="proyek-tab"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
+                <ProjectsLocations user={user} />
               </motion.div>
             )}
 

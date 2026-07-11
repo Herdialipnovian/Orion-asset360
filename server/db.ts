@@ -58,6 +58,9 @@ export function rowToAsset(r: any): Asset {
     serialNumber: r.serial_number ?? undefined,
     fisik: r.fisik ?? undefined,
     tglBeli: r.tgl_beli ?? undefined,
+    owner: r.owner ?? "Origin",
+    usageType: r.usage_type ?? "Reusable",
+    projectId: r.project_id ?? null,
     stageDetails: r.stage_details
   };
 }
@@ -119,13 +122,14 @@ export async function insertAsset(a: Asset, exec: Exec = q): Promise<void> {
     `insert into assets
        (id, name, category, client, project_code, quantity, current_stage, current_location,
         qrcode, audit_score, maintenance_status, warna, asset_type, serial_number, fisik, tgl_beli,
-        specs, financials, stage_details, created_at, updated_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20,$21)
+        owner, usage_type, project_id, specs, financials, stage_details, created_at, updated_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21::jsonb,$22::jsonb,$23,$24)
      on conflict (id) do nothing`,
     [
       a.id, a.name, a.category, a.client, a.projectCode, a.quantity, a.currentStage, a.currentLocation,
       a.qrcode, a.auditScore ?? null, a.maintenanceStatus ?? null,
       a.warna ?? null, a.type ?? null, a.serialNumber ?? null, a.fisik ?? null, a.tglBeli ?? null,
+      a.owner ?? "Origin", a.usageType ?? "Reusable", a.projectId ?? null,
       JSON.stringify(a.specs || {}), JSON.stringify(a.financials || {}), JSON.stringify(a.stageDetails || {}),
       a.createdAt, a.updatedAt
     ]
@@ -138,11 +142,12 @@ export async function updateAssetCore(id: string, a: Asset): Promise<void> {
     `update assets set
        name=$2, category=$3, client=$4, quantity=$5,
        warna=$6, asset_type=$7, serial_number=$8, fisik=$9, tgl_beli=$10,
-       specs=$11::jsonb, financials=$12::jsonb, updated_at=now()
+       owner=$11, usage_type=$12, specs=$13::jsonb, financials=$14::jsonb, updated_at=now()
      where id=$1`,
     [
       id, a.name, a.category, a.client, a.quantity,
       a.warna ?? null, a.type ?? null, a.serialNumber ?? null, a.fisik ?? null, a.tglBeli ?? null,
+      a.owner ?? "Origin", a.usageType ?? "Reusable",
       JSON.stringify(a.specs || {}), JSON.stringify(a.financials || {})
     ]
   );
@@ -150,6 +155,11 @@ export async function updateAssetCore(id: string, a: Asset): Promise<void> {
 
 export async function deleteAsset(id: string): Promise<void> {
   await q(`delete from assets where id=$1`, [id]);
+}
+
+// Assign (or clear) an asset's current deployment project.
+export async function setAssetProject(id: string, projectId: number | null, exec: Exec = q): Promise<void> {
+  await exec(`update assets set project_id=$2, updated_at=now() where id=$1`, [id, projectId]);
 }
 
 export async function updateAssetStageRow(

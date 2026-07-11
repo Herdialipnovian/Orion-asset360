@@ -8,6 +8,7 @@
  * transition/completion that triggered it (callers wrap in try/catch).
  */
 import { q } from "./db";
+import { broadcastUser } from "./sse";
 
 export interface NotifRow {
   id: number;
@@ -38,6 +39,8 @@ export async function insertNotification(n: { userId: number; type: string; titl
     `insert into notifications (user_id, type, title, body, asset_id) values ($1,$2,$3,$4,$5)`,
     [n.userId, n.type, n.title, n.body ?? null, n.assetId ?? null]
   );
+  // Push to the recipient's live streams so their bell updates instantly.
+  broadcastUser(n.userId, "notif", { at: new Date().toISOString() });
 }
 
 export async function listNotifications(userId: number, limit = 30): Promise<NotifRow[]> {

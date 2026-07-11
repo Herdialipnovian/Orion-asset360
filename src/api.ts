@@ -18,6 +18,7 @@ export interface AuthUser {
   name: string;
   role: string;
   client?: string | null;
+  area?: string | null;
 }
 
 export interface UserRow {
@@ -26,7 +27,54 @@ export interface UserRow {
   name: string;
   role: string;
   client?: string | null;
+  area?: string | null;
   created_at: string;
+}
+
+export interface Employee {
+  id: number;
+  code: string | null;
+  name: string;
+  department: string | null;
+  position: string | null;
+  active: boolean;
+}
+
+export type DeploymentType = "Internal" | "Event" | "Distribusi";
+export interface Client {
+  id: number;
+  name: string;
+  deploymentTypes: DeploymentType[];
+  hasStoreList: boolean;
+}
+
+export type ProjectMode = "Internal" | "Event" | "Distribusi";
+export interface Project {
+  id: number;
+  name: string;
+  client: string | null;
+  mode: ProjectMode;
+  status: "active" | "done";
+  area: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  notes?: string | null;
+  assetCount?: number;
+}
+export type LocationType = "Venue" | "Toko" | "Internal";
+export interface Loc {
+  id: number;
+  name: string;
+  type: LocationType;
+  client: string | null;
+  area: string | null;
+  address: string | null;
+  gpsLat: number | null;
+  gpsLng: number | null;
+  pic: string | null;
+  code: string | null;
+  source: "list" | "field";
+  active: boolean;
 }
 
 export interface NotifItem {
@@ -44,6 +92,23 @@ export interface MasterItem {
   name: string;
 }
 export type MasterKind = "categories" | "clients";
+
+export interface EvidenceView {
+  id: string;
+  assetId: string;
+  stage: number | null;
+  slot: string | null;
+  gps: { lat: number; lng: number } | null;
+  capturedAt: string | null;
+  operator: string | null;
+  createdAt: string;
+  url: string;
+  thumbUrl: string;
+}
+// Token-bearing evidence URL for <img> (image requests can't send an Authorization header).
+export function evidenceThumb(id: string): string {
+  return `/api/evidence/${encodeURIComponent(id)}/thumb?token=${encodeURIComponent(getToken() || "")}`;
+}
 
 async function req(path: string, opts: RequestInit = {}): Promise<any> {
   const token = getToken();
@@ -110,11 +175,104 @@ export const api = {
   getUsers(): Promise<UserRow[]> {
     return req("/users");
   },
-  createUser(p: { username: string; name: string; role: string; password: string; client?: string }): Promise<UserRow> {
+  createUser(p: { username: string; name: string; role: string; password: string; client?: string; area?: string }): Promise<UserRow> {
     return req("/users", { method: "POST", body: JSON.stringify(p) });
   },
-  updateUser(id: number, p: { name?: string; role?: string; password?: string; client?: string }): Promise<UserRow> {
+  updateUser(id: number, p: { name?: string; role?: string; password?: string; client?: string; area?: string }): Promise<UserRow> {
     return req(`/users/${id}`, { method: "PATCH", body: JSON.stringify(p) });
+  },
+  // Areas master (geographic zones for user scoping / distribution).
+  getAreas(): Promise<MasterItem[]> {
+    return req("/areas");
+  },
+  createArea(name: string): Promise<MasterItem> {
+    return req("/areas", { method: "POST", body: JSON.stringify({ name }) });
+  },
+  updateArea(id: number, name: string): Promise<MasterItem> {
+    return req(`/areas/${id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+  },
+  deleteArea(id: number): Promise<{ ok: boolean; id: number }> {
+    return req(`/areas/${id}`, { method: "DELETE" });
+  },
+  // Employees / Karyawan master (internal-asset custodians).
+  getEmployees(): Promise<Employee[]> {
+    return req("/employees");
+  },
+  createEmployee(p: { code?: string; name: string; department?: string; position?: string }): Promise<Employee> {
+    return req("/employees", { method: "POST", body: JSON.stringify(p) });
+  },
+  updateEmployee(id: number, p: { code?: string; name?: string; department?: string; position?: string; active?: boolean }): Promise<Employee> {
+    return req(`/employees/${id}`, { method: "PATCH", body: JSON.stringify(p) });
+  },
+  deleteEmployee(id: number): Promise<{ ok: boolean; id: number }> {
+    return req(`/employees/${id}`, { method: "DELETE" });
+  },
+  // Clients (rich): name + deployment-type tags + store-list flag.
+  getClients(): Promise<Client[]> {
+    return req("/clients");
+  },
+  createClient(p: { name: string; deploymentTypes?: DeploymentType[]; hasStoreList?: boolean }): Promise<Client> {
+    return req("/clients", { method: "POST", body: JSON.stringify(p) });
+  },
+  updateClient(id: number, p: { name?: string; deploymentTypes?: DeploymentType[]; hasStoreList?: boolean }): Promise<Client> {
+    return req(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(p) });
+  },
+  deleteClient(id: number): Promise<{ ok: boolean; id: number }> {
+    return req(`/clients/${id}`, { method: "DELETE" });
+  },
+  // Projects (Proyek/Campaign) — deployment container + mode.
+  getProjects(filter?: { client?: string; mode?: ProjectMode }): Promise<Project[]> {
+    const qs = new URLSearchParams(filter as any).toString();
+    return req(`/projects${qs ? "?" + qs : ""}`);
+  },
+  createProject(p: Partial<Project> & { name: string }): Promise<Project> {
+    return req("/projects", { method: "POST", body: JSON.stringify(p) });
+  },
+  updateProject(id: number, p: Partial<Project>): Promise<Project> {
+    return req(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(p) });
+  },
+  deleteProject(id: number): Promise<{ ok: boolean; id: number }> {
+    return req(`/projects/${id}`, { method: "DELETE" });
+  },
+  // Locations (Venue / Toko / Internal target).
+  getLocations(filter?: { client?: string; type?: LocationType; area?: string }): Promise<Loc[]> {
+    const qs = new URLSearchParams(filter as any).toString();
+    return req(`/locations${qs ? "?" + qs : ""}`);
+  },
+  createLocation(p: Partial<Loc> & { name: string }): Promise<Loc> {
+    return req("/locations", { method: "POST", body: JSON.stringify(p) });
+  },
+  updateLocation(id: number, p: Partial<Loc>): Promise<Loc> {
+    return req(`/locations/${id}`, { method: "PATCH", body: JSON.stringify(p) });
+  },
+  deleteLocation(id: number): Promise<{ ok: boolean; id: number }> {
+    return req(`/locations/${id}`, { method: "DELETE" });
+  },
+  // Assign / clear an asset's current deployment project.
+  setAssetProject(id: string, projectId: number | null): Promise<{ ok: boolean; id: string; projectId: number | null }> {
+    return req(`/assets/${encodeURIComponent(id)}/project`, { method: "POST", body: JSON.stringify({ projectId }) });
+  },
+  // Fase 1 Internal: serah-terima aset Origin ke Karyawan (custodian) — moves asset to Fase 6.
+  handoverInternal(id: string, p: { custodianId: number; handoverDate?: string; signatureBase64?: string; note?: string; projectId?: number | null }): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(id)}/handover`, { method: "POST", body: JSON.stringify(p) });
+  },
+  // Fase 2 Event: setup asset at a venue leg (call again to relocate to the next venue).
+  deployVenue(id: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null }): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(id)}/deploy-venue`, { method: "POST", body: JSON.stringify(p) });
+  },
+  // Fase 3 Distribusi: fan-out placement per toko / report a placement / sampling audit.
+  distribute(id: string, p: { placements: { locationId: number; merchandiserId?: number; qty: number }[]; projectId?: number | null }): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(id)}/distribute`, { method: "POST", body: JSON.stringify(p) });
+  },
+  placeAtToko(id: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }): Promise<{ asset: Asset; installedQty: number; fullyInstalled: boolean }> {
+    return req(`/assets/${encodeURIComponent(id)}/place`, { method: "POST", body: JSON.stringify(p) });
+  },
+  auditSample(id: string, samples: { locationId: number; compliant: boolean }[]): Promise<{ asset: Asset; coverage: any }> {
+    return req(`/assets/${encodeURIComponent(id)}/audit-sample`, { method: "POST", body: JSON.stringify({ samples }) });
+  },
+  // Evidence for one asset (client report photos).
+  async getEvidence(assetId: string): Promise<EvidenceView[]> {
+    return (await req(`/assets/${encodeURIComponent(assetId)}/evidence`)).evidence;
   },
   // Directory of PIC / Merchandiser for a client (dropdown sources).
   usersDirectory(role: "PIC" | "Merchandiser", client?: string): Promise<{ id: number; name: string; client: string | null }[]> {

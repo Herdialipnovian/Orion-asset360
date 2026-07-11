@@ -36,10 +36,14 @@ export interface CommitRecord {
   lastError?: string;
   createdAt: string;
   // Discriminator: absent/"transition" = stage move; "install" = a Fase-6 install
-  // progress report (no transition — bumps the merchandiser's doneQty).
-  kind?: "transition" | "install";
-  doneQty?: number; // install: units reported this commit
-  signature?: string; // install: optional BAST TTD
+  // progress report; "placement" = a Fase-3 distribusi drop at an assigned toko.
+  kind?: "transition" | "install" | "placement";
+  doneQty?: number; // install/placement: units reported this commit
+  signature?: string; // install/placement: optional BAST TTD (-> signatureBase64)
+  locationId?: number; // placement: the assigned toko/location id
+  gpsLat?: number; // placement: drop coordinates (best-effort)
+  gpsLng?: number; // placement: drop coordinates
+  note?: string; // placement: optional free-text note
 }
 
 class OutboxDB extends Dexie {
@@ -101,6 +105,12 @@ export async function syncAll({ force = false }: { force?: boolean } = {}): Prom
         // 2) commit: install progress report OR stage transition (idempotent per commit id)
         if (c.kind === "install") {
           await fieldApi.completeInstall(c.assetId, { doneQty: c.doneQty, signatureBase64: c.signature }, `${c.id}:ic`);
+        } else if (c.kind === "placement") {
+          await fieldApi.placeAtToko(
+            c.assetId,
+            { locationId: c.locationId!, doneQty: c.doneQty, gpsLat: c.gpsLat, gpsLng: c.gpsLng, signatureBase64: c.signature, note: c.note },
+            `${c.id}:pl`
+          );
         } else {
           await fieldApi.transition(
             c.assetId,

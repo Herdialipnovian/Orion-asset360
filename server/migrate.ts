@@ -321,6 +321,14 @@ export async function migrate({ seedAssets = true }: { seedAssets?: boolean } = 
     await q(`insert into settings (key, value) values ('phase0_asset_backfill','done') on conflict (key) do nothing`);
   }
 
+  // One-time: Fase 1 (Request/WO) & 2 (Produksi) removed from the flow — assets are added directly
+  // in Master Data (born in Gudang/Fase 3). Bump any existing/seeded asset out of 1/2 into Gudang.
+  const { rows: nrp } = await q(`select 1 from settings where key='flow_no_request_prod'`);
+  if (!nrp.length) {
+    await q(`update assets set current_stage=3, current_location='Gudang Utama Origin' where current_stage in (1,2)`);
+    await q(`insert into settings (key, value) values ('flow_no_request_prod','done') on conflict (key) do nothing`);
+  }
+
   // One-time: seed example client deployment-type tags (a client may run several patterns).
   const { rows: p0c } = await q(`select 1 from settings where key='phase0_client_backfill'`);
   if (!p0c.length) {

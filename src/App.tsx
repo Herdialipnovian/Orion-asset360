@@ -59,9 +59,8 @@ import SystemSettings from "./components/SystemSettings";
 import { api, getToken, type AuthUser } from "./api";
 
 // All 10 lifecycle phases shown in the sidebar (main menu) — mirrors the STEP/FASE filter.
+// Fase 1 (Request/WO) & 2 (Produksi) removed — assets are added in Master Data (born in Gudang/Fase 3).
 const PHASE_NAV: { stage: number; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
-  { stage: 1, label: "Request & WO", Icon: ClipboardList },
-  { stage: 2, label: "Produksi", Icon: Settings },
   { stage: 3, label: "Inventory & Gudang", Icon: Home },
   { stage: 4, label: "Pengiriman", Icon: Truck },
   { stage: 5, label: "Transit / Kiriman", Icon: Compass },

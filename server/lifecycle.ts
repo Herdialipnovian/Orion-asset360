@@ -43,9 +43,9 @@ export const DEFAULT_LOG: { [k: number]: string } = {
 
 // Legal lifecycle transitions, keyed by the asset's CURRENT stage -> allowed next stages.
 // Mirrors the CMS graph; enforced server-side so no client can jump an illegal step.
+// Fase 1 (Request/WO) & 2 (Produksi) removed from the flow — assets are born in Gudang (Fase 3)
+// via Master Data, so 3 is the start state (only re-entered from 9→3 retrieval).
 export const TRANSITIONS: { [k: number]: number[] } = {
-  1: [2],
-  2: [3],
   3: [4],
   4: [5],
   5: [6],

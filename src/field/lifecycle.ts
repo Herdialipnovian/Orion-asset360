@@ -113,7 +113,7 @@ export const TRANSITION_VERB: { [k: number]: string } = {
 
 // Legal transitions, keyed by CURRENT stage (mirror of server TRANSITIONS).
 export const TRANSITIONS: { [k: number]: number[] } = {
-  1: [2], 2: [3], 3: [4], 4: [5], 5: [6], 6: [7, 8, 9], 7: [6, 8, 9], 8: [6, 9], 9: [3, 6, 10], 10: []
+  3: [4], 4: [5], 5: [6], 6: [7, 8, 9], 7: [6, 8, 9], 8: [6, 9], 9: [3, 6, 10], 10: []
 };
 
 // Which role may move an asset INTO a stage (mirror of server STAGE_ROLE). [] = Admin only.

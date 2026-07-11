@@ -288,6 +288,8 @@ app.post(
     }
     if (a.category) await q(`insert into categories (name) values ($1) on conflict (name) do nothing`, [a.category]);
     await q(`insert into clients (name) values ($1) on conflict (name) do nothing`, [a.client]);
+    // Fase 1 (Request) & 2 (Produksi) removed — assets are born in Gudang (Fase 3) at the earliest.
+    if (!a.currentStage || a.currentStage < 3) a.currentStage = 3;
     a.id = await genAssetId(a.client);
     a.qrcode = `ASETIFY-${a.id}`;
     a.createdAt = a.createdAt || new Date().toISOString();

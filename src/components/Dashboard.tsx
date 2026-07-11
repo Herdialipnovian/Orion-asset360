@@ -43,8 +43,7 @@ interface DashboardProps {
 
 // Per-stage presentation metadata (label / donut hex / bar class / icon)
 const STAGE_META: { [k: number]: { label: string; hex: string; bar: string; icon: any } } = {
-  1: { label: "Request", hex: "#2563eb", bar: "bg-blue-500", icon: ClipboardList },
-  2: { label: "Produksi", hex: "#0d9488", bar: "bg-teal-500", icon: Settings },
+  // Fase 1 (Request) & 2 (Produksi) removed from the flow — assets start in Gudang (Fase 3).
   3: { label: "Gudang", hex: "#16a34a", bar: "bg-green-500", icon: Home },
   4: { label: "Kirim", hex: "#ea580c", bar: "bg-orange-500", icon: Truck },
   5: { label: "Transit", hex: "#d97706", bar: "bg-amber-500", icon: MapPin },
@@ -155,8 +154,7 @@ export default function Dashboard({
 
     // Per-stage distribution for the bar chart
     const maxStageUnit = Math.max(1, ...Object.values(uByStage));
-    const stages = Array.from({ length: 10 }).map((_, i) => {
-      const s = i + 1;
+    const stages = [3, 4, 5, 6, 7, 8, 9, 10].map(s => {
       return { stage: s, ...STAGE_META[s], units: uByStage[s], recs: byStage[s].length, h: Math.round((uByStage[s] / maxStageUnit) * 100) };
     });
 
@@ -582,7 +580,7 @@ export default function Dashboard({
                 </div>
               ) : (
                 m.logs.slice(0, 8).map(log => {
-                  const meta = STAGE_META[log.stage] || STAGE_META[1];
+                  const meta = STAGE_META[log.stage] || { label: `Fase ${log.stage}`, hex: "#94a3b8", bar: "bg-slate-400", icon: ClipboardList };
                   const Icon = meta.icon;
                   const tone =
                     log.type === "success"

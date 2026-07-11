@@ -53,7 +53,7 @@ const DOC_CODE: { [k: number]: string } = {
 };
 
 export default function OperationsDocs({ assets, settings }: OperationsDocsProps) {
-  const [selectedStep, setSelectedStep] = React.useState<number>(1);
+  const [selectedStep, setSelectedStep] = React.useState<number>(3); // Fase 1 & 2 removed from flow
   const [selectedAssetId, setSelectedAssetId] = React.useState<string>("");
 
   // POD signature pad (step 5)
@@ -149,7 +149,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
           <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-100 space-y-3">
             <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-2">Pilih Dokumen / Langkah</h4>
             <div className="flex flex-col gap-1.5 max-h-[420px] overflow-y-auto custom-scrollbar pr-1">
-              {ALL_STEPS_FLOW.map(fStep => {
+              {ALL_STEPS_FLOW.filter(fStep => fStep.step >= 3).map(fStep => {
                 const isActive = fStep.step === selectedStep;
                 const reached = !!activeAssetObj && activeAssetObj.currentStage >= fStep.step;
                 return (

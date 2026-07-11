@@ -63,8 +63,8 @@ export default function ReportDistribusi({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-3 sm:p-6">
-      <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl border border-slate-100 my-2">
+    <div className="report-print-host fixed inset-0 z-[70] bg-slate-900/70 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-3 sm:p-6">
+      <div className="report-print-card bg-white rounded-2xl w-full max-w-4xl shadow-2xl border border-slate-100 my-2">
         <div className="no-print bg-slate-900 text-white px-5 py-3 flex items-center justify-between rounded-t-2xl">
           <div>
             <h3 className="font-bold text-sm">Laporan Distribusi — Klien</h3>

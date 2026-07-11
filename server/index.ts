@@ -1224,9 +1224,16 @@ app.post("/api/assets/:id/handover", requireAuth, requireRole("Admin", "Logistik
 // to the next venue (closes the active leg, opens a new one) — builds the roadshow timeline on
 // one asset. Admin + Logistik + PIC. First call jumps 3–5→6; later calls stay Fase 6. ──
 app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logistik", "PIC"), wrap(async (req: AuthedReq, res) => {
-  const asset = await getAsset(req.params.id);
-  if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
-  if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Setup/relokasi venue hanya dari Fase 3–6." });
+  const id = req.params.id;
+  const pre = await getAsset(id);
+  if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  if (pre.currentStage < 3 || pre.currentStage > 6) return res.status(422).json({ error: "Setup/relokasi venue hanya dari Fase 3–6." });
+  // Client-scoped roles can only touch their own client's asset (mirrors /place).
+  if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
+  // Mode invariant: don't corrupt a Distribusi asset into a hybrid.
+  const preDep: any = (pre.stageDetails as any)?.deployment || {};
+  if (preDep.mode && preDep.mode !== "Event") return res.status(422).json({ error: "Aset bukan mode Event." });
+  if (Array.isArray(preDep.placements) && preDep.placements.length) return res.status(422).json({ error: "Aset sudah mode Distribusi (ada placement)." });
   const b = req.body || {};
   const locId = Number(b.locationId);
   if (!locId) return res.status(400).json({ error: "Venue wajib dipilih." });
@@ -1234,35 +1241,42 @@ app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logi
   if (!lr[0]) return res.status(400).json({ error: "Venue tidak ditemukan." });
   const loc = lr[0];
   const now = new Date().toISOString().slice(0, 10);
-  const dep: any = { ...((asset.stageDetails as any).deployment || {}) };
-  const legs: any[] = Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : [];
-  // Relocate: close the currently-active leg before opening the next.
-  for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
-  const seq = legs.reduce((m, l) => Math.max(m, l.seq || 0), 0) + 1;
-  legs.push({ locationId: loc.id, venue: loc.name, area: loc.area || undefined, pic: b.pic ? String(b.pic).trim() : undefined, seq, status: "active", setupDate: b.setupDate || now, signature: b.signatureBase64 || undefined, note: b.note ? String(b.note).trim() : undefined });
-  dep.legs = legs; dep.currentLegSeq = seq; dep.mode = "Event";
-  let projectId: number | null = null;
+  let projectId: number | null = null, projectName: string | null = null;
   if (b.projectId != null) {
     const { rows: pr } = await q(`select id, name from projects where id=$1`, [Number(b.projectId)]);
-    if (pr[0]) { projectId = pr[0].id; dep.projectId = pr[0].id; dep.projectName = pr[0].name; }
+    if (pr[0]) { projectId = pr[0].id; projectName = pr[0].name; }
   }
-  const stageDetails = { ...asset.stageDetails, deployment: dep };
-  const location = `Venue: ${loc.name}${loc.area ? ` (${loc.area})` : ""}`;
-  await updateAssetStageRow(asset.id, { currentStage: 6, currentLocation: location, stageDetails });
-  if (projectId != null) await setAssetProject(asset.id, projectId);
-  const isRelocate = seq > 1;
+  // Row-lock so concurrent relocations can't drop a leg / collide on seq.
+  const result = await tx(async c => {
+    const { rows } = await c.query(`select stage_details from assets where id=$1 for update`, [id]);
+    if (!rows.length) return { http: 404, body: { error: "Aset tidak ditemukan." } };
+    const sd: any = rows[0].stage_details || {};
+    const dep: any = { ...(sd.deployment || {}) };
+    const legs: any[] = Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : [];
+    for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
+    const seq = legs.reduce((m, l) => Math.max(m, l.seq || 0), 0) + 1;
+    legs.push({ locationId: loc.id, venue: loc.name, area: loc.area || undefined, pic: b.pic ? String(b.pic).trim() : undefined, seq, status: "active", setupDate: b.setupDate || now, signature: b.signatureBase64 || undefined, note: b.note ? String(b.note).trim() : undefined });
+    dep.legs = legs; dep.currentLegSeq = seq; dep.mode = "Event";
+    if (projectId != null) { dep.projectId = projectId; dep.projectName = projectName ?? undefined; }
+    const details = { ...sd, deployment: dep };
+    await c.query(`update assets set current_stage=6, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [id, `Venue: ${loc.name}${loc.area ? ` (${loc.area})` : ""}`, JSON.stringify(details)]);
+    return { ok: true, seq, venue: loc.name };
+  });
+  if ((result as any).http) return res.status((result as any).http).json((result as any).body);
+  const r = result as any;
+  if (projectId != null) await setAssetProject(id, projectId);
   await insertLog({
     id: `LOG-VENUE-${Date.now()}`,
     timestamp: new Date().toISOString(),
-    assetId: asset.id,
-    assetName: asset.name,
+    assetId: id,
+    assetName: pre.name,
     stage: 6,
-    action: isRelocate ? `Relokasi ke venue ${loc.name} (leg ${seq})` : `Setup di venue ${loc.name}`,
+    action: r.seq > 1 ? `Relokasi ke venue ${r.venue} (leg ${r.seq})` : `Setup di venue ${r.venue}`,
     operator: req.user!.name,
     type: "success"
   });
-  assetChanged(asset.id);
-  res.json({ asset: await getAsset(asset.id) });
+  assetChanged(id);
+  res.json({ asset: await getAsset(id) });
 }));
 
 // ── Fase 3 Distribusi helpers + endpoints: fan-out placement per toko, per-toko reporting, sampling audit. ──
@@ -1283,6 +1297,11 @@ app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logist
   const asset = await getAsset(req.params.id);
   if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
   if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Distribusi hanya dari Fase 3–6." });
+  // Client-scope (mirrors /place) + mode invariant (don't corrupt an Event asset into a hybrid).
+  if (req.user!.role === "PIC" && (req.user!.client || null) !== (asset.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
+  const curDep: any = (asset.stageDetails as any)?.deployment || {};
+  if (curDep.mode && curDep.mode !== "Distribusi") return res.status(422).json({ error: "Aset bukan mode Distribusi." });
+  if (Array.isArray(curDep.legs) && curDep.legs.length) return res.status(422).json({ error: "Aset sudah mode Event (ada venue leg)." });
   const rows: any[] = Array.isArray(req.body?.placements) ? req.body.placements : [];
   if (!rows.length) return res.status(400).json({ error: "Minimal 1 toko." });
   // resolve toko + merchandiser names

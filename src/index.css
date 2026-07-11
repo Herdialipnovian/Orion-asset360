@@ -60,6 +60,24 @@ html {
     border-radius: 0 !important;
     overflow: visible !important;
   }
+  /* Report modal host: neutralize the fixed/overflow/backdrop wrapper so the absolute
+     #printable-doc inside it isn't clipped to a single page (paginate over the page area). */
+  .report-print-host {
+    position: static !important;
+    inset: auto !important;
+    overflow: visible !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  .report-print-card {
+    max-width: none !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
   .no-print {
     display: none !important;
   }

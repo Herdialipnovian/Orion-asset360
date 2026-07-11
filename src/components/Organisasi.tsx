@@ -83,20 +83,21 @@ function ClientCard({ clients, onChange, onErr }: { clients: Client[]; onChange:
   const [form, setForm] = React.useState(emptyClient());
   const [busy, setBusy] = React.useState(false);
   const [confirmDel, setConfirmDel] = React.useState<Client | null>(null);
+  const [merr, setMerr] = React.useState<string | null>(null); // error shown INSIDE the modal
 
-  const openNew = () => { setForm(emptyClient()); setEditing("new"); };
-  const openEdit = (c: Client) => { setForm({ name: c.name, deploymentTypes: [...c.deploymentTypes], hasStoreList: c.hasStoreList }); setEditing(c); };
+  const openNew = () => { setForm(emptyClient()); setMerr(null); setEditing("new"); };
+  const openEdit = (c: Client) => { setForm({ name: c.name, deploymentTypes: [...c.deploymentTypes], hasStoreList: c.hasStoreList }); setMerr(null); setEditing(c); };
   const toggleType = (t: DeploymentType) =>
     setForm(f => ({ ...f, deploymentTypes: f.deploymentTypes.includes(t) ? f.deploymentTypes.filter(x => x !== t) : [...f.deploymentTypes, t] }));
   const save = async () => {
-    if (!form.name.trim() || busy) { if (!form.name.trim()) onErr("Nama client wajib diisi."); return; }
-    setBusy(true);
+    if (!form.name.trim() || busy) { if (!form.name.trim()) setMerr("Nama client wajib diisi."); return; }
+    setBusy(true); setMerr(null);
     const payload = { name: form.name.trim(), deploymentTypes: form.deploymentTypes, hasStoreList: form.hasStoreList };
     try {
       if (editing === "new") await api.createClient(payload);
       else if (editing) await api.updateClient(editing.id, payload);
       setEditing(null); onChange();
-    } catch (e: any) { onErr(e?.message || "Gagal simpan client."); } finally { setBusy(false); }
+    } catch (e: any) { setMerr(e?.message || "Gagal simpan client."); } finally { setBusy(false); }
   };
   const del = async (c: Client) => { try { await api.deleteClient(c.id); setConfirmDel(null); onChange(); } catch (er: any) { onErr(er?.message || "Gagal hapus."); } };
 
@@ -180,6 +181,7 @@ function ClientCard({ clients, onChange, onErr }: { clients: Client[]; onChange:
                 <span className="font-bold text-slate-700">Punya list toko</span>
                 <span className="text-[10px] text-slate-400">(relevan untuk Distribusi — titik/toko sudah terdaftar)</span>
               </label>
+              {merr && <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5"><AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {merr}</div>}
               <div className="pt-2 border-t border-slate-100 flex justify-end gap-3">
                 <button onClick={() => setEditing(null)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg">Batal</button>
                 <button onClick={save} disabled={busy} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg flex items-center gap-1.5">{busy && <Loader2 className="h-4 w-4 animate-spin" />}Simpan</button>
@@ -211,19 +213,21 @@ function AreaCard({ areas, onChange, onErr }: { areas: MasterItem[]; onChange: (
   const [editId, setEditId] = React.useState<number | null>(null);
   const [editVal, setEditVal] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const [aerr, setAerr] = React.useState<string | null>(null); // LOCAL error shown right at the card
 
   const add = async () => {
     const name = adding.trim();
     if (!name || busy) return;
-    setBusy(true);
-    try { await api.createArea(name); setAdding(""); onChange(); } catch (e: any) { onErr(e?.message || "Gagal menambah area."); } finally { setBusy(false); }
+    setBusy(true); setAerr(null);
+    try { await api.createArea(name); setAdding(""); onChange(); } catch (e: any) { setAerr(e?.message || "Gagal menambah area."); } finally { setBusy(false); }
   };
   const saveEdit = async (id: number) => {
     const name = editVal.trim();
     if (!name) return;
-    try { await api.updateArea(id, name); setEditId(null); onChange(); } catch (e: any) { onErr(e?.message || "Gagal ubah area."); }
+    setAerr(null);
+    try { await api.updateArea(id, name); setEditId(null); onChange(); } catch (e: any) { setAerr(e?.message || "Gagal ubah area."); }
   };
-  const del = async (id: number) => { try { await api.deleteArea(id); onChange(); } catch (e: any) { onErr(e?.message || "Gagal hapus area."); } };
+  const del = async (id: number) => { setAerr(null); try { await api.deleteArea(id); onChange(); } catch (e: any) { setAerr(e?.message || "Gagal hapus area."); } };
 
   return (
     <div className="bg-white border border-slate-100 rounded-xl shadow-xs overflow-hidden">
@@ -240,6 +244,7 @@ function AreaCard({ areas, onChange, onErr }: { areas: MasterItem[]; onChange: (
           <Plus className="h-4 w-4" /> Tambah
         </button>
       </div>
+      {aerr && <div className="mx-4 -mt-2 mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5"><AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {aerr}</div>}
       <ul className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
         {areas.length === 0 ? (
           <li className="px-5 py-8 text-center text-xs text-slate-400">Belum ada area.</li>
@@ -273,17 +278,18 @@ function EmployeeCard({ emps, onChange, onErr }: { emps: Employee[]; onChange: (
   const [form, setForm] = React.useState(emptyEmp());
   const [busy, setBusy] = React.useState(false);
   const [confirmDel, setConfirmDel] = React.useState<Employee | null>(null);
+  const [merr, setMerr] = React.useState<string | null>(null); // error shown INSIDE the modal
 
-  const openNew = () => { setForm(emptyEmp()); setEditing("new"); };
-  const openEdit = (e: Employee) => { setForm({ code: e.code || "", name: e.name, department: e.department || "", position: e.position || "" }); setEditing(e); };
+  const openNew = () => { setForm(emptyEmp()); setMerr(null); setEditing("new"); };
+  const openEdit = (e: Employee) => { setForm({ code: e.code || "", name: e.name, department: e.department || "", position: e.position || "" }); setMerr(null); setEditing(e); };
   const save = async () => {
-    if (!form.name.trim() || busy) { if (!form.name.trim()) onErr("Nama karyawan wajib diisi."); return; }
-    setBusy(true);
+    if (!form.name.trim() || busy) { if (!form.name.trim()) setMerr("Nama karyawan wajib diisi."); return; }
+    setBusy(true); setMerr(null);
     try {
       if (editing === "new") await api.createEmployee({ code: form.code.trim(), name: form.name.trim(), department: form.department.trim(), position: form.position.trim() });
       else if (editing) await api.updateEmployee(editing.id, { code: form.code.trim(), name: form.name.trim(), department: form.department.trim(), position: form.position.trim() });
       setEditing(null); onChange();
-    } catch (e: any) { onErr(e?.message || "Gagal simpan karyawan."); } finally { setBusy(false); }
+    } catch (e: any) { setMerr(e?.message || "Gagal simpan karyawan."); } finally { setBusy(false); }
   };
   const del = async (e: Employee) => { try { await api.deleteEmployee(e.id); setConfirmDel(null); onChange(); } catch (er: any) { onErr(er?.message || "Gagal hapus."); } };
 
@@ -325,6 +331,7 @@ function EmployeeCard({ emps, onChange, onErr }: { emps: Employee[]; onChange: (
                 <div className="space-y-1.5"><label className="font-bold text-slate-700">Divisi</label><input value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} className={inp} placeholder="IT" /></div>
               </div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Jabatan</label><input value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} className={inp} placeholder="IT Support" /></div>
+              {merr && <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5"><AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {merr}</div>}
               <div className="pt-2 border-t border-slate-100 flex justify-end gap-3">
                 <button onClick={() => setEditing(null)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg">Batal</button>
                 <button onClick={save} disabled={busy} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg flex items-center gap-1.5">{busy && <Loader2 className="h-4 w-4 animate-spin" />}Simpan</button>

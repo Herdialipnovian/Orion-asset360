@@ -287,14 +287,14 @@ export const api = {
   },
   // Fase 2 Event: SHIP the asset to a venue leg (transit); call again to relocate to the next venue.
   // Carries courier tracking (like Fase 5). arriveVenue() then confirms it landed (transit→active).
-  deployVenue(id: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }): Promise<{ asset: Asset }> {
+  deployVenue(id: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(id)}/deploy-venue`, { method: "POST", body: JSON.stringify(p) });
   },
   arriveVenue(id: string): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(id)}/arrive-venue`, { method: "POST", body: JSON.stringify({}) });
   },
   // End of roadshow: ship back to warehouse (tracked) then confirm arrival (→ Fase 3 Gudang).
-  shipReturn(id: string, p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }): Promise<{ asset: Asset }> {
+  shipReturn(id: string, p: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(id)}/ship-return`, { method: "POST", body: JSON.stringify(p) });
   },
   arriveWarehouse(id: string, p?: { warehouse?: string }): Promise<{ asset: Asset }> {

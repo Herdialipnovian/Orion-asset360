@@ -185,12 +185,13 @@ export interface Asset {
         signature?: string;
         note?: string;
         // Inbound shipment tracking (asset shipped TO this venue) — mirrors Fase-5 transit tracking.
-        shipping?: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; shippedAt?: string };
+        // Every venue shipment carries its own Surat Jalan number.
+        shipping?: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; shippedAt?: string };
         arrivedAt?: string; // set when transit→active is confirmed
       }[];
       currentLegSeq?: number; // which leg the asset is physically at now
-      // Return-to-warehouse shipment at the end of a roadshow (venue → Gudang), tracked like a leg.
-      returnShipment?: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; shippedAt?: string; arrivedAt?: string; status?: "transit" | "done" };
+      // Return-to-warehouse shipment at the end of a roadshow (venue → Gudang), also has a Surat Jalan.
+      returnShipment?: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; shippedAt?: string; arrivedAt?: string; status?: "transit" | "done" };
 
       // Distribusi — fan-out placement per toko (GPS + foto), driven by merchandisers.
       placements?: {

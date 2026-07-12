@@ -272,7 +272,7 @@ export default function App() {
   // Fase 2 Event: setup / relocate an asset at a venue leg (roadshow).
   const handleDeployVenue = async (
     assetId: string,
-    p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
+    p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
   ): Promise<{ ok: boolean; error?: string }> => {
     try {
       await api.deployVenue(assetId, p);
@@ -289,7 +289,7 @@ export default function App() {
   };
   const handleShipReturn = async (
     assetId: string,
-    p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
+    p: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
   ): Promise<{ ok: boolean; error?: string }> => {
     try { await api.shipReturn(assetId, p); await refresh(); return { ok: true }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal mengirim aset kembali ke Gudang." }; }

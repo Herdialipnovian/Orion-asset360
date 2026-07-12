@@ -1513,9 +1513,9 @@ app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logi
   const loc = lr[0];
   const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
   if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
-  const shipping: any = (b.courier || trackingUrl || b.trackingNo || b.eta)
-    ? { courier: b.courier ? String(b.courier).trim() : undefined, trackingUrl: trackingUrl || undefined, trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined, eta: b.eta ? String(b.eta).trim() : undefined }
-    : undefined;
+  // Every venue shipment carries a Surat Jalan (generated if the client didn't supply one).
+  const venueSJ = String(b.suratJalanNo || "").trim() || `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
+  const shipping: any = { suratJalanNo: venueSJ, courier: b.courier ? String(b.courier).trim() : undefined, trackingUrl: trackingUrl || undefined, trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined, eta: b.eta ? String(b.eta).trim() : undefined };
   const now = new Date().toISOString().slice(0, 10);
   let projectId: number | null = null, projectName: string | null = null;
   if (b.projectId != null) {
@@ -1614,6 +1614,8 @@ app.post("/api/assets/:id/ship-return", requireAuth, requireRole("Admin", "Logis
   const b = req.body || {};
   const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
   if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
+  // Return-to-gudang shipment also gets a Surat Jalan.
+  const returnSJ = String(b.suratJalanNo || "").trim() || `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
   const now = new Date().toISOString().slice(0, 10);
   const result = await tx(async c => {
     const { rows } = await c.query(`select stage_details, current_stage from assets where id=$1 for update`, [id]);
@@ -1626,7 +1628,7 @@ app.post("/api/assets/:id/ship-return", requireAuth, requireRole("Admin", "Logis
     if (dep.returnShipment?.status === "transit") return { http: 422, body: { error: "Aset sudah dalam pengiriman balik ke gudang." } };
     for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
     dep.legs = legs;
-    dep.returnShipment = { courier: b.courier ? String(b.courier).trim() : undefined, trackingUrl: trackingUrl || undefined, trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined, eta: b.eta ? String(b.eta).trim() : undefined, shippedAt: now, status: "transit" };
+    dep.returnShipment = { suratJalanNo: returnSJ, courier: b.courier ? String(b.courier).trim() : undefined, trackingUrl: trackingUrl || undefined, trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined, eta: b.eta ? String(b.eta).trim() : undefined, shippedAt: now, status: "transit" };
     const details = { ...sd, deployment: dep };
     await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [id, `Dalam pengiriman → Gudang`, JSON.stringify(details)]);
     return { ok: true };

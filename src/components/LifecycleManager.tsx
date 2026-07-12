@@ -331,9 +331,9 @@ interface LifecycleManagerProps {
   onShipAsset: (assetId: string, updatedDetails: any, meta?: { logAction?: string; operator?: string }) => Promise<{ ok: boolean; error?: string }>;
   onAssignInstall: (assetId: string, assignments: { merchandiserId: number; qty: number }[], baseUpdatedAt?: string) => Promise<{ ok: boolean; error?: string }>;
   onHandoverInternal?: (assetId: string, p: { custodianId: number; handoverDate?: string; signatureBase64?: string; note?: string; projectId?: number | null }) => Promise<{ ok: boolean; error?: string }>;
-  onDeployVenue?: (assetId: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
+  onDeployVenue?: (assetId: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
   onArriveVenue?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
-  onShipReturn?: (assetId: string, p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
+  onShipReturn?: (assetId: string, p: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
   onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onBatchShip?: (p: { items: { id: string; qty: number }[]; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
@@ -460,7 +460,7 @@ export default function LifecycleManager({
   const [batchForm, setBatchForm] = React.useState({ suratJalanNo: "", driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
   const [batchBusy, setBatchBusy] = React.useState(false);
   const [batchError, setBatchError] = React.useState<string | null>(null);
-  const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
+  const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; courier?: string; trackingNo?: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
 
   // Transition gate state
   const [transitionTarget, setTransitionTarget] = React.useState<number | null>(null);
@@ -518,12 +518,12 @@ export default function LifecycleManager({
     } catch { setVenues([]); }
   }, []);
   const [venueOpen, setVenueOpen] = React.useState(false);
-  const [venueForm, setVenueForm] = React.useState<{ locationId: string; pic: string; setupDate: string; note: string; signature: string; courier: string; trackingUrl: string; trackingNo: string; eta: string }>({ locationId: "", pic: "", setupDate: "", note: "", signature: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+  const [venueForm, setVenueForm] = React.useState<{ locationId: string; pic: string; setupDate: string; note: string; signature: string; suratJalanNo: string; courier: string; trackingUrl: string; trackingNo: string; eta: string }>({ locationId: "", pic: "", setupDate: "", note: "", signature: "", suratJalanNo: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
   const [venueBusy, setVenueBusy] = React.useState(false);
   const [venueError, setVenueError] = React.useState<string | null>(null);
   // Return-to-warehouse shipment modal (end of roadshow — venue → Gudang, tracked).
   const [returnOpen, setReturnOpen] = React.useState(false);
-  const [returnForm, setReturnForm] = React.useState<{ courier: string; trackingUrl: string; trackingNo: string; eta: string }>({ courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+  const [returnForm, setReturnForm] = React.useState<{ suratJalanNo: string; courier: string; trackingUrl: string; trackingNo: string; eta: string }>({ suratJalanNo: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
   const [returnBusy, setReturnBusy] = React.useState(false);
   const [returnError, setReturnError] = React.useState<string | null>(null);
   const [arriveBusy, setArriveBusy] = React.useState(false); // shared for arrive-venue / arrive-warehouse
@@ -695,7 +695,7 @@ export default function LifecycleManager({
     if (!detailAsset) return;
     void loadVenues(detailAsset.client);
     void loadDirectory(detailAsset.client);
-    setVenueForm({ locationId: "", pic: "", setupDate: new Date().toISOString().slice(0, 10), note: "", signature: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+    setVenueForm({ locationId: "", pic: "", setupDate: new Date().toISOString().slice(0, 10), note: "", signature: "", suratJalanNo: genSuratJalan(), courier: "", trackingUrl: "", trackingNo: "", eta: "" });
     setVenueError(null);
     setVenueOpen(true);
   };
@@ -713,6 +713,7 @@ export default function LifecycleManager({
       note: venueForm.note || undefined,
       signatureBase64: venueForm.signature || undefined,
       projectId: detailAsset.projectId ?? undefined,
+      suratJalanNo: venueForm.suratJalanNo || undefined,
       courier: venueForm.courier || undefined,
       trackingUrl: venueForm.trackingUrl.trim() || undefined,
       trackingNo: venueForm.trackingNo.trim() || undefined,
@@ -724,7 +725,7 @@ export default function LifecycleManager({
   };
   const openReturn = () => {
     if (!detailAsset) return;
-    setReturnForm({ courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+    setReturnForm({ suratJalanNo: genSuratJalan(), courier: "", trackingUrl: "", trackingNo: "", eta: "" });
     setReturnError(null);
     setReturnOpen(true);
   };
@@ -735,6 +736,7 @@ export default function LifecycleManager({
     setReturnBusy(true);
     setReturnError(null);
     const res = await onShipReturn(detailAsset.id, {
+      suratJalanNo: returnForm.suratJalanNo || undefined,
       courier: returnForm.courier || undefined,
       trackingUrl: returnForm.trackingUrl.trim() || undefined,
       trackingNo: returnForm.trackingNo.trim() || undefined,
@@ -1903,7 +1905,7 @@ export default function LifecycleManager({
                         <div className="min-w-0">
                           <p className="text-xs font-extrabold text-slate-800">Pelacakan Kiriman {toGudang ? "ke Gudang" : "ke Venue"}</p>
                           <p className="text-[10px] text-slate-500">
-                            Tujuan: <strong className="text-slate-700">{destName}</strong>
+                            {ship?.suratJalanNo ? <>No. Surat Jalan: <strong className="text-slate-700 font-mono">{ship.suratJalanNo}</strong> · </> : null}Tujuan: <strong className="text-slate-700">{destName}</strong>
                             {ship?.courier ? ` · ${ship.courier}` : ""}{ship?.trackingNo ? ` · Resi ${ship.trackingNo}` : ""}{ship?.eta ? ` · ETA ${ship.eta}` : ""}
                           </p>
                         </div>
@@ -1921,6 +1923,9 @@ export default function LifecycleManager({
                           <ArrowRight className="h-3.5 w-3.5" /> Bagikan{pic ? " ke PIC" : ""}
                         </a>
                       </div>
+                      <button type="button" onClick={() => setBatchPrint({ suratJalanNo: ship?.suratJalanNo || "-", area: destName, picPenerima: pic, driverName: "", vehiclePlate: "", courier: ship?.courier, trackingNo: ship?.trackingNo, rows: [{ id: detailAsset.id, name: detailAsset.name, qty: detailAsset.quantity }] })} className="w-full flex items-center justify-center gap-1.5 bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg transition">
+                        <FileText className="h-3.5 w-3.5" /> Cetak Surat Jalan
+                      </button>
                     </div>
                   );
                 })()}
@@ -2477,6 +2482,13 @@ export default function LifecycleManager({
             </div>
             <form onSubmit={submitVenue} className="p-5 space-y-4 text-xs">
               <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Nomor Surat Jalan</label>
+                <div className="flex gap-2">
+                  <input value={venueForm.suratJalanNo} readOnly className="flex-1 bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg font-mono text-slate-700" />
+                  <button type="button" onClick={() => setVenueForm({ ...venueForm, suratJalanNo: genSuratJalan() })} className="px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /></button>
+                </div>
+              </div>
+              <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Venue <span className="text-rose-500">*</span></label>
                 <select value={venueForm.locationId} onChange={e => setVenueForm({ ...venueForm, locationId: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 cursor-pointer">
                   <option value="">— pilih venue —</option>
@@ -2537,6 +2549,13 @@ export default function LifecycleManager({
               <button onClick={() => setReturnOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
             </div>
             <form onSubmit={submitReturn} className="p-5 space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Nomor Surat Jalan</label>
+                <div className="flex gap-2">
+                  <input value={returnForm.suratJalanNo} readOnly className="flex-1 bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg font-mono text-slate-700" />
+                  <button type="button" onClick={() => setReturnForm({ ...returnForm, suratJalanNo: genSuratJalan() })} className="px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /></button>
+                </div>
+              </div>
               <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-2.5">
                 <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Tracking Pengiriman ke Gudang</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -2676,7 +2695,7 @@ export default function LifecycleManager({
               </div>
               <div className="grid grid-cols-2 gap-3 text-[11px] mb-4">
                 <div>Tujuan: <strong>{batchPrint.area}</strong>{batchPrint.picPenerima ? <> · PIC: <strong>{batchPrint.picPenerima}</strong></> : null}</div>
-                <div className="text-right">Driver: <strong>{batchPrint.driverName}</strong>{batchPrint.vehiclePlate ? <> · {batchPrint.vehiclePlate}</> : null}</div>
+                <div className="text-right">{batchPrint.driverName ? <>Driver: <strong>{batchPrint.driverName}</strong>{batchPrint.vehiclePlate ? <> · {batchPrint.vehiclePlate}</> : null}</> : batchPrint.courier ? <>Kurir: <strong>{batchPrint.courier}</strong>{batchPrint.trackingNo ? <> · Resi {batchPrint.trackingNo}</> : null}</> : null}</div>
               </div>
               <table className="w-full text-[11px] border-collapse">
                 <thead><tr className="bg-slate-100"><th className="border border-slate-300 px-2 py-1 text-left">No</th><th className="border border-slate-300 px-2 py-1 text-left">ID Aset</th><th className="border border-slate-300 px-2 py-1 text-left">Nama Aset</th><th className="border border-slate-300 px-2 py-1 text-right">Qty</th></tr></thead>

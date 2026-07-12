@@ -120,6 +120,10 @@ const genSuratJalan = () => `SJ/ORG/${new Date().getFullYear()}/${String(Math.fl
 
 // 3rd-party couriers/vendors that handle the actual delivery (logistik just pastes their tracking link).
 const BATCH_INP = "w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500";
+// Shipment-group lockstep MOVEMENT path: a batched asset at each of these stages can advance the
+// whole group (same batchId) together to the mapped next stage. Audit(7)/Maintenance(8) excluded.
+const GROUP_NEXT: { [k: number]: number } = { 4: 5, 5: 6, 6: 9, 9: 3 };
+const batchIdOf = (a: Asset | null | undefined) => (a?.stageDetails as any)?.shipping?.batchId as string | undefined;
 const COURIERS = [
   "JNE", "J&T Express", "SiCepat", "AnterAja", "Ninja Xpress", "Wahana", "Pos Indonesia",
   "ID Express", "Lion Parcel", "Shopee (SPX Express)", "Lalamove", "GoSend (Gojek)",
@@ -332,6 +336,7 @@ interface LifecycleManagerProps {
   onShipReturn?: (assetId: string, p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
   onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onBatchShip?: (p: { items: { id: string; qty: number }[]; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
+  onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
   onAuditSample?: (assetId: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }) => Promise<{ ok: boolean; error?: string }>;
@@ -428,6 +433,7 @@ export default function LifecycleManager({
   onShipReturn,
   onArriveWarehouse,
   onBatchShip,
+  onGroupAdvance,
   onDistribute,
   onPlaceToko,
   onAuditSample,
@@ -458,6 +464,7 @@ export default function LifecycleManager({
 
   // Transition gate state
   const [transitionTarget, setTransitionTarget] = React.useState<number | null>(null);
+  const [groupMode, setGroupMode] = React.useState(false); // apply the gate to the whole shipment group
   const [gateForm, setGateForm] = React.useState<Record<string, any>>({});
   const [gateError, setGateError] = React.useState<string | null>(null);
 
@@ -650,6 +657,16 @@ export default function LifecycleManager({
     () => assets.find(a => a.id === detailAssetId) || null,
     [assets, detailAssetId]
   );
+  // Shipment group of the open asset (members share a batchId, still in-journey Fase 4–9).
+  const detailBatchId = batchIdOf(detailAsset);
+  const groupMembers = React.useMemo(
+    () => (detailBatchId ? assets.filter(a => batchIdOf(a) === detailBatchId && a.currentStage >= 4 && a.currentStage <= 9) : []),
+    [assets, detailBatchId]
+  );
+  const groupSameStage = detailAsset ? groupMembers.filter(a => a.currentStage === detailAsset.currentStage) : [];
+  // Can the CURRENT gate transition be applied to the whole group? (movement stages only, ≥2 members)
+  const groupable = !!(onGroupAdvance && detailAsset && transitionTarget != null &&
+    GROUP_NEXT[detailAsset.currentStage] === transitionTarget && detailBatchId && groupSameStage.length >= 2);
 
   const openHandover = () => {
     setHandoverForm({ custodianId: "", handoverDate: new Date().toISOString().slice(0, 10), signature: "", note: "" });
@@ -905,6 +922,10 @@ export default function LifecycleManager({
   const openGate = (target: number) => {
     if (!detailAsset) return;
     void loadDirectory(detailAsset.client); // populate PIC/Merchandiser dropdowns for this client
+    // Default the "process whole group" toggle ON when this is a groupable movement transition.
+    const bId = batchIdOf(detailAsset);
+    const sameStage = bId ? assets.filter(a => batchIdOf(a) === bId && a.currentStage === detailAsset.currentStage).length : 0;
+    setGroupMode(!!onGroupAdvance && GROUP_NEXT[detailAsset.currentStage] === target && !!bId && sameStage >= 2);
     const cfg = gateFor(target, detailAsset.currentStage, detailAsset);
     const existing = (detailAsset.stageDetails as any)[cfg.stageKey] || {};
     const init: Record<string, any> = {};
@@ -1087,6 +1108,14 @@ export default function LifecycleManager({
         setGateError(shipRes.error || "Gagal menerbitkan surat jalan.");
         return;
       }
+      closeGate();
+      return;
+    }
+
+    // Group movement: apply this gate to the WHOLE shipment group (same batchId, same stage) at once.
+    if (groupMode && onGroupAdvance && GROUP_NEXT[fromStage] === transitionTarget && batchIdOf(detailAsset)) {
+      const gres = await onGroupAdvance({ batchId: batchIdOf(detailAsset)!, fromStage, toStage: transitionTarget, stageKey: cfg.stageKey, section, meta: { logAction: meta.logAction, operator: meta.operator } });
+      if (!gres.ok) { setGateError(gres.error || "Gagal memproses grup pengiriman."); return; }
       closeGate();
       return;
     }
@@ -1960,6 +1989,14 @@ export default function LifecycleManager({
                     </div>
                   </div>
 
+                  {/* Shipment group banner — this asset was dispatched together with others (Kirim Bersama). */}
+                  {detailBatchId && groupMembers.length >= 2 && detailAsset.currentStage >= 4 && detailAsset.currentStage <= 9 && (
+                    <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 text-[11px] text-blue-800">
+                      <Truck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>Bagian dari <strong>grup pengiriman</strong> {detailBatchId} · {groupMembers.length} aset ({groupSameStage.length} di fase ini).{GROUP_NEXT[detailAsset.currentStage] ? " Langkah pindah bisa diproses sekaligus untuk seluruh grup (centang di form)." : ""}</span>
+                    </div>
+                  )}
+
                   {/* Internal custodian handover moved to the dedicated "Aset Internal" menu. */}
 
                   {/* Proyek — binds the asset to a Project; its mode drives which deploy action
@@ -2318,6 +2355,15 @@ export default function LifecycleManager({
             </div>
 
             <form onSubmit={submitGate} className="p-5 space-y-4">
+              {groupable && (
+                <label className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2.5 cursor-pointer select-none">
+                  <input type="checkbox" checked={groupMode} onChange={e => setGroupMode(e.target.checked)} className="mt-0.5 h-4 w-4 rounded accent-blue-600" />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Proses untuk seluruh grup pengiriman ({groupSameStage.length} aset)</span>
+                    <span className="block text-[10px] text-blue-600/90 leading-snug">Surat Jalan {detailBatchId} — semua aset yang dikirim bersama & masih di fase ini ikut pindah sekaligus. Data di form ini dipakai untuk semua.</span>
+                  </span>
+                </label>
+              )}
               <div className="grid grid-cols-2 gap-4">{gateFor(transitionTarget, detailAsset.currentStage, detailAsset).fields.map(renderField)}</div>
 
               {gateError && (

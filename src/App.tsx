@@ -305,6 +305,12 @@ export default function App() {
     try { const r = await api.batchShip(p); await refresh(); return { ok: true, suratJalanNo: r.suratJalanNo }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal mengirim bersama." }; }
   };
+  const handleGroupAdvance = async (
+    p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; meta?: { logAction?: string; operator?: string } }
+  ): Promise<{ ok: boolean; error?: string; count?: number }> => {
+    try { const r = await api.groupAdvance(p); await refresh(); return { ok: true, count: r.count }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses grup pengiriman." }; }
+  };
 
   // Fase 3 Distribusi: fan-out placements / report a toko placement / sampling audit.
   const handleDistribute = async (
@@ -863,6 +869,7 @@ export default function App() {
                   onShipReturn={handleShipReturn}
                   onArriveWarehouse={handleArriveWarehouse}
                   onBatchShip={handleBatchShip}
+                  onGroupAdvance={handleGroupAdvance}
                   onDistribute={handleDistribute}
                   onPlaceToko={handlePlaceToko}
                   onAuditSample={handleAuditSample}

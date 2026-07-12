@@ -758,6 +758,53 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
   res.json({ ok: true, suratJalanNo, count: affected.length, assets: shipped });
 }));
 
+// --- Group MOVEMENT: advance ALL members of a consolidated dispatch (same batchId) that sit at the
+// same stage, together, in lockstep along the shipping path — transit→arrive→retrieval→gudang. The
+// shared gate data (tracking / POD / retrieval reason) is merged into each member's own details.
+// Audit/maintenance are intentionally NOT groupable (per-asset). ---
+const GROUP_NEXT: { [k: number]: number } = { 4: 5, 5: 6, 6: 9, 9: 3 };
+app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, res) => {
+  const b = req.body || {};
+  const batchId = String(b.batchId || "").trim();
+  const fromStage = Number(b.fromStage), toStage = Number(b.toStage);
+  const stageKey = String(b.stageKey || "").trim();
+  const section = (b.section && typeof b.section === "object" && !Array.isArray(b.section)) ? b.section : {};
+  if (!batchId) return res.status(400).json({ error: "Grup pengiriman (batchId) wajib." });
+  if (GROUP_NEXT[fromStage] !== toStage) return res.status(422).json({ error: `Perpindahan grup Fase ${fromStage} → ${toStage} tidak diizinkan.` });
+  const allowed = STAGE_ROLE[toStage] || [];
+  if (req.user!.role !== "Admin" && !allowed.includes(req.user!.role)) return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang untuk perpindahan ini.` });
+  const now = new Date().toISOString();
+  const operator = b.meta?.operator || req.user!.name;
+  const logAction = String(b.meta?.logAction || `Proses grup: Fase ${fromStage} → Fase ${toStage}.`);
+  const affected: string[] = [];
+  try {
+    await tx(async c => {
+      const { rows } = await c.query(
+        `select id, client, current_location, stage_details from assets
+         where stage_details->'shipping'->>'batchId' = $1 and current_stage = $2 for update`,
+        [batchId, fromStage]
+      );
+      if (!rows.length) throw Object.assign(new Error("Tidak ada anggota grup di fase ini."), { http: 422 });
+      for (const r of rows) {
+        const sd = r.stage_details || {};
+        const merged = stageKey ? { ...sd, [stageKey]: { ...(sd[stageKey] || {}), ...section } } : sd;
+        const loc = computeLocation(toStage, undefined, r.client, r.current_location);
+        await c.query(`update assets set current_stage=$2, current_location=$3, stage_details=$4::jsonb, updated_at=now() where id=$1`, [r.id, toStage, loc, JSON.stringify(merged)]);
+        affected.push(r.id);
+      }
+    });
+  } catch (e: any) {
+    if (e && e.http) return res.status(e.http).json({ error: e.message });
+    throw e;
+  }
+  for (const id of affected) {
+    const a = await getAsset(id);
+    await insertLog({ id: `LOG-GRP-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: toStage, action: `${logAction} (grup ${batchId})`, operator, type: "success" });
+    assetChanged(id);
+  }
+  res.json({ ok: true, count: affected.length, assets: await Promise.all(affected.map(id => getAsset(id))) });
+}));
+
 // --- PIC assigns / re-assigns install portions (Fase 6, in-place) ---
 // Single source of truth for creating AND editing assignments. Merges by merchandiserId:
 // existing done/partial rows keep their progress; new/edited rows are validated. Under-

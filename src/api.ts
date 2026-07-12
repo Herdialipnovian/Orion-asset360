@@ -177,6 +177,10 @@ export const api = {
   }): Promise<{ ok: boolean; suratJalanNo: string; count: number; assets: Asset[] }> {
     return req(`/assets/batch-ship`, { method: "POST", body: JSON.stringify(p) });
   },
+  // Move ALL members of a shipment group (same batchId) at one stage to the next, together.
+  groupAdvance(p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; meta?: { logAction?: string; operator?: string } }): Promise<{ ok: boolean; count: number; assets: Asset[] }> {
+    return req(`/assets/group-advance`, { method: "POST", body: JSON.stringify(p) });
+  },
   reset(): Promise<{ ok: boolean; assets: Asset[]; logs: ActivityLog[] }> {
     return req("/reset", { method: "POST" });
   },

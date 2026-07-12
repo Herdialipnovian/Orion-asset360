@@ -142,6 +142,15 @@ export default function App() {
     if (user) refresh();
   }, [user, refresh]);
 
+  // Keep the top-bar Client filter honest: if the selected client disappears (renamed or
+  // deleted in Organisasi), fall back to ALL so the dropdown's shown value and the actual
+  // filter can never desync. Guard on clientNames.length so we don't reset during first load.
+  React.useEffect(() => {
+    if (selectedClient !== "ALL" && clientNames.length > 0 && !clientNames.includes(selectedClient)) {
+      setSelectedClient("ALL");
+    }
+  }, [clientNames, selectedClient]);
+
   // Live updates (SSE): the server pushes on any data change, so the CMS reflects
   // work done elsewhere (mobile merchandiser, another operator) without a manual
   // refresh. Auto-reconnects; a fresh "hello" on (re)connect re-syncs missed changes.
@@ -922,7 +931,7 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
               >
-                <Organisasi user={user} />
+                <Organisasi user={user} onChanged={refresh} />
               </motion.div>
             )}
 

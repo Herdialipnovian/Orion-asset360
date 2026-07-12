@@ -181,6 +181,7 @@ export default function App() {
 
   // Reset demo data (Admin only; server-side re-seed).
   const restoreDefaults = async () => {
+    if (!window.confirm("Kembalikan data demo? Seluruh aset & aktivitas saat ini akan dihapus dan diganti dengan data contoh. Hanya tersedia saat mode Demo.")) return;
     try {
       const r = await api.reset();
       setAssets(r.assets);

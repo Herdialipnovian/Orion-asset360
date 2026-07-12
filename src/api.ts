@@ -172,6 +172,16 @@ export const api = {
   reset(): Promise<{ ok: boolean; assets: Asset[]; logs: ActivityLog[] }> {
     return req("/reset", { method: "POST" });
   },
+  // Data mode (demo vs production) + destructive wipe — Admin only.
+  dbStatus(): Promise<{ seedMode: "demo" | "production"; assets: number; activity: number }> {
+    return req("/db/status");
+  },
+  setDbMode(mode: "demo" | "production"): Promise<{ seedMode: "demo" | "production"; assets: number; activity: number }> {
+    return req("/db/mode", { method: "POST", body: JSON.stringify({ mode }) });
+  },
+  wipeData(confirm: string): Promise<{ ok: boolean; seedMode: "demo" | "production"; assets: number; activity: number }> {
+    return req("/db/wipe", { method: "POST", body: JSON.stringify({ confirm }) });
+  },
   getUsers(): Promise<UserRow[]> {
     return req("/users");
   },

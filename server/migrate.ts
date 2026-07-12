@@ -270,48 +270,71 @@ export async function migrate({ seedAssets = true }: { seedAssets?: boolean } = 
     update users set role='Merchandiser' where role='Field Technician';
   `);
 
-  for (const u of SEED_USERS) {
-    const hash = await hashPassword(u.password);
+  // Always ensure the Admin login exists (even on a wiped/blank DB) — safe insert-if-missing.
+  const adminSeed = SEED_USERS.find(u => u.role === "Admin");
+  if (adminSeed) {
+    const hash = await hashPassword(adminSeed.password);
     await q(
       `insert into users (username, name, password_hash, role, client, area)
        values ($1,$2,$3,$4,$5,$6) on conflict (username) do nothing`,
-      [u.username, u.name, hash, u.role, u.client, u.area ?? null]
+      [adminSeed.username, adminSeed.name, hash, adminSeed.role, adminSeed.client, adminSeed.area ?? null]
     );
   }
 
-  const { rows } = await q(`select count(*)::int as n from assets`);
-  if (seedAssets && rows[0].n === 0) {
-    for (const a of INITIAL_ASSETS) await insertAsset(a);
-    for (const l of INITIAL_ACTIVITY_LOGS) await insertLog(l);
-    console.log(`[migrate] seeded ${INITIAL_ASSETS.length} assets + ${INITIAL_ACTIVITY_LOGS.length} logs`);
-  }
+  // Demo/sample data is seeded UNLESS an operator has taken over the DB (settings.seed_disabled='1').
+  // That flag is set when the data is wiped for manual entry, so a blank slate survives restarts
+  // (this migrate re-seeds on every boot otherwise). Admin + settings + schema always run above/below.
+  const { rows: sf } = await q(`select value from settings where key='seed_disabled'`);
+  const seedDisabled = sf[0]?.value === "1";
+  if (!seedDisabled) {
+    for (const u of SEED_USERS) {
+      if (u.role === "Admin") continue; // admin already ensured above
+      const hash = await hashPassword(u.password);
+      await q(
+        `insert into users (username, name, password_hash, role, client, area)
+         values ($1,$2,$3,$4,$5,$6) on conflict (username) do nothing`,
+        [u.username, u.name, hash, u.role, u.client, u.area ?? null]
+      );
+    }
 
-  const { rows: catN } = await q(`select count(*)::int as n from categories`);
-  if (catN[0].n === 0) {
-    for (const name of SEED_CATEGORIES) await q(`insert into categories (name) values ($1) on conflict (name) do nothing`, [name]);
-  }
-  const { rows: cliN } = await q(`select count(*)::int as n from clients`);
-  if (cliN[0].n === 0) {
-    for (const name of SAMPLE_CLIENTS) await q(`insert into clients (name) values ($1) on conflict (name) do nothing`, [name]);
-  }
-  // Ensure the clients referenced by the seed users exist (idempotent).
-  for (const c of ["Garuda Food", "AICE"]) await q(`insert into clients (name) values ($1) on conflict (name) do nothing`, [c]);
+    const { rows } = await q(`select count(*)::int as n from assets`);
+    if (seedAssets && rows[0].n === 0) {
+      for (const a of INITIAL_ASSETS) await insertAsset(a);
+      for (const l of INITIAL_ACTIVITY_LOGS) await insertLog(l);
+      console.log(`[migrate] seeded ${INITIAL_ASSETS.length} assets + ${INITIAL_ACTIVITY_LOGS.length} logs`);
+    }
 
-  // Seed Area & Employee masters (once).
-  const { rows: arN } = await q(`select count(*)::int as n from areas`);
-  if (arN[0].n === 0) for (const name of SEED_AREAS) await q(`insert into areas (name) values ($1) on conflict (name) do nothing`, [name]);
-  const { rows: empN } = await q(`select count(*)::int as n from employees`);
-  if (empN[0].n === 0) for (const e of SEED_EMPLOYEES) await q(`insert into employees (code, name, department, position) values ($1,$2,$3,$4)`, [e.code, e.name, e.department, e.position]);
+    const { rows: catN } = await q(`select count(*)::int as n from categories`);
+    if (catN[0].n === 0) {
+      for (const name of SEED_CATEGORIES) await q(`insert into categories (name) values ($1) on conflict (name) do nothing`, [name]);
+    }
+    const { rows: cliN } = await q(`select count(*)::int as n from clients`);
+    if (cliN[0].n === 0) {
+      for (const name of SAMPLE_CLIENTS) await q(`insert into clients (name) values ($1) on conflict (name) do nothing`, [name]);
+    }
+    // Ensure the clients referenced by the seed users exist (idempotent).
+    for (const c of ["Garuda Food", "AICE"]) await q(`insert into clients (name) values ($1) on conflict (name) do nothing`, [c]);
 
-  // Seed example Proyek + Lokasi (once).
-  const { rows: prjN } = await q(`select count(*)::int as n from projects`);
-  if (prjN[0].n === 0) for (const p of SEED_PROJECTS) await q(`insert into projects (name, client, mode, area, notes) values ($1,$2,$3,$4,$5)`, [p.name, p.client, p.mode, p.area, p.notes]);
-  const { rows: locN } = await q(`select count(*)::int as n from locations`);
-  if (locN[0].n === 0) for (const l of SEED_LOCATIONS) await q(`insert into locations (name, type, client, area, address, pic, code) values ($1,$2,$3,$4,$5,$6,$7)`, [l.name, l.type, l.client, l.area, l.address, l.pic, l.code]);
+    // Seed Area & Employee masters (once).
+    const { rows: arN } = await q(`select count(*)::int as n from areas`);
+    if (arN[0].n === 0) for (const name of SEED_AREAS) await q(`insert into areas (name) values ($1) on conflict (name) do nothing`, [name]);
+    const { rows: empN } = await q(`select count(*)::int as n from employees`);
+    if (empN[0].n === 0) for (const e of SEED_EMPLOYEES) await q(`insert into employees (code, name, department, position) values ($1,$2,$3,$4)`, [e.code, e.name, e.department, e.position]);
+
+    // Seed example Proyek + Lokasi (once).
+    const { rows: prjN } = await q(`select count(*)::int as n from projects`);
+    if (prjN[0].n === 0) for (const p of SEED_PROJECTS) await q(`insert into projects (name, client, mode, area, notes) values ($1,$2,$3,$4,$5)`, [p.name, p.client, p.mode, p.area, p.notes]);
+    const { rows: locN } = await q(`select count(*)::int as n from locations`);
+    if (locN[0].n === 0) for (const l of SEED_LOCATIONS) await q(`insert into locations (name, type, client, area, address, pic, code) values ($1,$2,$3,$4,$5,$6,$7)`, [l.name, l.type, l.client, l.area, l.address, l.pic, l.code]);
+  }
 
   for (const [k, v] of Object.entries(SEED_SETTINGS)) {
     await q(`insert into settings (key, value) values ($1, $2) on conflict (key) do nothing`, [k, v]);
   }
+  // Seed-mode flag — default 'demo' (0 = seed demo data on boot). Set to '1' (production/blank) when an
+  // operator takes over the DB for real data. Toggled ONLY via POST /api/db/mode (kept out of the
+  // generic settings whitelist so it can't be flipped by accident from the System Settings form).
+  await q(`insert into settings (key, value) values ('seed_disabled', '0') on conflict (key) do nothing`);
 
   // One-time heuristic: tag existing dummy assets with owner + usage_type (consumables = stickers/banners).
   const { rows: p0 } = await q(`select 1 from settings where key='phase0_asset_backfill'`);

@@ -15,7 +15,7 @@ import { migrate, SEED_SETTINGS } from "./migrate";
 import { computeLocation, DEFAULT_LOG, TRANSITIONS, isLegalTransition, EVIDENCE_REQUIRED } from "./lifecycle";
 import {
   upload, processImage, makeThumb, aHash, hamming, newEvidenceId, insertEvidence, evidenceView, listEvidence,
-  getEvidenceById, presentSlots, writeEvidenceFiles, absPath, getIdempotent, saveIdempotent
+  getEvidenceById, presentSlots, writeEvidenceFiles, absPath, getIdempotent, saveIdempotent, purgeEvidenceFiles
 } from "./evidence";
 import fs from "node:fs";
 import type { Asset, ActivityLog } from "../src/types";
@@ -1808,17 +1808,69 @@ app.put(
   })
 );
 
-// --- Reset demo data (Admin) ---
-app.post(
-  "/api/reset",
-  requireAuth,
-  requireRole("Admin"),
-  wrap(async (_req, res) => {
-    await q(`truncate assets, activity_logs`);
-    await migrate({ seedAssets: true });
-    res.json({ ok: true, assets: await getAssets(), logs: await getLogs(200) });
-  })
-);
+// ── Data mode (demo vs production) + reset/wipe (Admin) ──────────────────────────────
+// seed_disabled = '1' → production/blank: the operator has taken over the DB with real data, so
+// migrate() must NOT re-seed demo data on boot. '0'/absent → demo (sample data seeded on boot).
+async function getSeedDisabled(): Promise<boolean> {
+  const { rows } = await q(`select value from settings where key='seed_disabled'`);
+  return rows[0]?.value === "1";
+}
+async function setSeedDisabled(on: boolean): Promise<void> {
+  await q(
+    `insert into settings (key, value) values ('seed_disabled', $1)
+     on conflict (key) do update set value = excluded.value, updated_at = now()`,
+    [on ? "1" : "0"]
+  );
+}
+async function dbStatus() {
+  const [a, l] = await Promise.all([
+    q(`select count(*)::int as n from assets`),
+    q(`select count(*)::int as n from activity_logs`),
+  ]);
+  return { seedMode: (await getSeedDisabled()) ? "production" : "demo", assets: a.rows[0].n, activity: l.rows[0].n };
+}
+
+// Current data mode + row counts (drives the System Settings "Manajemen Data" panel).
+app.get("/api/db/status", requireAuth, requireRole("Admin"), wrap(async (_req, res) => {
+  res.json(await dbStatus());
+}));
+
+// Switch data mode WITHOUT touching existing data. 'production' = stop seeding demo on boot
+// (protects real data across restarts); 'demo' = allow demo seeding again on the next boot/reset.
+app.post("/api/db/mode", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const mode = String(req.body?.mode || "");
+  if (mode !== "demo" && mode !== "production") return res.status(400).json({ error: "Mode harus 'demo' atau 'production'." });
+  await setSeedDisabled(mode === "production");
+  res.json(await dbStatus());
+}));
+
+// Restore DEMO data (Admin). Flips back to demo mode, then truncates operational data and reseeds
+// the sample dataset — so "Kembalikan Data Demo" is predictable regardless of the current mode.
+app.post("/api/reset", requireAuth, requireRole("Admin"), wrap(async (_req, res) => {
+  // "Kembalikan Data Demo" only makes sense in Demo mode. Refuse on Production so a live DB with real
+  // data can never be truncated + overwritten with demo data by an accidental click. To reset a
+  // production DB, the operator switches to Demo mode first (Pengaturan Sistem → Manajemen Data).
+  if (await getSeedDisabled()) return res.status(422).json({ error: "Reset data demo hanya tersedia saat mode Demo. Alihkan mode terlebih dahulu di Pengaturan Sistem → Manajemen Data." });
+  await q(`truncate assets, activity_logs`);
+  await migrate({ seedAssets: true });
+  res.json({ ok: true, ...(await dbStatus()), assets: await getAssets(), logs: await getLogs(200) });
+}));
+
+// Wipe ALL operational data for a clean real-data start, and switch to production mode so a restart
+// won't repopulate demo. Destructive — requires an explicit confirm token. Masters (client/kategori/
+// area/karyawan/proyek/lokasi) and users are preserved; the operator curates those in the UI.
+app.post("/api/db/wipe", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  if (String(req.body?.confirm || "") !== "KOSONGKAN") return res.status(400).json({ error: "Konfirmasi tidak valid. Ketik KOSONGKAN untuk melanjutkan." });
+  // Atomic: set production flag + truncate together, so a mid-op failure can't leave a wiped DB
+  // still in demo mode (which would reseed demo on the next boot).
+  await tx(async c => {
+    await c.query(`insert into settings (key, value) values ('seed_disabled','1') on conflict (key) do update set value=excluded.value, updated_at=now()`);
+    await c.query(`truncate assets, activity_logs, evidence, notifications, idempotency_keys`);
+  });
+  // The DB rows are gone — remove the backing evidence image files too (no orphaned photos/PII on disk).
+  const purgedFiles = await purgeEvidenceFiles();
+  res.json({ ok: true, purgedFiles, ...(await dbStatus()) });
+}));
 
 // --- Evidence: upload photos for an asset (field ops). Any authed user may attach. ---
 // multipart: files[] (image/*), + fields: slot, stage, gpsLat, gpsLng, capturedAt, note.

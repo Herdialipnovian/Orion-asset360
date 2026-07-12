@@ -219,6 +219,25 @@ export async function writeEvidenceFiles(id: string, img: ProcessedImage, thumb:
   return { filename, thumbFilename };
 }
 
+// Delete ALL stored evidence image files (used by the destructive DB wipe, after the DB rows are
+// truncated — so no orphaned photos/PII are left on disk). Keeps the directories. Bounded strictly
+// to the evidence-store dir + its thumb subdir; only removes plain files.
+export async function purgeEvidenceFiles(): Promise<number> {
+  let removed = 0;
+  for (const dir of [THUMB_DIR, STORE_DIR]) {
+    let entries: string[] = [];
+    try { entries = await fs.promises.readdir(dir); } catch { continue; }
+    for (const e of entries) {
+      const p = path.join(dir, e);
+      try {
+        const st = await fs.promises.stat(p);
+        if (st.isFile()) { await fs.promises.unlink(p); removed++; }
+      } catch { /* ignore individual file errors */ }
+    }
+  }
+  return removed;
+}
+
 // --- Idempotency (safe offline retries): remember a key -> the response we already sent. ---
 export async function getIdempotent(key: string): Promise<any | null> {
   if (!key) return null;

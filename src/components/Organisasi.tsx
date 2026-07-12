@@ -216,8 +216,9 @@ function AreaCard({ areas, onChange, onErr }: { areas: MasterItem[]; onChange: (
   const [aerr, setAerr] = React.useState<string | null>(null); // LOCAL error shown right at the card
 
   const add = async () => {
+    if (busy) return;
     const name = adding.trim();
-    if (!name || busy) return;
+    if (!name) { setAerr("Isi nama area dulu, lalu klik Tambah."); return; }
     setBusy(true); setAerr(null);
     try { await api.createArea(name); setAdding(""); onChange(); } catch (e: any) { setAerr(e?.message || "Gagal menambah area."); } finally { setBusy(false); }
   };
@@ -240,7 +241,7 @@ function AreaCard({ areas, onChange, onErr }: { areas: MasterItem[]; onChange: (
         <input value={adding} onChange={e => setAdding(e.target.value)} onKeyDown={e => e.key === "Enter" && add()}
           placeholder="Tambah area baru (cth. Palembang)"
           className="flex-1 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500" />
-        <button onClick={add} disabled={busy || !adding.trim()} className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 rounded-lg">
+        <button onClick={add} disabled={busy} className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 rounded-lg">
           <Plus className="h-4 w-4" /> Tambah
         </button>
       </div>

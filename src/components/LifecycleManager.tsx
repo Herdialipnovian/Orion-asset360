@@ -100,7 +100,7 @@ const TRANSITION_VERB: { [k: number]: string } = {
 type FieldDef = {
   key: string;
   label: string;
-  type: "text" | "number" | "date" | "select" | "textarea" | "checkbox" | "tags" | "time" | "generated" | "destinations" | "signature" | "checklist" | "assignments";
+  type: "text" | "number" | "date" | "select" | "textarea" | "checkbox" | "tags" | "time" | "generated" | "destinations" | "signature" | "checklist" | "auditstatus" | "assignments";
   required?: boolean;
   options?: string[];
   // For selects whose options come from the user directory (per the asset's client).
@@ -129,6 +129,22 @@ const COURIERS = [
   "ID Express", "Lion Parcel", "Shopee (SPX Express)", "Lalamove", "GoSend (Gojek)",
   "GrabExpress", "Paxel", "Deliveree", "Lainnya"
 ];
+
+// Per-item audit checklist (Fase 7 · Audit & Kepatuhan). Each item has its OWN pair of statuses
+// (good = the first/"ok" state, bad = the second/"needs attention" state) instead of a generic
+// Lulus/Tidak. The "kelengkapan" item also captures the actual quantity found on the ground.
+// The audit is recorded PER ASSET — each asset's gate writes to its own stageDetails.audit.
+const AUDIT_ITEMS: { key: string; label: string; good: string; bad: string; qty?: boolean }[] = [
+  { key: "kondisi", label: "Kondisi Fisik baik", good: "Baik", bad: "Perlu perbaikan" },
+  { key: "kelengkapan", label: "Kelengkapan Qty", good: "Qty Sesuai", bad: "Qty Kurang", qty: true },
+  { key: "bersih", label: "Bersih & rapi", good: "Bersih", bad: "Kotor" },
+  { key: "fungsi", label: "Berfungsi normal", good: "Normal", bad: "Tidak berfungsi" },
+  { key: "penempatan", label: "Penempatan sesuai", good: "Sesuai", bad: "Tidak Sesuai" },
+  { key: "aman", label: "Aman digunakan", good: "Aman", bad: "Tidak aman" },
+  { key: "aksesoris", label: "Aksesoris lengkap", good: "Lengkap", bad: "Tidak lengkap" },
+  { key: "foto", label: "Foto dokumentasi lengkap", good: "Lengkap", bad: "Tidak lengkap" },
+];
+const QTY_ITEM_KEY = "kelengkapanQty"; // where the actual counted qty lives inside the checklist map
 
 // The data captured when transitioning INTO each stage (drives the gate form)
 const GATE_FORMS: { [target: number]: { stageKey: string; title: string; fields: FieldDef[] } } = {
@@ -194,10 +210,9 @@ const GATE_FORMS: { [target: number]: { stageKey: string; title: string; fields:
       { key: "lastAuditDate", label: "Tanggal Audit", type: "date", required: true },
       {
         key: "checklist",
-        label: "Checklist Kepatuhan (skor & status otomatis)",
-        type: "checklist",
-        full: true,
-        options: ["Sesuai planogram / tata ruang", "Kondisi fisik baik (tanpa kerusakan)", "Branding / stiker lengkap & benar", "Area bersih, rapi & aman", "Berfungsi normal"]
+        label: "Checklist Audit per Aset (skor & status otomatis)",
+        type: "auditstatus",
+        full: true
       },
       { key: "recommendation", label: "Rekomendasi / Catatan", type: "textarea", full: true }
     ]
@@ -1022,6 +1037,13 @@ export default function LifecycleManager({
       else if (f.type === "generated") v = v || genSuratJalan();
       else if (f.type === "time") v = v || new Date().toTimeString().slice(0, 5);
       else if (f.type === "checklist") v = v && typeof v === "object" ? v : {};
+      else if (f.type === "auditstatus") {
+        // Default every item to its "good" state; seed the counted qty from the asset's own quantity.
+        const prev = v && typeof v === "object" ? v : {};
+        const seeded: Record<string, any> = { [QTY_ITEM_KEY]: prev[QTY_ITEM_KEY] ?? (detailAsset.quantity || 1) };
+        AUDIT_ITEMS.forEach(it => { seeded[it.key] = prev[it.key] !== false; });
+        v = seeded;
+      }
       else if (v === undefined || v === null || v === "") v = f.def ?? (f.type === "date" ? new Date().toISOString().split("T")[0] : "");
       init[f.key] = v;
     });
@@ -1125,6 +1147,19 @@ export default function LifecycleManager({
         v = result;
         section.scoring = items.length ? Math.round((passed / items.length) * 100) : 0;
         section.findings = items.filter(it => !result[it]);
+        section.complianceStatus = section.scoring >= 90 ? "PATUH" : section.scoring >= 70 ? "PERLU PERBAIKAN" : "TIDAK PATUH";
+      }
+      else if (f.type === "auditstatus") {
+        const map: any = v && typeof v === "object" ? v : {};
+        const qty = Math.max(0, Number(map[QTY_ITEM_KEY]) || 0);
+        const result: Record<string, any> = { [QTY_ITEM_KEY]: qty };
+        let passed = 0;
+        // Record the chosen status LABEL per item so the report/detail reads naturally.
+        for (const it of AUDIT_ITEMS) { const good = map[it.key] !== false; result[it.key] = good; if (good) passed++; }
+        v = result;
+        section.scoring = AUDIT_ITEMS.length ? Math.round((passed / AUDIT_ITEMS.length) * 100) : 0;
+        section.findings = AUDIT_ITEMS.filter(it => map[it.key] === false).map(it => `${it.label}: ${it.bad}${it.qty ? ` (Qty ${qty})` : ""}`);
+        section.kelengkapanQty = qty;
         section.complianceStatus = section.scoring >= 90 ? "PATUH" : section.scoring >= 70 ? "PERLU PERBAIKAN" : "TIDAK PATUH";
       }
       section[f.key] = v;
@@ -1460,6 +1495,48 @@ export default function LifecycleManager({
           <div className="flex items-center justify-between pt-1">
             <span className="text-[11px] text-slate-500">
               Skor otomatis: <strong className="text-slate-800">{score}</strong> ({passed}/{items.length})
+            </span>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}`}>{status}</span>
+          </div>
+        </div>
+      );
+    } else if (f.type === "auditstatus") {
+      const map: any = val && typeof val === "object" ? val : {};
+      const qty = map[QTY_ITEM_KEY] === "" ? "" : Number(map[QTY_ITEM_KEY]) || 0;
+      const passed = AUDIT_ITEMS.filter(it => map[it.key] !== false).length;
+      const score = AUDIT_ITEMS.length ? Math.round((passed / AUDIT_ITEMS.length) * 100) : 0;
+      const status = score >= 90 ? "PATUH" : score >= 70 ? "PERLU PERBAIKAN" : "TIDAK PATUH";
+      const badge = score >= 90 ? "bg-emerald-100 text-emerald-700" : score >= 70 ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700";
+      const pick = (k: string, good: boolean) => set({ ...map, [k]: good });
+      control = (
+        <div className="space-y-1.5">
+          {AUDIT_ITEMS.map(it => {
+            const good = map[it.key] !== false;
+            return (
+              <div key={it.key} className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                <span className="text-xs text-slate-700 flex-1 min-w-0">{it.label}</span>
+                {it.qty && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-[10px] text-slate-500">Qty</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={qty}
+                      onChange={e => set({ ...map, [QTY_ITEM_KEY]: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) })}
+                      className="w-14 bg-white border border-slate-200 px-2 py-1 rounded text-xs text-center outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+                <div className="flex rounded-md overflow-hidden border border-slate-200 shrink-0">
+                  <button type="button" onClick={() => pick(it.key, true)} className={`text-[10px] font-bold px-2.5 py-1 transition ${good ? "bg-emerald-500 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}>{it.good}</button>
+                  <button type="button" onClick={() => pick(it.key, false)} className={`text-[10px] font-bold px-2.5 py-1 transition ${!good ? "bg-rose-500 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}>{it.bad}</button>
+                </div>
+              </div>
+            );
+          })}
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-[11px] text-slate-500">
+              Skor otomatis: <strong className="text-slate-800">{score}</strong> ({passed}/{AUDIT_ITEMS.length})
             </span>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}`}>{status}</span>
           </div>
@@ -1994,6 +2071,9 @@ export default function LifecycleManager({
                         </div>
                         <span className={`ml-auto shrink-0 text-[10px] font-bold text-white px-2 py-0.5 rounded-full ${badge[st] || badge["TIDAK PATUH"]}`}>{st}</span>
                       </div>
+                      {au.kelengkapanQty != null && (
+                        <div className="text-[11px] text-slate-600"><span className="text-slate-400">Qty tercatat:</span> <strong className="text-slate-700">{au.kelengkapanQty}</strong></div>
+                      )}
                       {Array.isArray(au.findings) && au.findings.length > 0 && (
                         <div className="text-[11px] text-slate-600"><span className="text-slate-400">Temuan:</span> {au.findings.join(", ")}</div>
                       )}

@@ -24,7 +24,7 @@ const stageBadge = (s: number) =>
     : "bg-amber-50 text-amber-700 border-amber-200";
 
 const rupiah = (v: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(v || 0);
-const emptyForm = () => ({ client: "", category: "", name: "", warna: "", merk: "Custom", type: "", serialNumber: "", fisik: "Baru", tglBeli: "", harga: "0", qty: "1", owner: "Origin", usageType: "Reusable", peruntukan: "Deployment", peruntukanTouched: false });
+const emptyForm = () => ({ client: "", category: "", name: "", warna: "", merk: "Custom", type: "", serialNumber: "", fisik: "Baru", tglBeli: "", harga: "0", qty: "1", owner: "Origin", usageType: "Reusable", peruntukan: "Deployment", peruntukanTouched: false, projectId: "" });
 // Mirror of the server heuristic — Client assets are always Deployment; Origin ops categories → Internal.
 const INTERNAL_CAT_RE = /laptop|komputer|infrastruktur|kantor|keamanan|hvac|pendingin|kamera|cctv|printer|server|jaringan/i;
 const derivePeruntukan = (category: string, owner: string): "Internal" | "Deployment" =>
@@ -54,6 +54,11 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
   const [pending, setPending] = React.useState<{ rows: any[] } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
+  // Proyek options (bind asset → project; project mode drives the deployment flow).
+  const [projects, setProjects] = React.useState<{ id: number; name: string; mode: string; client: string | null; status: string }[]>([]);
+  React.useEffect(() => {
+    api.getProjects().then(ps => setProjects(ps.map(p => ({ id: p.id, name: p.name, mode: p.mode, client: p.client ?? null, status: p.status })))).catch(() => {});
+  }, []);
 
   const rows = React.useMemo(() => {
     const q = search.toLowerCase();
@@ -75,7 +80,8 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
       warna: a.warna || "", merk: a.specs?.brand || "", type: a.type || "",
       serialNumber: a.serialNumber || "", fisik: a.fisik || "Baru", tglBeli: a.tglBeli || "",
       harga: String(a.financials?.purchaseCost ?? 0), qty: String(a.quantity ?? 1),
-      owner: a.owner || "Origin", usageType: a.usageType || "Reusable", peruntukan: a.peruntukan || "Deployment", peruntukanTouched: true
+      owner: a.owner || "Origin", usageType: a.usageType || "Reusable", peruntukan: a.peruntukan || "Deployment", peruntukanTouched: true,
+      projectId: a.projectId != null ? String(a.projectId) : ""
     });
     setFormErr(null);
     setEditing(a);
@@ -88,13 +94,16 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
     if (Number(form.qty) < 1) return setFormErr("Qty minimal 1.");
     setSaving(true);
     try {
+      // Internal assets never carry a deployment project, even if a stale value lingered in state.
+      const pid = form.peruntukan !== "Internal" && form.projectId ? Number(form.projectId) : null;
       if (editing === "new") {
         await api.importAssets("append", [{
           client: form.client.trim(), category: form.category.trim(), name: form.name.trim(),
           warna: form.warna.trim(), merk: form.merk.trim(), type: form.type.trim(),
           serialNumber: form.serialNumber.trim(), fisik: form.fisik, tglBeli: form.tglBeli,
           harga: Number(form.harga) || 0, qty: Number(form.qty) || 1,
-          owner: form.owner, usageType: form.usageType, peruntukan: form.peruntukan
+          owner: form.owner, usageType: form.usageType, peruntukan: form.peruntukan,
+          projectId: pid
         }]);
         setNotice(`Aset "${form.name.trim()}" ditambahkan (Fase 3 · Gudang).`);
       } else if (editing) {
@@ -105,6 +114,8 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
           harga: Number(form.harga) || 0, quantity: Number(form.qty) || 1,
           owner: form.owner, usageType: form.usageType, peruntukan: form.peruntukan
         });
+        // Bind/clear the project only when it changed (uses the dedicated endpoint).
+        if ((editing.projectId ?? null) !== pid) await api.setAssetProject(editing.id, pid);
         setNotice(`Aset ${editing.id} diperbarui.`);
       }
       setEditing(null);
@@ -326,7 +337,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Client <span className="text-rose-500">*</span></label>
-                <input name="client" list="am-clients" value={form.client} onChange={e => setForm({ ...form, client: e.target.value })} className={input} placeholder="pilih / ketik baru" />
+                <input name="client" list="am-clients" value={form.client} onChange={e => setForm({ ...form, client: e.target.value, projectId: "" })} className={input} placeholder="pilih / ketik baru" />
                 <datalist id="am-clients">{clientOptions.map(o => <option key={o} value={o} />)}</datalist>
               </div>
               <div className="space-y-1.5">
@@ -361,12 +372,25 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Peruntukan</label>
-                <select value={form.peruntukan} disabled={form.owner === "Client"} onChange={e => setForm({ ...form, peruntukan: e.target.value, peruntukanTouched: true })} className={`${input} cursor-pointer disabled:opacity-60`}>
+                <select value={form.peruntukan} disabled={form.owner === "Client"} onChange={e => setForm({ ...form, peruntukan: e.target.value, peruntukanTouched: true, projectId: e.target.value === "Internal" ? "" : form.projectId })} className={`${input} cursor-pointer disabled:opacity-60`}>
                   <option value="Deployment">Deployment (event / distribusi)</option>
                   <option value="Internal">Internal (dipegang karyawan)</option>
                 </select>
                 <p className="text-[10px] text-slate-400">Auto dari kategori, bisa diubah. Aset klien selalu Deployment. Internal → menu "Aset Internal".</p>
               </div>
+              {form.peruntukan !== "Internal" && (() => {
+                const opts = projects.filter(p => p.status === "active" && p.mode !== "Internal" && (p.client || "") === form.client.trim());
+                return (
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700">Proyek <span className="text-slate-400 font-normal">(opsional)</span></label>
+                    <select value={form.projectId} onChange={e => setForm({ ...form, projectId: e.target.value })} className={`${input} cursor-pointer`}>
+                      <option value="">— tanpa proyek —</option>
+                      {opts.map(p => <option key={p.id} value={p.id}>{p.name} · {p.mode}</option>)}
+                    </select>
+                    <p className="text-[10px] text-slate-400">{form.client.trim() ? (opts.length ? "Mode proyek nentuin alur deployment (Event/Distribusi)." : "Belum ada proyek untuk client ini — buat di Proyek & Lokasi.") : "Pilih Client dulu untuk lihat proyeknya."}</p>
+                  </div>
+                );
+              })()}
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Tgl Beli</label><input type="date" value={form.tglBeli} onChange={e => setForm({ ...form, tglBeli: e.target.value })} className={input} /></div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Harga (IDR)</label><input type="number" min="0" value={form.harga} onChange={e => setForm({ ...form, harga: e.target.value })} className={input} /></div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Qty <span className="text-rose-500">*</span></label><input name="qty" type="number" min="1" value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })} className={input} /></div>

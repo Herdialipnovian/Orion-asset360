@@ -223,6 +223,10 @@ export const fieldApi = {
   async addLocation(body: { name: string; type?: "Toko" | "Venue"; client?: string; area?: string; address?: string; gpsLat?: number; gpsLng?: number }): Promise<{ id: number; name: string; type: string; area: string | null }> {
     return req(`/locations`, { method: "POST", body: JSON.stringify(body) });
   },
+  // Area master (strict dropdown source for Tambah Toko — no free-text drift).
+  async areas(): Promise<{ id: number; name: string }[]> {
+    return req(`/areas`);
+  },
   // PIC sets up / relocates a venue leg (Fase 2 Event roadshow) from the field (online-only).
   async deployVenue(assetId: string, body: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string }): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(assetId)}/deploy-venue`, { method: "POST", body: JSON.stringify(body) });

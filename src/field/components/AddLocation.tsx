@@ -26,6 +26,7 @@ export default function AddLocation({
   const [name, setName] = React.useState("");
   const [type, setType] = React.useState<"Toko" | "Venue">("Toko");
   const [area, setArea] = React.useState(user.area || "");
+  const [areaOpts, setAreaOpts] = React.useState<{ id: number; name: string }[]>([]);
   const [address, setAddress] = React.useState("");
   const [gps, setGps] = React.useState<{ lat: number; lng: number } | null>(null);
   const [locating, setLocating] = React.useState(false);
@@ -37,6 +38,9 @@ export default function AddLocation({
     let live = true;
     setLocating(true);
     getGeo().then(g => { if (live) { setGps(g); setLocating(false); } });
+    // Strict dropdown: drop a prefilled area (user.area) that isn't in the master, so the shown
+    // placeholder and the submitted value never diverge.
+    fieldApi.areas().then(a => { if (live) { setAreaOpts(a); setArea(prev => a.some(x => x.name === prev) ? prev : ""); } }).catch(() => {});
     return () => { live = false; };
   }, []);
 
@@ -101,7 +105,11 @@ export default function AddLocation({
 
       <label className="flex flex-col gap-1.5">
         <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Area</span>
-        <input value={area} onChange={e => setArea(e.target.value)} placeholder="mis. Jakarta Selatan" className="rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-[#4d8bff]" />
+        <select value={area} onChange={e => setArea(e.target.value)} className="tap rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-[#4d8bff]">
+          <option value="">— pilih area —</option>
+          {areaOpts.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+        </select>
+        {areaOpts.length === 0 && <span className="text-[11px] text-amber-300">Belum ada master Area. Minta Admin tambah di menu Organisasi dulu.</span>}
       </label>
 
       <label className="flex flex-col gap-1.5">

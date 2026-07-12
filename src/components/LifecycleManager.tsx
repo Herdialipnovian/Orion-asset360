@@ -28,7 +28,8 @@ import {
   Play,
   RefreshCw,
   Building,
-  UserCheck
+  UserCheck,
+  Briefcase
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
 import { api } from "../api";
@@ -327,6 +328,7 @@ interface LifecycleManagerProps {
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
   onAuditSample?: (assetId: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }) => Promise<{ ok: boolean; error?: string }>;
+  onSetProject?: (assetId: string, projectId: number | null) => Promise<{ ok: boolean; error?: string }>;
   initialStageFilter?: number | string;
 }
 
@@ -417,6 +419,7 @@ export default function LifecycleManager({
   onDistribute,
   onPlaceToko,
   onAuditSample,
+  onSetProject,
   initialStageFilter = "ALL"
 }: LifecycleManagerProps) {
   const catOpts = categoryOptions && categoryOptions.length ? categoryOptions : CATEGORY_OPTIONS;
@@ -472,9 +475,11 @@ export default function LifecycleManager({
   const [handoverError, setHandoverError] = React.useState<string | null>(null);
 
   // Fase 2 Event — projects (to derive mode) + venue locations + venue-deploy modal state.
-  const [projects, setProjects] = React.useState<{ id: number; name: string; mode: string }[]>([]);
+  const [projects, setProjects] = React.useState<{ id: number; name: string; mode: string; client: string | null; area: string | null; status: string }[]>([]);
+  const [areaOptions, setAreaOptions] = React.useState<string[]>([]);
   React.useEffect(() => {
-    api.getProjects().then(ps => setProjects(ps.map(p => ({ id: p.id, name: p.name, mode: p.mode })))).catch(() => {});
+    api.getProjects().then(ps => setProjects(ps.map(p => ({ id: p.id, name: p.name, mode: p.mode, client: p.client ?? null, area: p.area ?? null, status: p.status })))).catch(() => {});
+    api.getAreas().then(as => setAreaOptions(as.map(a => a.name))).catch(() => {});
   }, []);
   const [venues, setVenues] = React.useState<{ id: number; name: string; area: string | null }[]>([]);
   const loadVenues = React.useCallback(async (client?: string | null) => {
@@ -531,6 +536,16 @@ export default function LifecycleManager({
   const [sampleMethod, setSampleMethod] = React.useState<"manual" | "auto">("manual");
   const [samplePctInput, setSamplePctInput] = React.useState("15");
   const [autoPct, setAutoPct] = React.useState<number | null>(null);
+  // Proyek binding (drives projectModeOf → which deploy action shows).
+  const [projBusy, setProjBusy] = React.useState(false);
+  const [projError, setProjError] = React.useState<string | null>(null);
+  const setProjectFor = async (projectId: number | null) => {
+    if (!detailAsset || !onSetProject) return;
+    setProjBusy(true); setProjError(null);
+    const res = await onSetProject(detailAsset.id, projectId);
+    setProjBusy(false);
+    if (!res.ok) setProjError(res.error || "Gagal menetapkan proyek.");
+  };
 
   const openDistribute = () => {
     if (!detailAsset) return;
@@ -633,6 +648,7 @@ export default function LifecycleManager({
   const openVenue = () => {
     if (!detailAsset) return;
     void loadVenues(detailAsset.client);
+    void loadDirectory(detailAsset.client);
     setVenueForm({ locationId: "", pic: "", setupDate: new Date().toISOString().slice(0, 10), note: "", signature: "" });
     setVenueError(null);
     setVenueOpen(true);
@@ -1038,12 +1054,16 @@ export default function LifecycleManager({
         <div className="space-y-2">
           {rows.map((r, i) => (
             <div key={i} className="grid grid-cols-12 gap-2 items-center bg-slate-50 border border-slate-200 rounded-lg p-2">
-              <input
-                className={`${base} col-span-5`}
-                placeholder="Tujuan / Area (cth. Cabang Bekasi)"
+              <select
+                className={`${base} col-span-5 cursor-pointer`}
                 value={r.area || ""}
                 onChange={e => setRows(rows.map((x, idx) => (idx === i ? { ...x, area: e.target.value } : x)))}
-              />
+              >
+                <option value="">— pilih area —</option>
+                {(r.area && !areaOptions.includes(r.area) ? [r.area, ...areaOptions] : areaOptions).map(a => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </select>
               <select
                 className={`${base} col-span-4 cursor-pointer`}
                 value={r.picPenerima || ""}
@@ -1079,6 +1099,11 @@ export default function LifecycleManager({
           {picOptions.length === 0 && (
             <p className="text-[10px] text-amber-600">
               Belum ada PIC untuk client {detailAsset?.client || "ini"}. Tambahkan dulu di User Management agar bisa dipilih.
+            </p>
+          )}
+          {areaOptions.length === 0 && (
+            <p className="text-[10px] text-amber-600">
+              Belum ada master Area. Tambahkan dulu di menu Organisasi agar Area bisa dipilih.
             </p>
           )}
           <div className="flex items-center justify-between pt-0.5">
@@ -1748,6 +1773,40 @@ export default function LifecycleManager({
 
                   {/* Internal custodian handover moved to the dedicated "Aset Internal" menu. */}
 
+                  {/* Proyek — binds the asset to a Project; its mode drives which deploy action
+                      (Event / Distribusi) appears below. One source of truth (client + mode + area). */}
+                  {onSetProject && !isInternalDeploy(detailAsset) && detailAsset.peruntukan !== "Internal" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 6 && (() => {
+                    const cur = detailAsset.projectId != null ? projects.find(p => p.id === detailAsset.projectId) : null;
+                    const base = projects.filter(p => p.status === "active" && p.mode !== "Internal" && (p.client || null) === (detailAsset.client || null));
+                    // Always keep the currently-bound project selectable so the controlled value
+                    // matches a real <option> (else the select shows "— tanpa proyek —" despite a binding).
+                    const opts = cur && !base.some(o => o.id === cur.id) ? [cur, ...base] : base;
+                    const modeLocked = !!(detailAsset.stageDetails as any)?.deployment?.mode; // after first deploy, mode is fixed
+                    return (
+                      <div className="bg-white border border-indigo-100 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-indigo-600 text-white p-1.5 rounded-lg"><Briefcase className="h-3.5 w-3.5" /></span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-extrabold text-slate-800">Proyek Deployment</p>
+                            <p className="text-[10px] text-slate-500">{cur ? `${cur.name} · ${cur.mode}${cur.area ? " · " + cur.area : ""}` : "Belum ditetapkan — pilih proyek untuk membuka aksi deployment."}</p>
+                          </div>
+                        </div>
+                        <select
+                          value={detailAsset.projectId ?? ""}
+                          disabled={projBusy || modeLocked}
+                          onChange={e => setProjectFor(e.target.value === "" ? null : Number(e.target.value))}
+                          className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-indigo-500 cursor-pointer disabled:opacity-50"
+                        >
+                          <option value="">— tanpa proyek —</option>
+                          {opts.map(p => <option key={p.id} value={p.id}>{p.name} · {p.mode}{p.area ? ` · ${p.area}` : ""}</option>)}
+                        </select>
+                        {opts.length === 0 && <p className="text-[10px] text-amber-600">Belum ada proyek {detailAsset.client ? `untuk ${detailAsset.client}` : ""}. Buat dulu di Proyek &amp; Lokasi.</p>}
+                        {modeLocked && <p className="text-[10px] text-slate-400">Mode sudah terkunci ({(detailAsset.stageDetails as any).deployment.mode}) karena aset sudah mulai deployment.</p>}
+                        {projError && <p className="text-[10px] text-rose-600 font-semibold">{projError}</p>}
+                      </div>
+                    );
+                  })()}
+
                   {/* Fase 2 Event — setup / relocate asset at a venue (roadshow). */}
                   {onDeployVenue && projectModeOf(detailAsset) === "Event" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 6 && (() => {
                     const hasLegs = (detailAsset.stageDetails?.deployment?.legs?.length || 0) > 0;
@@ -2114,7 +2173,12 @@ export default function LifecycleManager({
                 {venues.length === 0 && <p className="text-[10px] text-amber-600">Belum ada venue untuk client ini. Tambahkan dulu di Proyek &amp; Lokasi (tipe Venue).</p>}
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">PIC di Venue</label><input value={venueForm.pic} onChange={e => setVenueForm({ ...venueForm, pic: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500" placeholder="PIC per-leg" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">PIC di Venue</label>
+                  <select value={venueForm.pic} onChange={e => setVenueForm({ ...venueForm, pic: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 cursor-pointer">
+                    <option value="">— pilih PIC —</option>
+                    {(venueForm.pic && !picOptions.includes(venueForm.pic) ? [venueForm.pic, ...picOptions] : picOptions).map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
                 <div className="space-y-1.5"><label className="font-bold text-slate-700">Tanggal Setup</label><input type="date" value={venueForm.setupDate} onChange={e => setVenueForm({ ...venueForm, setupDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500" /></div>
               </div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={venueForm.note} onChange={e => setVenueForm({ ...venueForm, note: e.target.value })} rows={2} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 resize-none" placeholder="cth. Tenda + sound + booth" /></div>

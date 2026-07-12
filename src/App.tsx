@@ -297,6 +297,10 @@ export default function App() {
     try { await api.auditSample(assetId, samples, meta); await refresh(); return { ok: true }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal audit sampling." }; }
   };
+  const handleSetProject = async (assetId: string, projectId: number | null): Promise<{ ok: boolean; error?: string }> => {
+    try { await api.setAssetProject(assetId, projectId); await refresh(); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal menetapkan proyek." }; }
+  };
 
   // Navigates straight to a tab while selecting a stage filter where applicable
   const handleTabRedirect = (tabName: string) => {
@@ -824,6 +828,7 @@ export default function App() {
                   onDistribute={handleDistribute}
                   onPlaceToko={handlePlaceToko}
                   onAuditSample={handleAuditSample}
+                  onSetProject={handleSetProject}
                   initialStageFilter={initialStageFilter}
                 />
               </motion.div>

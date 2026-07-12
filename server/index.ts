@@ -246,6 +246,7 @@ function buildImportedAsset(id: string, row: any): Asset {
       const p = row.peruntukan === "Internal" ? "Internal" : row.peruntukan === "Deployment" ? "Deployment" : derivePeruntukan(String(row.category || ""), own);
       return p === "Internal" && own !== "Origin" ? "Deployment" : p; // internal = Origin-only
     })(),
+    projectId: row.projectId != null && Number.isFinite(Number(row.projectId)) ? Number(row.projectId) : null,
     stageDetails: {
       request: { reqId: `REQ-${id}`, timelineWeeks: 0, specsRequired: "Registrasi aset fisik (master data)", vendorName: "-", picName: "-", approvalDate: tgl || now.slice(0, 10) },
       production: { prodLead: "-", qcInspector: "-", qcScore: 100, productionReportCode: "-", evidencePhoto: "", readyDate: tgl || "" },
@@ -424,6 +425,15 @@ app.post(
         await c.query(`insert into clients (name) values ($1) on conflict (name) do nothing`, [client]);
         clis.add(client);
         const id = await genAssetId(client, exec);
+        // Validate projectId: must EXIST and belong to THIS client — else drop to null (no
+        // dangling / cross-client project reference; assets.project_id has no DB-level FK).
+        if (row.projectId != null) {
+          const pn = Number(row.projectId);
+          if (Number.isFinite(pn)) {
+            const { rows: pr } = await c.query(`select client from projects where id=$1`, [pn]);
+            row.projectId = pr[0] && (pr[0].client || "") === client ? pn : null;
+          } else row.projectId = null;
+        }
         await insertAsset(buildImportedAsset(id, row), exec);
         added++;
       }
@@ -1194,14 +1204,18 @@ app.delete("/api/locations/:id", requireAuth, requireRole("Admin", "Logistik"), 
 app.post("/api/assets/:id/project", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req, res) => {
   const asset = await getAsset(req.params.id);
   if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
-  const pid = req.body?.projectId;
-  if (pid != null) {
-    const { rows } = await q(`select 1 from projects where id=$1`, [Number(pid)]);
+  const raw = req.body?.projectId;
+  let pid: number | null = null;
+  if (raw != null) {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0) return res.status(400).json({ error: "projectId tidak valid." });
+    const { rows } = await q(`select 1 from projects where id=$1`, [n]);
     if (!rows[0]) return res.status(400).json({ error: "Proyek tidak ditemukan." });
+    pid = n;
   }
-  await setAssetProject(asset.id, pid != null ? Number(pid) : null);
+  await setAssetProject(asset.id, pid);
   assetChanged(asset.id);
-  res.json({ ok: true, id: asset.id, projectId: pid != null ? Number(pid) : null });
+  res.json({ ok: true, id: asset.id, projectId: pid });
 }));
 
 // ── Fase 1 Internal: serah-terima aset Origin ke Karyawan (custodian) + BAST. Jumps to Fase 6

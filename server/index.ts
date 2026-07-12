@@ -472,6 +472,11 @@ app.patch(
     if (req.user!.role !== "Admin" && !allowed.includes(req.user!.role)) {
       return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang memproses aset ke Fase ${ns}.` });
     }
+    // Client-scope: a PIC may only advance assets belonging to their own client (mirrors deploy-venue,
+    // install/assign, distribute, …). Admin/Logistik operate across clients.
+    if (req.user!.role === "PIC" && (req.user!.client || null) !== (asset.client || null)) {
+      return res.status(403).json({ error: "Aset ini di luar client Anda." });
+    }
 
     // Lifecycle graph guard: block illegal jumps. Admin may override with meta.force=true.
     const cur = asset.currentStage;
@@ -595,63 +600,57 @@ app.post(
     const details = updatedDetails || asset.stageDetails;
     const operator = meta?.operator || req.user!.name;
 
-    // Ship ALL -> whole record moves to Fase 4 (no split)
-    if (shipQty === asset.quantity) {
-      await updateAssetStageRow(id, { currentStage: 4, currentLocation: location, stageDetails: details, auditScore: asset.auditScore, maintenanceStatus: asset.maintenanceStatus });
-      const log: ActivityLog = {
-        id: `LOG-SHIP-${Date.now()}`, timestamp: now, assetId: id, assetName: asset.name, stage: 4,
-        action: meta?.logAction || `Surat Jalan terbit: ${shipQty} unit dikirim.`, operator, type: "success"
-      };
-      await insertLog(log);
+    // Authoritative move: lock the parent row and RE-VALIDATE stage + stock INSIDE the tx (mirrors
+    // batch-ship). Without this, two concurrent partial ships each read the stale qty and both split,
+    // over-shipping stock / minting a duplicate -SJ id (silently dropped by ON CONFLICT) / corrupting
+    // the parent stage if it raced a full ship. The financial divisor stays the pre-tx snapshot qty.
+    const perUnit = (asset.financials?.purchaseCost || 0) / (asset.quantity || 1);
+    const perDisposal = (asset.financials?.disposalValue || 0) / (asset.quantity || 1);
+    let outcome: { mode: "full" | "split"; childId?: string; remaining?: number };
+    try {
+      outcome = await tx(async c => {
+        const exec = (t: string, p?: any[]) => c.query(t, p);
+        const { rows } = await exec(`select current_stage, quantity from assets where id=$1 for update`, [id]);
+        if (!rows.length) throw Object.assign(new Error("Aset tidak ditemukan."), { http: 404 });
+        if (rows[0].current_stage !== 3) throw Object.assign(new Error(`Surat Jalan hanya dari Fase 3 (Gudang). Aset ini di Fase ${rows[0].current_stage}.`), { http: 422, code: "illegal_transition" });
+        const stock = Number(rows[0].quantity);
+        if (shipQty > stock) throw Object.assign(new Error(`Qty kirim (${shipQty}) melebihi stok di gudang (${stock}).`), { http: 422, code: "qty_exceeds" });
+        if (shipQty === stock) {
+          // Ship ALL -> whole record moves to Fase 4 (no split)
+          await exec(`update assets set current_stage=4, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [id, location, JSON.stringify(details)]);
+          return { mode: "full" };
+        }
+        // Ship PARTIAL -> split off a child at Fase 4, keep the remainder at Fase 3
+        const remaining = stock - shipQty;
+        const cid = await genSplitId(id, exec);
+        const child: Asset = {
+          ...asset, id: cid, quantity: shipQty, currentStage: 4, currentLocation: location,
+          qrcode: `ASETIFY-${cid}`, createdAt: now, updatedAt: now,
+          specs: { ...(asset.specs || {}), splitFrom: id },
+          financials: {
+            ...(asset.financials || { purchaseCost: 0, maintenanceCost: 0, disposalValue: 0 }),
+            purchaseCost: Math.round(perUnit * shipQty), disposalValue: Math.round(perDisposal * shipQty)
+          },
+          stageDetails: { ...asset.stageDetails, shipping }
+        };
+        await insertAsset(child, exec);
+        await exec(`update assets set quantity=$2, financials=$3::jsonb, updated_at=now() where id=$1`,
+          [id, remaining, JSON.stringify({ ...(asset.financials || {}), purchaseCost: Math.round(perUnit * remaining), disposalValue: Math.round(perDisposal * remaining) })]);
+        return { mode: "split", childId: cid, remaining };
+      });
+    } catch (e: any) {
+      if (e && e.http) return res.status(e.http).json({ ...(e.code ? { code: e.code } : {}), error: e.message });
+      throw e;
+    }
+
+    if (outcome.mode === "full") {
+      await insertLog({ id: `LOG-SHIP-${Date.now()}`, timestamp: now, assetId: id, assetName: asset.name, stage: 4, action: meta?.logAction || `Surat Jalan terbit: ${shipQty} unit dikirim.`, operator, type: "success" });
       assetChanged(id);
       return res.json({ mode: "full", original: await getAsset(id), child: null });
     }
-
-    // Ship PARTIAL -> split off a child at Fase 4, keep the remainder at Fase 3
-    const perUnit = (asset.financials?.purchaseCost || 0) / asset.quantity;
-    const perDisposal = (asset.financials?.disposalValue || 0) / asset.quantity;
-    const remaining = asset.quantity - shipQty;
-
-    const childId = await tx(async c => {
-      const exec = (t: string, p?: any[]) => c.query(t, p);
-      const cid = await genSplitId(id, exec);
-      const child: Asset = {
-        ...asset,
-        id: cid,
-        quantity: shipQty,
-        currentStage: 4,
-        currentLocation: location,
-        qrcode: `ASETIFY-${cid}`,
-        createdAt: now,
-        updatedAt: now,
-        specs: { ...(asset.specs || {}), splitFrom: id },
-        financials: {
-          ...(asset.financials || { purchaseCost: 0, maintenanceCost: 0, disposalValue: 0 }),
-          purchaseCost: Math.round(perUnit * shipQty),
-          disposalValue: Math.round(perDisposal * shipQty)
-        },
-        stageDetails: { ...asset.stageDetails, shipping }
-      };
-      await insertAsset(child, exec);
-      await exec(`update assets set quantity=$2, financials=$3::jsonb, updated_at=now() where id=$1`, [
-        id,
-        remaining,
-        JSON.stringify({ ...(asset.financials || {}), purchaseCost: Math.round(perUnit * remaining), disposalValue: Math.round(perDisposal * remaining) })
-      ]);
-      return cid;
-    });
-
-    const shipLog: ActivityLog = {
-      id: `LOG-SHIP-${Date.now()}`, timestamp: now, assetId: childId, assetName: asset.name, stage: 4,
-      action: `${meta?.logAction || "Surat Jalan terbit"}: ${shipQty} unit dikirim (dipisah dari ${id}).`, operator, type: "success"
-    };
-    await insertLog(shipLog);
-    const splitLog: ActivityLog = {
-      id: `LOG-SPLIT-${Date.now()}`, timestamp: now, assetId: id, assetName: asset.name, stage: asset.currentStage,
-      action: `${shipQty} unit dikirim via ${childId}; sisa ${remaining} unit tetap di Gudang.`, operator, type: "info"
-    };
-    await insertLog(splitLog);
-
+    const childId = outcome.childId!;
+    await insertLog({ id: `LOG-SHIP-${Date.now()}`, timestamp: now, assetId: childId, assetName: asset.name, stage: 4, action: `${meta?.logAction || "Surat Jalan terbit"}: ${shipQty} unit dikirim (dipisah dari ${id}).`, operator, type: "success" });
+    await insertLog({ id: `LOG-SPLIT-${Date.now()}`, timestamp: now, assetId: id, assetName: asset.name, stage: 3, action: `${shipQty} unit dikirim via ${childId}; sisa ${outcome.remaining} unit tetap di Gudang.`, operator, type: "info" });
     assetChanged(id);
     res.json({ mode: "split", original: await getAsset(id), child: await getAsset(childId) });
   })
@@ -737,7 +736,8 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
   if (!driverName) return res.status(400).json({ error: "Nama driver wajib diisi." });
   const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
   if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
-  const suratJalanNo = String(b.suratJalanNo || "").trim() || `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
+  const clientSuppliedSJ = !!String(b.suratJalanNo || "").trim();
+  let suratJalanNo = String(b.suratJalanNo || "").trim() || `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
 
   // Validate every item up front (all-or-nothing) — must be a real, non-Internal Gudang (Fase 3) asset.
   const seen = new Set<string>();
@@ -755,6 +755,22 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
     if (qty > asset.quantity) return res.status(422).json({ code: "qty_exceeds", error: `Qty kirim untuk ${it.id} (${qty}) melebihi stok gudang (${asset.quantity}).` });
     plan.push({ asset, qty });
   }
+  // One Surat Jalan / lockstep group can't span clients (group-advance moves all members together);
+  // a PIC is further restricted to their own client.
+  const batchClients = [...new Set(plan.map(p => p.asset.client || ""))];
+  if (batchClients.length > 1) return res.status(400).json({ error: "Satu Surat Jalan tidak boleh mencampur aset dari lebih dari satu client." });
+  if (req.user!.role === "PIC" && (batchClients[0] || null) !== (req.user!.client || null)) return res.status(403).json({ error: "Aset di luar client Anda." });
+
+  // The batchId (= Surat Jalan number) drives lockstep group movement, so it must be UNIQUE — otherwise
+  // two dispatches sharing a number would advance together. Reject a duplicate operator-supplied number;
+  // regenerate a colliding auto-number.
+  const sjExists = async (sj: string) => (await q(`select 1 from assets where stage_details->'shipping'->>'batchId' = $1 limit 1`, [sj])).rows.length > 0;
+  if (clientSuppliedSJ) {
+    if (await sjExists(suratJalanNo)) return res.status(409).json({ code: "sj_duplicate", error: `Nomor Surat Jalan ${suratJalanNo} sudah dipakai pengiriman lain.` });
+  } else {
+    for (let i = 0; i < 6 && (await sjExists(suratJalanNo)); i++) suratJalanNo = `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
+  }
+
   // Deterministic lock order (by asset id) so two overlapping batches can't deadlock on their row locks.
   plan.sort((x, y) => (x.asset.id < y.asset.id ? -1 : x.asset.id > y.asset.id ? 1 : 0));
 
@@ -854,6 +870,11 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
         [batchId, fromStage]
       );
       if (!rows.length) throw Object.assign(new Error("Tidak ada anggota grup di fase ini."), { http: 422 });
+      // Client-scope: a PIC may only advance a group whose members all belong to their own client
+      // (one call moves N assets, so an unscoped call is a cross-client BAC). Admin/Logistik are global.
+      if (req.user!.role === "PIC" && rows.some(r => (r.client || null) !== (req.user!.client || null))) {
+        throw Object.assign(new Error("Grup ini memuat aset di luar client Anda."), { http: 403 });
+      }
       for (const r of rows) {
         const sd = r.stage_details || {};
         const merged = stageKey ? { ...sd, [stageKey]: { ...(sd[stageKey] || {}), ...section } } : sd;
@@ -1600,8 +1621,10 @@ app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logi
   const now = new Date().toISOString().slice(0, 10);
   let projectId: number | null = null, projectName: string | null = null;
   if (b.projectId != null) {
-    const { rows: pr } = await q(`select id, name from projects where id=$1`, [Number(b.projectId)]);
-    if (pr[0]) { projectId = pr[0].id; projectName = pr[0].name; }
+    // Only link a project that belongs to the SAME client as the asset (don't let a foreign project
+    // get stamped onto this asset's deployment).
+    const { rows: pr } = await q(`select id, name, client from projects where id=$1`, [Number(b.projectId)]);
+    if (pr[0] && (pr[0].client || "") === (pre.client || "")) { projectId = pr[0].id; projectName = pr[0].name; }
   }
   // Row-lock so concurrent relocations can't drop a leg / collide on seq — AND so the transit
   // invariant ("at most one shipment in transit") is validated against the locked row, not a stale pre-read.

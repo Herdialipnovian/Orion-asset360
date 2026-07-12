@@ -9,7 +9,7 @@ import type { Response, NextFunction } from "express";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { q, getAssets, getAsset, insertAsset, insertLog, updateAssetStageRow, getLogs, tx, genAssetId, genSplitId, updateAssetCore, deleteAsset, setAssetProject, logHash } from "./db";
+import { q, getAssets, getAsset, insertAsset, insertLog, updateAssetStageRow, getLogs, tx, genAssetId, genSplitId, updateAssetCore, deleteAsset, setAssetProject, logHash, rowToAsset } from "./db";
 import { requireAuth, requireAuthFlexible, requireRole, signToken, verifyPassword, hashPassword, STAGE_ROLE, type AuthedReq } from "./auth";
 import { migrate, SEED_SETTINGS } from "./migrate";
 import { computeLocation, DEFAULT_LOG, TRANSITIONS, isLegalTransition, EVIDENCE_REQUIRED } from "./lifecycle";
@@ -548,7 +548,16 @@ app.patch(
     };
     await insertLog(log);
 
-    const out = { asset: await getAsset(id), log };
+    // Returning to Gudang (Fase 3) folds any partial-shipment split back onto the original card.
+    let surfaceId = id;
+    let mergedInto: string | null = null;
+    if (ns === 3) {
+      const fb = await foldBackOnReturn(asset, meta?.operator || req.user!.name);
+      surfaceId = fb.surfaceId;
+      mergedInto = fb.mergedInto;
+    }
+
+    const out = { asset: await getAsset(surfaceId), log, ...(mergedInto ? { merged: true, mergedInto } : {}) };
     await saveIdempotent(idemKey, `stage:${id}`, out);
     assetChanged(id);
     res.json(out);
@@ -647,6 +656,66 @@ app.post(
     res.json({ mode: "split", original: await getAsset(id), child: await getAsset(childId) });
   })
 );
+
+// --- Merge a returned partial-shipment split back into its original card ---
+// A partial ship splits off a child ("<id>-SJ<n>", specs.splitFrom=<id>) and keeps the remainder in
+// Gudang. When a split child comes BACK to Gudang (Fase 3) it should re-join the original card, not
+// linger as a separate row — e.g. kabel 5 → ship 1 → (kabel 4 + kabel 1) → return → kabel 5 again.
+// Symmetric: also absorbs any split children already waiting in Gudang when the ROOT itself lands there.
+// Only merges INTO a root that is itself in Gudang (Fase 3); otherwise children wait until it returns.
+// Financials: purchase/disposal are summed (they were split proportionally); maintenance takes the max
+// (the split copies it whole, so summing would double-count the shared base). Non-fatal on any error.
+async function reconcileGudangSplits(rootId: string, operator: string): Promise<{ merged: boolean; absorbed: string[]; rootId: string }> {
+  try {
+    const r = await tx(async c => {
+      const rootRes = await c.query(`select * from assets where id=$1 for update`, [rootId]);
+      if (!rootRes.rows.length) return null;
+      const root = rowToAsset(rootRes.rows[0]);
+      if (root.currentStage !== 3) return null; // can only merge into a card that's home in Gudang
+      const kids = await c.query(
+        `select * from assets where specs->>'splitFrom' = $1 and current_stage = 3 and id <> $1 order by id for update`,
+        [rootId]
+      );
+      if (!kids.rows.length) return null;
+      let qty = root.quantity;
+      const rf: any = { purchaseCost: 0, maintenanceCost: 0, disposalValue: 0, ...(root.financials || {}) };
+      const absorbed: string[] = [];
+      for (const kr of kids.rows) {
+        const kid = rowToAsset(kr);
+        qty += kid.quantity;
+        const kf: any = kid.financials || {};
+        rf.purchaseCost = (rf.purchaseCost || 0) + (kf.purchaseCost || 0);
+        rf.disposalValue = (rf.disposalValue || 0) + (kf.disposalValue || 0);
+        rf.maintenanceCost = Math.max(rf.maintenanceCost || 0, kf.maintenanceCost || 0);
+        await c.query(`delete from assets where id=$1`, [kid.id]);
+        absorbed.push(kid.id);
+      }
+      await c.query(`update assets set quantity=$2, financials=$3::jsonb, updated_at=now() where id=$1`, [rootId, qty, JSON.stringify(rf)]);
+      return { name: root.name, prevQty: root.quantity, newQty: qty, absorbed };
+    });
+    if (!r) return { merged: false, absorbed: [], rootId };
+    await insertLog({
+      id: `LOG-MERGE-${Date.now()}-${rootId}`, timestamp: new Date().toISOString(), assetId: rootId, assetName: r.name, stage: 3,
+      action: `${r.absorbed.length} kiriman kembali digabung ke kartu asal ${rootId} (${r.absorbed.join(", ")}); qty ${r.prevQty} → ${r.newQty}.`,
+      operator, type: "success"
+    });
+    for (const cid of r.absorbed) assetChanged(cid);
+    assetChanged(rootId);
+    return { merged: true, absorbed: r.absorbed, rootId };
+  } catch (e) {
+    console.error("reconcileGudangSplits failed for", rootId, e);
+    return { merged: false, absorbed: [], rootId };
+  }
+}
+
+// After an asset lands in Gudang (Fase 3), fold split shipments back onto the original card and return
+// the id the caller should surface (the original card if THIS asset merged away, else the asset itself).
+async function foldBackOnReturn(asset: Asset, operator: string): Promise<{ mergedInto: string | null; surfaceId: string }> {
+  const rootId = (asset.specs as any)?.splitFrom || asset.id;
+  const rec = await reconcileGudangSplits(rootId, operator);
+  if (rec.merged && rec.absorbed.includes(asset.id)) return { mergedInto: rootId, surfaceId: rootId };
+  return { mergedInto: null, surfaceId: asset.id };
+}
 
 // --- Consolidated dispatch (Fase 4): ONE Surat Jalan / driver / destination for MANY assets ---
 // items:[{id, qty}]. Each item ships full (whole record → Fase 4) or partial (split a child at
@@ -802,7 +871,18 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
     await insertLog({ id: `LOG-GRP-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: toStage, action: `${logAction} (grup ${batchId})`, operator, type: "success" });
     assetChanged(id);
   }
-  res.json({ ok: true, count: affected.length, assets: await Promise.all(affected.map(id => getAsset(id))) });
+  // Returning to Gudang (Fase 3) folds any partial-shipment splits back onto the original cards.
+  let surfaceIds = affected;
+  if (toStage === 3) {
+    const surfaced = new Set<string>();
+    for (const id of affected) {
+      const a = await getAsset(id);
+      if (!a) continue; // already absorbed by a sibling split's reconcile this pass
+      surfaced.add((await foldBackOnReturn(a, operator)).surfaceId);
+    }
+    surfaceIds = [...surfaced];
+  }
+  res.json({ ok: true, count: affected.length, assets: (await Promise.all(surfaceIds.map(id => getAsset(id)))).filter(Boolean) });
 }));
 
 // --- PIC assigns / re-assigns install portions (Fase 6, in-place) ---
@@ -1485,8 +1565,9 @@ app.post("/api/assets/:id/return-internal", requireAuth, requireRole("Admin", "L
   const stageDetails = { ...asset.stageDetails, deployment: dep };
   await updateAssetStageRow(asset.id, { currentStage: 3, currentLocation: "Gudang Utama Origin", stageDetails });
   await insertLog({ id: `LOG-RETURN-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: 3, action: `Aset internal ditarik dari ${who} → kembali ke Gudang`, operator: req.user!.name, type: "success" });
+  const fb = await foldBackOnReturn(asset, req.user!.name);
   assetChanged(asset.id);
-  res.json({ asset: await getAsset(asset.id) });
+  res.json({ asset: await getAsset(fb.surfaceId), ...(fb.mergedInto ? { merged: true, mergedInto: fb.mergedInto } : {}) });
 }));
 
 // ── Fase 2 Event/Roadshow: deploy asset(-package) at a Venue as a Leg. Called again to RELOCATE
@@ -1669,8 +1750,9 @@ app.post("/api/assets/:id/arrive-warehouse", requireAuth, requireRole("Admin", "
   });
   if ((result as any).http) return res.status((result as any).http).json((result as any).body);
   await insertLog({ id: `LOG-RETURN-ARRIVE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: id, assetName: pre.name, stage: 3, action: `Tiba di gudang — aset kembali ke Fase 3 (roadshow selesai)`, operator: req.user!.name, type: "success" });
+  const fb = await foldBackOnReturn(pre, req.user!.name);
   assetChanged(id);
-  res.json({ asset: await getAsset(id) });
+  res.json({ asset: await getAsset(fb.surfaceId), ...(fb.mergedInto ? { merged: true, mergedInto: fb.mergedInto } : {}) });
 }));
 
 // ── Fase 3 Distribusi helpers + endpoints: fan-out placement per toko, per-toko reporting, sampling audit. ──

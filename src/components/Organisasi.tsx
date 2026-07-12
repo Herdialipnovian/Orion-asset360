@@ -64,7 +64,7 @@ export default function Organisasi({ user, onChanged }: { user: AuthUser; onChan
     <div className="space-y-6">
       <div className="pb-2 border-b border-slate-100">
         <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2"><Building2 className="h-5 w-5 text-blue-600" /> Organisasi</h2>
-        <p className="text-slate-400 text-xs mt-0.5">Client, Area, Kategori Aset &amp; Karyawan — master pendukung aset, deployment &amp; custodian.</p>
+        <p className="text-slate-400 text-xs mt-0.5">Client, Area, Kategori Aset, dan Karyawan — data master pendukung aset, deployment, dan custodian.</p>
       </div>
       {err && <div className="flex items-center gap-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><AlertTriangle className="h-4 w-4" /> {err}</div>}
       {loading ? (
@@ -106,9 +106,9 @@ function ClientCard({ clients, onChange, onErr }: { clients: Client[]; onChange:
       if (editing === "new") await api.createClient(payload);
       else if (editing) await api.updateClient(editing.id, payload);
       setEditing(null); onChange();
-    } catch (e: any) { setMerr(e?.message || "Gagal simpan client."); } finally { setBusy(false); }
+    } catch (e: any) { setMerr(e?.message || "Gagal menyimpan client."); } finally { setBusy(false); }
   };
-  const del = async (c: Client) => { try { await api.deleteClient(c.id); setConfirmDel(null); onChange(); } catch (er: any) { onErr(er?.message || "Gagal hapus."); } };
+  const del = async (c: Client) => { try { await api.deleteClient(c.id); setConfirmDel(null); onChange(); } catch (er: any) { onErr(er?.message || "Gagal menghapus."); } };
 
   const inp = "w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500";
   return (
@@ -116,7 +116,7 @@ function ClientCard({ clients, onChange, onErr }: { clients: Client[]; onChange:
       <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
         <Store className="h-4 w-4 text-blue-600" />
         <h3 className="font-bold text-slate-800 text-sm">Client</h3>
-        <span className="text-[10px] text-slate-400">· kategori proyek (Event / Distribusi / Internal) &amp; list toko</span>
+        <span className="text-[10px] text-slate-400">· kategori proyek (Event / Distribusi / Internal) dan daftar toko</span>
         <button onClick={openNew} className="ml-auto flex items-center gap-1 text-[11px] bg-blue-600 hover:bg-blue-700 text-white font-bold px-2.5 py-1.5 rounded-lg"><Plus className="h-3.5 w-3.5" /> Tambah</button>
       </div>
       <div className="overflow-x-auto">
@@ -125,7 +125,7 @@ function ClientCard({ clients, onChange, onErr }: { clients: Client[]; onChange:
             <tr className="text-slate-400 border-b border-slate-100 bg-slate-50/60">
               <th className="text-left font-extrabold px-5 py-2.5">Client</th>
               <th className="text-left font-extrabold px-5 py-2.5">Tipe Proyek</th>
-              <th className="text-left font-extrabold px-5 py-2.5">List Toko</th>
+              <th className="text-left font-extrabold px-5 py-2.5">Daftar Toko</th>
               <th className="text-right font-extrabold px-5 py-2.5">Aksi</th>
             </tr>
           </thead>
@@ -169,10 +169,10 @@ function ClientCard({ clients, onChange, onErr }: { clients: Client[]; onChange:
               <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-5 space-y-4 text-xs">
-              <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama Client <span className="text-rose-500">*</span></label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inp} placeholder="cth. AICE" /></div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama Client <span className="text-rose-500">*</span></label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inp} placeholder="contoh: AICE" /></div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Tipe Proyek</label>
-                <p className="text-[10px] text-slate-400 -mt-1">Boleh lebih dari satu — satu client bisa jalanin Event &amp; Distribusi sekaligus.</p>
+                <p className="text-[10px] text-slate-400 -mt-1">Boleh lebih dari satu — satu client dapat menjalankan Event dan Distribusi sekaligus.</p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   {DEPLOY_TYPES.map(t => {
                     const on = form.deploymentTypes.includes(t);
@@ -187,8 +187,8 @@ function ClientCard({ clients, onChange, onErr }: { clients: Client[]; onChange:
               </div>
               <label className="flex items-center gap-2.5 cursor-pointer select-none pt-1">
                 <input type="checkbox" checked={form.hasStoreList} onChange={e => setForm({ ...form, hasStoreList: e.target.checked })} className="h-4 w-4 rounded accent-blue-600" />
-                <span className="font-bold text-slate-700">Punya list toko</span>
-                <span className="text-[10px] text-slate-400">(relevan untuk Distribusi — titik/toko sudah terdaftar)</span>
+                <span className="font-bold text-slate-700">Punya daftar toko</span>
+                <span className="text-[10px] text-slate-400">(relevan untuk Distribusi — titik atau toko sudah terdaftar)</span>
               </label>
               {merr && <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5"><AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {merr}</div>}
               <div className="pt-2 border-t border-slate-100 flex justify-end gap-3">
@@ -204,7 +204,7 @@ function ClientCard({ clients, onChange, onErr }: { clients: Client[]; onChange:
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl border border-slate-100 p-6 text-center space-y-4">
             <div className="mx-auto w-12 h-12 rounded-full bg-rose-50 border border-rose-200 grid place-items-center"><Trash2 className="h-5 w-5 text-rose-500" /></div>
-            <p className="text-slate-500 text-xs">Hapus client <strong className="text-slate-800">{confirmDel.name}</strong>? Tidak bisa jika masih dipakai aset.</p>
+            <p className="text-slate-500 text-xs">Hapus client <strong className="text-slate-800">{confirmDel.name}</strong>? Client tidak dapat dihapus jika masih digunakan oleh aset.</p>
             <div className="flex gap-3">
               <button onClick={() => setConfirmDel(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg text-xs">Batal</button>
               <button onClick={() => del(confirmDel)} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-2 rounded-lg text-xs">Ya, Hapus</button>
@@ -227,7 +227,7 @@ function AreaCard({ areas, onChange, onErr }: { areas: MasterItem[]; onChange: (
   const add = async () => {
     if (busy) return;
     const name = adding.trim();
-    if (!name) { setAerr("Isi nama area dulu, lalu klik Tambah."); return; }
+    if (!name) { setAerr("Isi nama area terlebih dahulu, lalu klik Tambah."); return; }
     setBusy(true); setAerr(null);
     try { await api.createArea(name); setAdding(""); onChange(); } catch (e: any) { setAerr(e?.message || "Gagal menambah area."); } finally { setBusy(false); }
   };
@@ -235,7 +235,7 @@ function AreaCard({ areas, onChange, onErr }: { areas: MasterItem[]; onChange: (
     const name = editVal.trim();
     if (!name) return;
     setAerr(null);
-    try { await api.updateArea(id, name); setEditId(null); onChange(); } catch (e: any) { setAerr(e?.message || "Gagal ubah area."); }
+    try { await api.updateArea(id, name); setEditId(null); onChange(); } catch (e: any) { setAerr(e?.message || "Gagal mengubah area."); }
   };
   const del = async (id: number) => { setAerr(null); try { await api.deleteArea(id); onChange(); } catch (e: any) { setAerr(e?.message || "Gagal hapus area."); } };
 
@@ -248,7 +248,7 @@ function AreaCard({ areas, onChange, onErr }: { areas: MasterItem[]; onChange: (
       </div>
       <div className="p-4 flex gap-2">
         <input value={adding} onChange={e => setAdding(e.target.value)} onKeyDown={e => e.key === "Enter" && add()}
-          placeholder="Tambah area baru (cth. Palembang)"
+          placeholder="Tambah area baru (contoh: Palembang)"
           className="flex-1 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500" />
         <button onClick={add} disabled={busy} className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 rounded-lg">
           <Plus className="h-4 w-4" /> Tambah
@@ -292,7 +292,7 @@ function CategoryCard({ categories, onChange }: { categories: MasterItem[]; onCh
   const add = async () => {
     if (busy) return;
     const name = adding.trim();
-    if (!name) { setCerr("Isi nama kategori dulu, lalu klik Tambah."); return; }
+    if (!name) { setCerr("Isi nama kategori terlebih dahulu, lalu klik Tambah."); return; }
     setBusy(true); setCerr(null);
     try { await api.createMaster("categories", name); setAdding(""); onChange(); } catch (e: any) { setCerr(e?.message || "Gagal menambah kategori."); } finally { setBusy(false); }
   };
@@ -300,7 +300,7 @@ function CategoryCard({ categories, onChange }: { categories: MasterItem[]; onCh
     const name = editVal.trim();
     if (!name) return;
     setCerr(null);
-    try { await api.updateMaster("categories", id, name); setEditId(null); onChange(); } catch (e: any) { setCerr(e?.message || "Gagal ubah kategori."); }
+    try { await api.updateMaster("categories", id, name); setEditId(null); onChange(); } catch (e: any) { setCerr(e?.message || "Gagal mengubah kategori."); }
   };
   const del = async (id: number) => { setCerr(null); try { await api.deleteMaster("categories", id); onChange(); } catch (e: any) { setCerr(e?.message || "Gagal hapus kategori."); } };
 
@@ -314,7 +314,7 @@ function CategoryCard({ categories, onChange }: { categories: MasterItem[]; onCh
       <div className="p-4 flex gap-2">
         <input value={adding} onChange={e => setAdding(e.target.value)} onKeyDown={e => e.key === "Enter" && add()}
           aria-label="Nama kategori baru"
-          placeholder="Tambah kategori baru (cth. Booth)"
+          placeholder="Tambah kategori baru (contoh: Booth)"
           className="flex-1 bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500" />
         <button onClick={add} disabled={busy} className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 rounded-lg">
           <Plus className="h-4 w-4" /> Tambah
@@ -366,9 +366,9 @@ function EmployeeCard({ emps, onChange, onErr }: { emps: Employee[]; onChange: (
       if (editing === "new") await api.createEmployee({ code: form.code.trim(), name: form.name.trim(), department: form.department.trim(), position: form.position.trim() });
       else if (editing) await api.updateEmployee(editing.id, { code: form.code.trim(), name: form.name.trim(), department: form.department.trim(), position: form.position.trim() });
       setEditing(null); onChange();
-    } catch (e: any) { setMerr(e?.message || "Gagal simpan karyawan."); } finally { setBusy(false); }
+    } catch (e: any) { setMerr(e?.message || "Gagal menyimpan karyawan."); } finally { setBusy(false); }
   };
-  const del = async (e: Employee) => { try { await api.deleteEmployee(e.id); setConfirmDel(null); onChange(); } catch (er: any) { onErr(er?.message || "Gagal hapus."); } };
+  const del = async (e: Employee) => { try { await api.deleteEmployee(e.id); setConfirmDel(null); onChange(); } catch (er: any) { onErr(er?.message || "Gagal menghapus."); } };
 
   const inp = "w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500";
   return (
@@ -402,7 +402,7 @@ function EmployeeCard({ emps, onChange, onErr }: { emps: Employee[]; onChange: (
               <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-5 space-y-3 text-xs">
-              <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama <span className="text-rose-500">*</span></label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inp} placeholder="cth. Rian Hidayat" /></div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama <span className="text-rose-500">*</span></label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inp} placeholder="contoh: Rian Hidayat" /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5"><label className="font-bold text-slate-700">Kode/NIK</label><input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} className={inp} placeholder="ORG-IT-01" /></div>
                 <div className="space-y-1.5"><label className="font-bold text-slate-700">Divisi</label><input value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} className={inp} placeholder="IT" /></div>

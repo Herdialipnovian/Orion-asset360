@@ -27,7 +27,7 @@ export default function Login({ onSuccess }: { onSuccess: (u: AuthUser) => void 
       const { user } = await api.login(username.trim(), password);
       onSuccess(user);
     } catch (err: any) {
-      setError(err?.message || "Login gagal.");
+      setError(err?.message || "Gagal masuk. Silakan coba lagi.");
     } finally {
       setLoading(false);
     }
@@ -49,7 +49,7 @@ export default function Login({ onSuccess }: { onSuccess: (u: AuthUser) => void 
         <form onSubmit={submit} className="bg-[#0b1220] border border-[#16213a] rounded-2xl p-6 space-y-4 shadow-2xl">
           <div className="space-y-1">
             <h2 className="text-sm font-bold text-white">Masuk ke Portal</h2>
-            <p className="text-[11px] text-slate-500">Autentikasi diperlukan untuk mengakses data aset.</p>
+            <p className="text-[11px] text-slate-500">Silakan masuk terlebih dahulu untuk mengakses data aset.</p>
           </div>
 
           <div className="space-y-1.5">
@@ -100,7 +100,7 @@ export default function Login({ onSuccess }: { onSuccess: (u: AuthUser) => void 
         {/* Demo creds */}
         <div className="bg-[#0b1220]/60 border border-[#16213a] rounded-xl p-3.5 space-y-2">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Layers className="h-3 w-3" /> Akun Demo (klik untuk isi)
+            <Layers className="h-3 w-3" /> Akun Demo (klik untuk mengisi)
           </p>
           <div className="grid grid-cols-1 gap-1">
             {DEMO.map(d => (

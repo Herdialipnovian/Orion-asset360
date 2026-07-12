@@ -27,15 +27,15 @@ interface OperationsDocsProps {
 
 const DOC_TITLES: { [k: number]: string } = {
   1: "SURAT WORK ORDER & PROJECT BRIEF",
-  2: "DOKUMEN QUALITY CONTROL REPORT APPROVED",
-  3: "TAG LABEL BARCODE / QR-CODE KARTU KENDALI",
-  4: "SURAT JALAN DIGITAL & DELIVERY MANIFEST",
-  5: "POD (PROOF OF DELIVERY) ELECTRONIC RECEIPT",
-  6: "BERITA ACARA & REKAP PEMASANGAN DOKUMENTASI",
-  7: "LEMBAR AUDIT RUTIN RESMI & SCORING INDEX",
-  8: "TIKET PEMELIHARAAN AKTIF & INVOICE PARADIGMA",
-  9: "FORMULIR PENARIKAN & RE-ALLOCATION APPROVAL",
-  10: "BERITA ACARA PEMUSNAHAN / DISPOSAL REPORT"
+  2: "LAPORAN QUALITY CONTROL DISETUJUI",
+  3: "KARTU KENDALI BARCODE / QR-CODE",
+  4: "SURAT JALAN DIGITAL & MANIFEST PENGIRIMAN",
+  5: "POD (PROOF OF DELIVERY) - TANDA TERIMA ELEKTRONIK",
+  6: "BERITA ACARA & REKAP PEMASANGAN",
+  7: "LEMBAR AUDIT RUTIN RESMI & INDEKS PENILAIAN",
+  8: "TIKET PEMELIHARAAN AKTIF & INVOICE PERBAIKAN",
+  9: "FORMULIR PENARIKAN & PERSETUJUAN RELOKASI",
+  10: "BERITA ACARA PEMUSNAHAN ASET"
 };
 
 // Short document code prefix per step (used in the letterhead reference number)
@@ -109,7 +109,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
             Dokumen &amp; Output Terintegrasi
           </h2>
           <p className="text-slate-500 text-sm mt-1">
-            Setiap langkah alur menerbitkan dokumen digital. Pilih aset &amp; langkah, lalu <strong>Cetak / Simpan PDF</strong>. Dokumen hanya terbit
+            Setiap langkah dalam alur kerja menerbitkan dokumen digital. Pilih aset dan langkah yang diinginkan, lalu <strong>Cetak / Simpan PDF</strong>. Dokumen hanya terbit
             setelah aset benar-benar mencapai tahap tersebut.
           </p>
         </div>
@@ -245,10 +245,10 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                     <div className="space-y-4">
                       <div className="bg-blue-50 border-l-4 border-blue-600 p-3 text-blue-900 rounded">
                         <p className="font-bold text-xs uppercase flex items-center gap-1.5">
-                          <Clock className="h-4 w-4" /> KEBUTUHAN PROYEK DISETUJUI (Fase 1)
+                          <Clock className="h-4 w-4" /> Kebutuhan proyek disetujui
                         </p>
                         <p className="text-[10px] text-blue-700 mt-1">
-                          Dokumen dibuat otomatis setelah approval pengadaan client dialihkan ke fase produksi.
+                          Dokumen ini dibuat otomatis setelah persetujuan pengadaan dari client dialihkan ke fase produksi.
                         </p>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -265,7 +265,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                           <p className="font-bold text-indigo-700 border-b border-slate-100 pb-1">{activeAssetObj?.name}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-slate-400">PERSONEL PIC PENUGASAN:</p>
+                          <p className="text-[10px] text-slate-400">PIC PENUGASAN:</p>
                           <p className="font-bold text-slate-900 border-b border-slate-100 pb-1">{activeAssetObj?.stageDetails?.request?.picName || "Iwan Setiawan"}</p>
                         </div>
                       </div>
@@ -287,18 +287,18 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <p className="text-[10px] text-slate-400">LEADER FABRIKASI:</p>
+                          <p className="text-[10px] text-slate-400">KEPALA FABRIKASI:</p>
                           <p className="font-bold text-slate-800">{activeAssetObj?.stageDetails?.production?.prodLead || "Anton Hermawan"}</p>
                         </div>
                         <div>
                           <p className="text-[10px] text-slate-400">SKOR KELAYAKAN QC:</p>
                           <p className="font-extrabold text-emerald-600 flex items-center gap-1">
-                            <Award className="h-4 w-4" /> {activeAssetObj?.stageDetails?.production?.qcScore || 96}/100 LAYAK JALAN
+                            <Award className="h-4 w-4" /> {activeAssetObj?.stageDetails?.production?.qcScore || 96}/100 Layak Jalan
                           </p>
                         </div>
                       </div>
                       <div className="border border-slate-150 rounded-lg p-3.5 space-y-2">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">REKAP CHECKLIST UJI KELAYAKAN STANDARD FISIK:</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Rekap checklist uji kelayakan fisik:</p>
                         <div className="space-y-1 text-slate-600 font-medium">
                           <p className="flex items-center gap-1.5 text-emerald-600">✓ [Lolos] Kalibrasi Sensor Sensitivitas Voltan &amp; Amperage Arus Listrik</p>
                           <p className="flex items-center gap-1.5 text-emerald-600">✓ [Lolos] Uji Durabilitas Operasional Panas Selama 72 Jam Non-stop</p>
@@ -321,12 +321,12 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                           <p className="text-[11px] font-bold text-slate-800">{activeAssetObj?.name}</p>
                           <p className="text-[10px] font-mono text-slate-500">ID: {activeAssetObj?.id}</p>
                           <p className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 inline-block rounded">
-                            STANDAR REGISTERED - {activeAssetObj?.stageDetails?.inventory?.shelfLoc || "BI-A3-MAIN"}
+                            TERDAFTAR RESMI - {activeAssetObj?.stageDetails?.inventory?.shelfLoc || "BI-A3-MAIN"}
                           </p>
                         </div>
                       </div>
                       <div className="text-slate-400 text-[10px] max-w-xs mx-auto leading-relaxed">
-                        Stiker di atas dicetak oleh operator gudang untuk dilekatkan pada body fisik aset sebelum dikirim ke lokasi project.
+                        Stiker di atas dicetak oleh operator Gudang untuk ditempelkan pada bodi fisik aset sebelum dikirim ke lokasi kegiatan.
                       </div>
                     </div>
                   )}
@@ -340,7 +340,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                       </div>
                       <div className="grid grid-cols-2 gap-4 border border-slate-100 p-3 rounded-lg bg-slate-50/50">
                         <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">NAMA SUPIR (DRIVER):</span>
+                          <span className="text-[10px] text-slate-400 block font-medium">NAMA SUPIR:</span>
                           <strong className="text-slate-800 font-bold">{activeAssetObj?.stageDetails?.shipping?.driverName || "Dedi Sumantri"}</strong>
                         </div>
                         <div>
@@ -415,10 +415,10 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                       )}
                       <div className="bg-amber-50 border-l-4 border-amber-600 p-3 text-amber-950 rounded">
                         <p className="font-bold text-xs uppercase flex items-center gap-1.5">
-                          <AlertCircle className="h-4 w-4 text-amber-700" /> BUKTI PENERIMAAN POD DI LOKASI (Step 5)
+                          <AlertCircle className="h-4 w-4 text-amber-700" /> BUKTI PENERIMAAN POD DI LOKASI
                         </p>
                         <p className="text-[10px] text-amber-800 mt-1">
-                          Klaim penerimaan wajib diisi oleh perwakilan client saat truk kargo tiba melakukan serah terima fisik aset.
+                          Bukti penerimaan wajib diisi oleh perwakilan client saat armada tiba dan melakukan serah terima fisik aset.
                         </p>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -426,7 +426,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                           <p className="text-[10px] text-slate-400 font-medium">PENERIMA PERWAKILAN CLIENT:</p>
                           <input
                             type="text"
-                            placeholder="Ketik Nama Penerima..."
+                            placeholder="Ketik nama penerima..."
                             value={signatureName}
                             onChange={e => {
                               setSignatureName(e.target.value);
@@ -454,7 +454,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                               <p className="text-[8px] text-slate-400 not-italic font-mono mt-1">ID Hash: MD5-AS-9801A</p>
                             </div>
                           ) : (
-                            <span className="text-slate-400 text-[11px] no-print">Ketik nama penerima di atas untuk membubuhkan tanda-tangan otomatis...</span>
+                            <span className="text-slate-400 text-[11px] no-print">Ketik nama penerima di atas untuk membubuhkan tanda tangan otomatis...</span>
                           )}
                         </div>
                       </div>
@@ -469,7 +469,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                           <CheckCircle className="h-5 w-5" />
                         </div>
                         <div>
-                          <h5 className="font-extrabold text-slate-800 text-xs uppercase tracking-wide">BERITA ACARA PEMASANGAN SELESAI (6. BAST)</h5>
+                          <h5 className="font-extrabold text-slate-800 text-xs uppercase tracking-wide">Berita Acara Pemasangan Selesai (BAST)</h5>
                           <p className="text-[10px] text-slate-400">Instalasi &amp; Kalibrasi di Lokasi Client</p>
                         </div>
                       </div>
@@ -484,7 +484,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                         </div>
                       </div>
                       <div className="space-y-2 border border-slate-150 rounded-lg p-3.5 bg-slate-50/40">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">KOMPONEN DI-VERIFIKASI TIM TEKNISI DI CABANG:</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Komponen yang diverifikasi tim teknisi di cabang:</p>
                         <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-semibold text-slate-700 pl-1.5">
                           {(activeAssetObj?.stageDetails?.deployment?.verifiedItems?.length
                             ? activeAssetObj.stageDetails.deployment.verifiedItems
@@ -501,12 +501,12 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                   {selectedStep === 7 && (
                     <div className="space-y-4">
                       <div className="text-center space-y-1">
-                        <h5 className="font-extrabold text-slate-900 text-sm">SURAT LOG AUDIT EVALUASI KEPATUHAN (Step 7)</h5>
+                        <h5 className="font-extrabold text-slate-900 text-sm">LEMBAR AUDIT EVALUASI KEPATUHAN</h5>
                         <p className="text-[10px] text-slate-400">Auditor: {activeAssetObj?.stageDetails?.audit?.auditorName || "Siti Amelia"}</p>
                       </div>
                       <div className="grid grid-cols-2 gap-4 text-center py-2">
                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                          <p className="text-[10px] text-slate-400 block font-medium">SKOR STANDARD SLA:</p>
+                          <p className="text-[10px] text-slate-400 block font-medium">SKOR SLA:</p>
                           <strong className="text-2xl font-extrabold text-emerald-600">{activeAssetObj?.stageDetails?.audit?.scoring || activeAssetObj?.auditScore || 94}/100</strong>
                         </div>
                         <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
@@ -515,7 +515,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                         </div>
                       </div>
                       <div className="space-y-1.5">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase">REKOMENDASI AUDIT MUTLAK:</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase">Rekomendasi audit:</p>
                         <p className="p-3 bg-indigo-50 border border-indigo-150 rounded leading-relaxed text-slate-700 italic">
                           &quot;{activeAssetObj?.stageDetails?.audit?.recommendation || "Lakukan pembersihan berkala, pastikan AC ruangan penempatan berfungsi normal untuk menjaga kestabilan suhu perangkat."}&quot;
                         </p>
@@ -530,7 +530,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                         <p className="font-bold text-xs uppercase flex items-center gap-1.5">
                           <AlertCircle className="h-4 w-4 text-rose-600" /> TIKET PERAWATAN &amp; TROUBLESHOOTING AKTIF
                         </p>
-                        <p className="text-[10px] text-rose-800 mt-1">Mencatat sejarah perbaikan, biaya penggantian suku cadang, dan teknisi penanggungjawab.</p>
+                        <p className="text-[10px] text-rose-800 mt-1">Mencatat riwayat perbaikan, biaya penggantian suku cadang, dan teknisi penanggung jawab.</p>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -538,11 +538,11 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                           <p className="font-mono font-bold text-slate-900 border-b border-slate-100 pb-1">{activeAssetObj?.stageDetails?.maintenance?.activeTicketId || "TKT-2026-001"}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-slate-400">TEKNISI AHLI DIUTUS:</p>
+                          <p className="text-[10px] text-slate-400">TEKNISI YANG DITUGASKAN:</p>
                           <p className="font-bold text-slate-900 border-b border-slate-100 pb-1">{activeAssetObj?.stageDetails?.maintenance?.technician || "Aditia (AC Specialist)"}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-slate-400">BENTUK KERUSAKAN:</p>
+                          <p className="text-[10px] text-slate-400">JENIS KERUSAKAN:</p>
                           <p className="font-bold text-rose-600 border-b border-slate-100 pb-1">{activeAssetObj?.stageDetails?.maintenance?.issueType || "Descaling standard fan / software glitch"}</p>
                         </div>
                         <div>
@@ -556,14 +556,14 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                   {/* STEP 9 — RETRIEVAL */}
                   {selectedStep === 9 && (
                     <div className="space-y-4">
-                      <h5 className="font-extrabold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-150 pb-2">FORM RELOKASI &amp; PENARIKAN KEMBALI ASET</h5>
+                      <h5 className="font-extrabold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-150 pb-2">FORMULIR RELOKASI &amp; PENARIKAN ASET</h5>
                       <div className="grid grid-cols-2 gap-4 text-slate-600">
                         <div>
-                          <p className="text-[10px] text-slate-400">TANGGAL PENGAJUAN TARIK:</p>
+                          <p className="text-[10px] text-slate-400">TANGGAL PENGAJUAN PENARIKAN:</p>
                           <p className="font-bold text-slate-800">{activeAssetObj?.stageDetails?.retrieval?.requestDate || "Baru saja diajukan"}</p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-slate-400">REKOMENDASI KELAYAKAN RETUR:</p>
+                          <p className="text-[10px] text-slate-400">REKOMENDASI KELAYAKAN:</p>
                           <p className="font-bold text-indigo-700 uppercase">{activeAssetObj?.stageDetails?.retrieval?.assessResult || "REDEPLOY (Suku Cadang Bagus)"}</p>
                         </div>
                       </div>
@@ -578,15 +578,15 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                     <div className="space-y-4 text-slate-600">
                       <div className="text-center py-2 border-b border-slate-100">
                         <ShieldCheck className="h-8 w-8 text-slate-700 mx-auto mb-1.5" />
-                        <h5 className="font-extrabold text-slate-900 text-xs uppercase tracking-widest">SERTIFIKAT DESTRUKSI &amp; DISPOSAL RESMI</h5>
+                        <h5 className="font-extrabold text-slate-900 text-xs uppercase tracking-widest">SERTIFIKAT PEMUSNAHAN ASET RESMI</h5>
                         <p className="text-[10px] text-slate-400">Aset Lifecycle Retirement Protocol</p>
                       </div>
                       <p className="leading-relaxed text-slate-600 text-center px-4">
-                        Menyatakan secara sah, bahwa perangkat dengan Serial ID <strong className="font-mono text-slate-800">{activeAssetObj?.id || "AST-2026-X"}</strong> telah resmi diproses hancur (Scrap logam) atau dilelang karena tidak efisien secara finansial perawatan.
+                        Dengan ini dinyatakan secara sah bahwa perangkat dengan Serial ID <strong className="font-mono text-slate-800">{activeAssetObj?.id || "AST-2026-X"}</strong> telah resmi dimusnahkan (scrap logam) atau dilelang karena biaya perawatannya tidak lagi efisien secara finansial.
                       </p>
                       <div className="border border-slate-200/60 rounded-lg p-3 bg-slate-50/50 flex justify-between items-center">
                         <div>
-                          <p className="text-[10px] text-slate-400 font-medium">BIAYA RECOVERY NILAI SCRAP:</p>
+                          <p className="text-[10px] text-slate-400 font-medium">NILAI PEMULIHAN SCRAP:</p>
                           <strong className="text-emerald-600 text-sm font-extrabold">{formatRupiah(activeAssetObj?.stageDetails?.disposal?.scrapValue || 2500000)}</strong>
                         </div>
                         <div className="text-right">
@@ -627,7 +627,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
           <div className="no-print bg-slate-50 px-6 py-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <span className="text-slate-500 text-xs font-medium">
               {isIssued ? (
-                <>Dokumen diekspor dinamis dari arsip client {activeAssetObj?.client}.</>
+                <>Dokumen ini diekspor secara dinamis dari arsip client {activeAssetObj?.client}.</>
               ) : (
                 <>Dokumen terkunci hingga aset mencapai Fase {selectedStep}.</>
               )}

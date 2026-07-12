@@ -66,7 +66,7 @@ export default function Home({
           myPlacementTasks(a, user.id)
             .filter(p => !pl?.has(p.locationId))
             .forEach(p => labels.push(`Pasang di ${p.toko} (${p.remaining} unit)`));
-          if (canDeployVenue(a, user)) labels.push("Pindah venue (roadshow)");
+          if (canDeployVenue(a, user)) labels.push("Pindah ke Venue (Roadshow)");
           labels.push(...actions.map(x => x.verb));
           return { a, labels };
         })
@@ -112,7 +112,7 @@ export default function Home({
             <Boxes className="h-4 w-4" /> Hasil pencarian ({searchResults.length})
           </h2>
           {searchResults.length === 0 ? (
-            <EmptyState title="Tidak ada aset cocok" hint="Coba Asset ID atau nama lain." />
+            <EmptyState title="Tidak ada aset yang cocok" hint="Coba cari dengan Asset ID atau nama lain." />
           ) : (
             searchResults.map(a => (
               <button key={a.id} onClick={() => onOpen(a.id)} className={ROW_CLASS}>
@@ -131,8 +131,8 @@ export default function Home({
           ) : tasks.length === 0 ? (
             <EmptyState
               icon={<ClipboardList className="h-8 w-8" />}
-              title="Belum ada tugas untuk role kamu"
-              hint={`Sebagai ${ROLE_SHORT[user.role] || user.role}, aksi lapangan muncul di sini saat ada aset di fase yang bisa kamu proses. Scan QR aset untuk mulai.`}
+              title="Belum ada tugas untuk role Anda"
+              hint={`Sebagai ${ROLE_SHORT[user.role] || user.role}, aksi lapangan akan muncul di sini saat ada aset pada fase yang bisa Anda proses. Scan QR aset untuk memulai.`}
             />
           ) : (
             tasks.map(({ a, labels }) => (

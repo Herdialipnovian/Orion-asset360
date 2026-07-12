@@ -17,8 +17,8 @@ export default function FieldLogin({ onLogin }: { onLogin: (u: AuthUser) => void
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!username || !password) return setErr("Isi username & password.");
-    if (native && !server.trim()) return setErr("Isi alamat server dulu.");
+    if (!username || !password) return setErr("Silakan isi username dan password.");
+    if (native && !server.trim()) return setErr("Silakan isi alamat server terlebih dahulu.");
     if (native) setApiBase(server);
     setBusy(true);
     setErr("");
@@ -26,7 +26,7 @@ export default function FieldLogin({ onLogin }: { onLogin: (u: AuthUser) => void
       const { user } = await fieldApi.login(username.trim(), password);
       onLogin(user);
     } catch (e: any) {
-      setErr(e?.message || "Gagal masuk. Cek alamat server & koneksi.");
+      setErr(e?.message || "Gagal masuk. Periksa alamat server dan koneksi Anda.");
       setBusy(false);
     }
   }

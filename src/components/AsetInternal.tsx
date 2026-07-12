@@ -26,7 +26,7 @@ function SignaturePad({ onChange }: { onChange: (v: string) => void }) {
   const clear = () => { const c = ref.current!; c.getContext("2d")!.clearRect(0, 0, c.width, c.height); dirty.current = false; onChange(""); };
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between"><span className="font-bold text-slate-700">TTD BAST (opsional)</span><button type="button" onClick={clear} className="inline-flex items-center gap-1 text-[11px] text-slate-500 border border-slate-200 rounded px-2 py-0.5"><Eraser className="h-3 w-3" /> Hapus</button></div>
+      <div className="flex items-center justify-between"><span className="font-bold text-slate-700">Tanda Tangan BAST (opsional)</span><button type="button" onClick={clear} className="inline-flex items-center gap-1 text-[11px] text-slate-500 border border-slate-200 rounded px-2 py-0.5"><Eraser className="h-3 w-3" /> Hapus</button></div>
       <canvas ref={ref} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up} className="w-full touch-none rounded-lg border border-slate-200 bg-white" style={{ height: 130 }} />
     </div>
   );
@@ -62,28 +62,28 @@ export default function AsetInternal({ assets, user, onChanged }: { assets: Asse
   const openHandover = (a: Asset) => { setHoAsset(a); setHoForm({ custodianId: String(custodianOf(a).custodianId || ""), date: new Date().toISOString().slice(0, 10), note: "", signature: "" }); setHoErr(null); };
   const submitHandover = async () => {
     if (!hoAsset) return;
-    if (!hoForm.custodianId) return setHoErr("Pilih karyawan dulu.");
+    if (!hoForm.custodianId) return setHoErr("Silakan pilih karyawan terlebih dahulu.");
     setBusy(true); setHoErr(null);
     try {
       await api.handoverInternal(hoAsset.id, { custodianId: Number(hoForm.custodianId), handoverDate: hoForm.date || undefined, note: hoForm.note || undefined, signatureBase64: hoForm.signature || undefined });
       setHoAsset(null); onChanged();
-    } catch (e: any) { setHoErr(e?.message || "Gagal serah-terima."); } finally { setBusy(false); }
+    } catch (e: any) { setHoErr(e?.message || "Gagal melakukan serah-terima."); } finally { setBusy(false); }
   };
   const openOpname = (a: Asset) => { setOpAsset(a); setOpForm({ condition: "Baik", note: "" }); setOpErr(null); };
   const submitOpname = async () => {
     if (!opAsset) return;
     setBusy(true); setOpErr(null);
     try { await api.opnameInternal(opAsset.id, { condition: opForm.condition, note: opForm.note || undefined }); setOpAsset(null); onChanged(); }
-    catch (e: any) { setOpErr(e?.message || "Gagal opname."); } finally { setBusy(false); }
+    catch (e: any) { setOpErr(e?.message || "Gagal menyimpan opname."); } finally { setBusy(false); }
   };
-  const doReturn = async (a: Asset) => { setBusy(true); try { await api.returnInternal(a.id); setConfirmReturn(null); onChanged(); } catch (e: any) { setErr(e?.message || "Gagal tarik."); } finally { setBusy(false); } };
+  const doReturn = async (a: Asset) => { setBusy(true); try { await api.returnInternal(a.id); setConfirmReturn(null); onChanged(); } catch (e: any) { setErr(e?.message || "Gagal menarik aset."); } finally { setBusy(false); } };
 
   if (!manage) {
     return (
       <div className="bg-white border border-slate-100 rounded-xl p-12 text-center shadow-xs max-w-md mx-auto mt-10">
         <div className="mx-auto w-14 h-14 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mb-3"><Lock className="h-6 w-6 text-amber-500" /></div>
         <h3 className="font-extrabold text-slate-800 text-sm">Akses Terbatas</h3>
-        <p className="text-slate-500 text-xs mt-1">Aset Internal dikelola oleh <strong>Admin</strong> / <strong>Logistik</strong>. Role Anda: {user.role}.</p>
+        <p className="text-slate-500 text-xs mt-1">Aset Internal dikelola oleh <strong>Admin</strong> dan <strong>Logistik</strong>. Peran Anda saat ini: {user.role}.</p>
       </div>
     );
   }
@@ -94,11 +94,11 @@ export default function AsetInternal({ assets, user, onChanged }: { assets: Asse
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
         <div>
           <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2"><Boxes className="h-5 w-5 text-slate-700" /> Aset Internal</h2>
-          <p className="text-slate-400 text-xs mt-0.5">Aset operasional Origin — dipegang karyawan (custodian). {internal.length} aset · {heldCount} dipegang.</p>
+          <p className="text-slate-400 text-xs mt-0.5">Aset operasional Origin yang dipegang oleh karyawan. {internal.length} aset · {heldCount} sedang dipegang.</p>
         </div>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cari aset / custodian…" className="bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 w-56" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cari aset atau custodian…" className="bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-2 text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 w-56" />
         </div>
       </div>
       {err && <div className="flex items-center gap-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><AlertTriangle className="h-4 w-4" /> {err}</div>}
@@ -116,7 +116,7 @@ export default function AsetInternal({ assets, user, onChanged }: { assets: Asse
           </tr></thead>
           <tbody className="divide-y divide-slate-100">
             {internal.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Belum ada aset internal. Tandai aset "Internal" di Master Data (atau kategori Laptop/IT/CCTV otomatis Internal).</td></tr>
+              <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Belum ada aset internal. Tandai aset sebagai "Internal" di Master Data, atau gunakan kategori Laptop/IT/CCTV yang otomatis menjadi Internal.</td></tr>
             ) : internal.map(a => {
               const d = custodianOf(a);
               const held = isHeld(a);
@@ -169,10 +169,10 @@ export default function AsetInternal({ assets, user, onChanged }: { assets: Asse
                   <option value="">— pilih karyawan —</option>
                   {employees.map(e => <option key={e.id} value={e.id}>{e.name}{e.department ? ` · ${e.department}` : ""}</option>)}
                 </select>
-                {employees.length === 0 && <p className="text-[10px] text-amber-600">Belum ada karyawan. Tambahkan di menu Organisasi → Karyawan.</p>}
+                {employees.length === 0 && <p className="text-[10px] text-amber-600">Belum ada karyawan. Silakan tambahkan terlebih dahulu melalui menu Organisasi, submenu Karyawan.</p>}
               </div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Tanggal</label><input type="date" value={hoForm.date} onChange={e => setHoForm({ ...hoForm, date: e.target.value })} className={inp} /></div>
-              <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={hoForm.note} onChange={e => setHoForm({ ...hoForm, note: e.target.value })} rows={2} className={`${inp} resize-none`} placeholder="cth. Laptop + charger + tas" /></div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={hoForm.note} onChange={e => setHoForm({ ...hoForm, note: e.target.value })} rows={2} className={`${inp} resize-none`} placeholder="contoh: Laptop, charger, dan tas" /></div>
               <SignaturePad onChange={v => setHoForm({ ...hoForm, signature: v })} />
               {hoErr && <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5"><AlertTriangle className="h-3.5 w-3.5" /> {hoErr}</div>}
               <div className="pt-2 border-t border-slate-100 flex justify-end gap-3">
@@ -203,7 +203,7 @@ export default function AsetInternal({ assets, user, onChanged }: { assets: Asse
                   <option>Baik</option><option>Rusak Ringan</option><option>Rusak Berat</option><option>Hilang</option>
                 </select>
               </div>
-              <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan</label><textarea value={opForm.note} onChange={e => setOpForm({ ...opForm, note: e.target.value })} rows={2} className={`${inp} resize-none`} placeholder="cth. kondisi fisik ok, lengkap" /></div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan</label><textarea value={opForm.note} onChange={e => setOpForm({ ...opForm, note: e.target.value })} rows={2} className={`${inp} resize-none`} placeholder="contoh: kondisi fisik baik dan lengkap" /></div>
               {opErr && <div className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5"><AlertTriangle className="h-3.5 w-3.5" /> {opErr}</div>}
               <div className="pt-2 border-t border-slate-100 flex justify-end gap-3">
                 <button onClick={() => setOpAsset(null)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg">Batal</button>

@@ -50,7 +50,7 @@ export default function AssetUtilization({
     setLoading(true);
     api.getUtilization()
       .then(rows => { if (live) { setUtil(Object.fromEntries(rows.map(r => [r.assetId, r]))); setErr(null); } })
-      .catch(e => { if (live) setErr(e?.message || "Gagal memuat utilisasi."); })
+      .catch(e => { if (live) setErr(e?.message || "Gagal memuat data utilisasi aset. Silakan coba lagi."); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
   }, []);
@@ -97,10 +97,10 @@ export default function AssetUtilization({
   }, [rows]);
 
   const cards = [
-    { label: "Aset dipantau", value: String(totals.count), sub: `${totals.active} pernah dipakai`, Icon: Boxes, tone: "text-teal-600" },
-    { label: "Total deployment", value: String(totals.deploys), sub: "event · toko · serah-terima", Icon: Activity, tone: "text-blue-600" },
-    { label: "Nilai perolehan", value: rupiah(totals.cost), sub: "harga beli (Origin)", Icon: Wallet, tone: "text-slate-600" },
-    { label: "Nilai buku kini", value: rupiah(totals.book), sub: `susut ${rupiah(totals.depr)}`, Icon: TrendingDown, tone: "text-amber-600" }
+    { label: "Aset dipantau", value: String(totals.count), sub: `${totals.active} aset pernah dipakai`, Icon: Boxes, tone: "text-teal-600" },
+    { label: "Total penerjunan", value: String(totals.deploys), sub: "event, toko, dan serah-terima", Icon: Activity, tone: "text-blue-600" },
+    { label: "Nilai perolehan", value: rupiah(totals.cost), sub: "harga beli aset Origin", Icon: Wallet, tone: "text-slate-600" },
+    { label: "Nilai buku kini", value: rupiah(totals.book), sub: `penyusutan ${rupiah(totals.depr)}`, Icon: TrendingDown, tone: "text-amber-600" }
   ];
 
   return (
@@ -108,11 +108,11 @@ export default function AssetUtilization({
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2"><Recycle className="h-5 w-5 text-teal-600" /> Riwayat &amp; Utilisasi Aset</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Berapa kali tiap aset dipakai, umur pakai, dan nilai buku (depresiasi garis-lurus {lifeMonths} bln · sisa {deprPct}%).</p>
+          <p className="text-xs text-slate-500 mt-0.5">Berapa kali tiap aset dipakai, umur pakainya, serta nilai bukunya (depresiasi garis lurus selama {lifeMonths} bulan, dengan nilai sisa {deprPct}%).</p>
         </div>
         <div className="flex items-center gap-1.5 text-[11px]">
-          <span className="text-slate-400 font-semibold">Urut:</span>
-          {([["deployments", "Paling sering"], ["age", "Tertua"], ["book", "Nilai buku"]] as const).map(([k, lbl]) => (
+          <span className="text-slate-400 font-semibold">Urutkan:</span>
+          {([["deployments", "Paling sering dipakai"], ["age", "Tertua"], ["book", "Nilai buku"]] as const).map(([k, lbl]) => (
             <button key={k} onClick={() => setSortKey(k)} className={`px-2.5 py-1 rounded-md font-bold border transition ${sortKey === k ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-500 border-slate-200 hover:border-teal-300"}`}>{lbl}</button>
           ))}
         </div>
@@ -141,21 +141,21 @@ export default function AssetUtilization({
             <thead>
               <tr className="bg-slate-50 text-slate-500 text-left">
                 <th className="font-extrabold px-3 py-2.5">Aset</th>
-                <th className="font-extrabold px-3 py-2.5">Owner</th>
+                <th className="font-extrabold px-3 py-2.5">Pemilik</th>
                 <th className="font-extrabold px-3 py-2.5"><span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" /> Umur</span></th>
-                <th className="font-extrabold px-3 py-2.5 text-right">Deploy</th>
-                <th className="font-extrabold px-3 py-2.5 text-right">Deploy/thn</th>
+                <th className="font-extrabold px-3 py-2.5 text-right">Penerjunan</th>
+                <th className="font-extrabold px-3 py-2.5 text-right">Penerjunan/thn</th>
                 <th className="font-extrabold px-3 py-2.5 text-right">Aktivitas</th>
-                <th className="font-extrabold px-3 py-2.5">Terakhir aktif</th>
+                <th className="font-extrabold px-3 py-2.5">Terakhir Aktif</th>
                 <th className="font-extrabold px-3 py-2.5 text-right">Nilai perolehan</th>
                 <th className="font-extrabold px-3 py-2.5 text-right">Nilai buku</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">Memuat utilisasi…</td></tr>
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">Memuat data utilisasi…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">Belum ada aset untuk dianalisis.</td></tr>
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">Belum ada aset yang dapat dianalisis.</td></tr>
               ) : rows.map(({ a, u, ageM, cost, isOrigin, book, depreciated, perYear }) => (
                 <tr key={a.id} className="hover:bg-slate-50/70">
                   <td className="px-3 py-2.5">
@@ -180,7 +180,7 @@ export default function AssetUtilization({
           </table>
         </div>
       </div>
-      <p className="text-[10px] text-slate-400">Deploy = jumlah kali aset diterjunkan (distribusi toko / setup venue / serah-terima internal), dihitung dari log penuh. Aktivitas = laporan lapangan (relokasi, pemasangan). Nilai buku aset klien tidak disusutkan Origin.</p>
+      <p className="text-[10px] text-slate-400">Penerjunan adalah jumlah kali aset dikerahkan, baik untuk distribusi toko, setup Venue, maupun serah-terima internal, yang dihitung dari log lengkap. Aktivitas adalah jumlah laporan lapangan, seperti relokasi dan pemasangan. Nilai buku aset Client tidak disusutkan oleh Origin.</p>
     </div>
   );
 }

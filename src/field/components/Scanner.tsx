@@ -25,7 +25,7 @@ export default function Scanner({ assets, onOpen }: { assets: Asset[]; onOpen: (
   const resolve = React.useCallback(
     (raw: string) => {
       const id = parseAssetId(raw);
-      if (!id) return setErr("Kode kosong.");
+      if (!id) return setErr("Kode masih kosong.");
       const found = assets.find(a => a.id.toUpperCase() === id);
       if (!found) return setErr(`Aset "${id}" tidak ditemukan.`);
       setErr("");
@@ -104,12 +104,12 @@ export default function Scanner({ assets, onOpen }: { assets: Asset[]; onOpen: (
               <CameraOff className="h-8 w-8" />
               <p className="text-sm">
                 {camState === "unsupported"
-                  ? "Kamera scan tidak didukung browser ini."
+                  ? "Pemindaian kamera tidak didukung di browser ini."
                   : camState === "denied"
                   ? "Akses kamera ditolak."
                   : "Menyiapkan kamera…"}
               </p>
-              <p className="text-xs text-slate-500">Gunakan input manual di bawah.</p>
+              <p className="text-xs text-slate-500">Silakan gunakan input manual di bawah.</p>
             </div>
           </div>
         )}
@@ -130,7 +130,7 @@ export default function Scanner({ assets, onOpen }: { assets: Asset[]; onOpen: (
           <input
             value={manual}
             onChange={e => setManual(e.target.value)}
-            placeholder="mis. DIN00001"
+            placeholder="contoh: DIN00001"
             autoCapitalize="characters"
             autoCorrect="off"
             className="tap flex-1 rounded-xl border border-[#1e2b45] bg-[#0f1728] px-4 font-mono text-base uppercase text-white outline-none placeholder:font-sans placeholder:normal-case placeholder:text-slate-600 focus:border-[#4d8bff]"

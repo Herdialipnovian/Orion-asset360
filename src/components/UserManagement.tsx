@@ -7,10 +7,10 @@ import { UserPlus, Pencil, Trash2, X, AlertTriangle, CheckCircle, ShieldCheck, L
 import { api, type AuthUser, type UserRow } from "../api";
 
 const ROLES = [
-  { value: "Admin", badge: "bg-indigo-50 text-indigo-700 border-indigo-200", desc: "Akses penuh — semua fase & manajemen user" },
-  { value: "Logistik", badge: "bg-blue-50 text-blue-700 border-blue-200", desc: "Produksi, gudang, kirim, transit, penarikan" },
-  { value: "PIC", badge: "bg-pink-50 text-pink-700 border-pink-200", desc: "Penerima di lokasi client — terima kiriman & audit" },
-  { value: "Merchandiser", badge: "bg-rose-50 text-rose-700 border-rose-200", desc: "Pemasangan & maintenance di lokasi client" }
+  { value: "Admin", badge: "bg-indigo-50 text-indigo-700 border-indigo-200", desc: "Akses penuh ke semua Fase dan manajemen user" },
+  { value: "Logistik", badge: "bg-blue-50 text-blue-700 border-blue-200", desc: "Produksi, Gudang, pengiriman, transit, dan penarikan" },
+  { value: "PIC", badge: "bg-pink-50 text-pink-700 border-pink-200", desc: "Penerima di lokasi Client untuk menerima kiriman dan Audit" },
+  { value: "Merchandiser", badge: "bg-rose-50 text-rose-700 border-rose-200", desc: "Pemasangan dan maintenance di lokasi Client" }
 ];
 const badgeFor = (role: string) => ROLES.find(r => r.value === role)?.badge || "bg-slate-100 text-slate-700 border-slate-200";
 // PIC & Merchandiser belong to a specific client; Admin & Logistik are global.
@@ -83,15 +83,15 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
     e.preventDefault();
     setFormErr(null);
     if (editing === "new" && (!form.username.trim() || !form.name.trim() || !form.password)) {
-      return setFormErr("Username, nama, dan password (min 6) wajib diisi.");
+      return setFormErr("Username, nama, dan password (minimal 6 karakter) wajib diisi.");
     }
     if (editing !== "new" && !form.name.trim()) return setFormErr("Nama wajib diisi.");
     if (isClientScoped(form.role) && !form.client) {
-      return setFormErr(`Role ${form.role} harus ditugaskan ke satu client.`);
+      return setFormErr(`Role ${form.role} harus ditugaskan ke satu Client.`);
     }
     // MD area-lock: a Merchandiser is locked to an area, so an area is mandatory.
     if (form.role === "Merchandiser" && !form.area) {
-      return setFormErr("Merchandiser wajib punya Area (dikunci ke area itu — pasang hanya di area-nya).");
+      return setFormErr("Merchandiser wajib memiliki Area karena hanya dapat melakukan pemasangan di area yang ditugaskan.");
     }
     setSaving(true);
     try {
@@ -119,7 +119,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
     setErr(null);
     try {
       await api.deleteUser(u.id);
-      setNotice(`User "${u.username}" dihapus.`);
+      setNotice(`User "${u.username}" berhasil dihapus.`);
     } catch (e: any) {
       setErr(e?.message || "Gagal menghapus user.");
     } finally {
@@ -136,7 +136,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
           <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
             <Users className="h-5 w-5 text-blue-600" /> User Management
           </h2>
-          <p className="text-slate-400 text-xs mt-0.5">Kelola akun operator & hak akses role · {users.length} user terdaftar</p>
+          <p className="text-slate-400 text-xs mt-0.5">Kelola akun operator dan hak akses role · {users.length} user terdaftar</p>
         </div>
         <button
           onClick={openNew}
@@ -285,7 +285,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                   disabled={editing !== "new"}
                   onChange={e => setForm({ ...form, username: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 text-slate-800 disabled:bg-slate-100 disabled:text-slate-400"
-                  placeholder="cth. budi.santoso"
+                  placeholder="contoh: budi.santoso"
                 />
                 {editing !== "new" && <p className="text-[10px] text-slate-400">Username tidak bisa diubah.</p>}
               </div>
@@ -299,7 +299,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 text-slate-800"
-                  placeholder="cth. Budi Santoso"
+                  placeholder="contoh: Budi Santoso"
                 />
               </div>
 
@@ -331,7 +331,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                     onChange={e => setForm({ ...form, client: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
                   >
-                    <option value="">— pilih client —</option>
+                    <option value="">— pilih Client —</option>
                     {clientOptions.map(c => (
                       <option key={c} value={c}>
                         {c}
@@ -341,7 +341,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                     {form.client && !clientOptions.includes(form.client) && <option value={form.client}>{form.client}</option>}
                   </select>
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    {form.role} hanya menangani aset milik client ini (setiap client punya PIC & Merchandiser sendiri).
+                    {form.role} hanya menangani aset milik Client ini. Setiap Client memiliki PIC dan Merchandiser tersendiri.
                   </p>
                 </div>
               )}
@@ -350,8 +350,8 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                 <div className="space-y-1.5">
                   <label className="font-bold text-slate-700">
                     Area {form.role === "Merchandiser"
-                      ? <span className="text-rose-500">* (wajib — MD dikunci ke area ini)</span>
-                      : <span className="font-normal text-slate-400">(opsional — untuk distribusi/roadshow)</span>}
+                      ? <span className="text-rose-500">* (wajib — hanya dapat bertugas di area ini)</span>
+                      : <span className="font-normal text-slate-400">(opsional — untuk distribusi atau Roadshow)</span>}
                   </label>
                   <select
                     name="area"
@@ -359,17 +359,17 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                     onChange={e => setForm({ ...form, area: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
                   >
-                    <option value="">{form.role === "Merchandiser" ? "— pilih area (wajib) —" : "— tanpa area (mis. event) —"}</option>
+                    <option value="">{form.role === "Merchandiser" ? "— pilih area (wajib) —" : "— tanpa area (misalnya event) —"}</option>
                     {areas.map(a => (
                       <option key={a} value={a}>{a}</option>
                     ))}
                     {form.area && !areas.includes(form.area) && <option value={form.area}>{form.area}</option>}
                   </select>
                   {form.role === "Merchandiser" && areas.length === 0 && (
-                    <p className="text-[11px] text-amber-600 font-semibold">Belum ada master Area — tambahkan Area dulu di menu Organisasi → Area sebelum membuat Merchandiser.</p>
+                    <p className="text-[11px] text-amber-600 font-semibold">Belum ada master Area. Tambahkan Area terlebih dahulu di menu Organisasi ke Area sebelum membuat Merchandiser.</p>
                   )}
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Isi kalau {form.role} bertanggung jawab di area tertentu (mis. PIC Area Aceh). Kosongkan untuk event.
+                    Isi jika {form.role} bertanggung jawab di area tertentu (misalnya PIC Area Aceh). Kosongkan untuk event.
                   </p>
                 </div>
               )}
@@ -384,7 +384,7 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                   value={form.password}
                   onChange={e => setForm({ ...form, password: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 text-slate-800"
-                  placeholder={editing === "new" ? "min. 6 karakter" : "••••••••"}
+                  placeholder={editing === "new" ? "minimal 6 karakter" : "••••••••"}
                 />
               </div>
 

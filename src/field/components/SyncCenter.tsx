@@ -43,7 +43,7 @@ export default function SyncCenter({
           <h1 className="text-lg font-bold text-white">Sinkronisasi</h1>
           <div className={`mt-0.5 inline-flex items-center gap-1.5 text-xs font-semibold ${online ? "text-emerald-400" : "text-amber-400"}`}>
             {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-            {online ? "Online" : "Offline — antre akan terkirim saat koneksi kembali"}
+            {online ? "Online" : "Offline — antrean akan terkirim saat koneksi kembali"}
           </div>
         </div>
         <button
@@ -72,7 +72,7 @@ export default function SyncCenter({
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <span>{c.verb}</span>
                 <span className="text-slate-600">·</span>
-                <span>Fase {c.currentStage} → {c.target} ({STAGE_LABELS[c.target]})</span>
+                <span>Fase {c.currentStage} ke {c.target} ({STAGE_LABELS[c.target]})</span>
               </div>
               <div className="flex items-center gap-3 text-[11px] text-slate-500">
                 <span className="inline-flex items-center gap-1"><ImageIcon className="h-3 w-3" /> {c.evidence.length} foto</span>
@@ -80,7 +80,7 @@ export default function SyncCenter({
               </div>
               {c.lastError && (c.status === "conflict" || c.status === "error") && (
                 <div className="rounded-lg bg-rose-500/10 px-2.5 py-1.5 text-[11px] text-rose-300">
-                  {c.status === "conflict" ? "Aset sudah berubah di server. Buang antrean ini, buka aset lagi, lalu ulangi aksi." : c.lastError}
+                  {c.status === "conflict" ? "Aset sudah berubah di server. Silakan buang antrean ini, buka kembali aset, lalu ulangi aksinya." : c.lastError}
                 </div>
               )}
               {(c.status === "conflict" || c.status === "error") && (

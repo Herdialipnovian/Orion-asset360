@@ -90,7 +90,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormErr(null);
-    if (!form.name.trim() || !form.client.trim()) return setFormErr("Nama Asset & Client wajib diisi.");
+    if (!form.name.trim() || !form.client.trim()) return setFormErr("Nama Asset dan Client wajib diisi.");
     if (Number(form.qty) < 1) return setFormErr("Qty minimal 1.");
     setSaving(true);
     try {
@@ -105,7 +105,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
           owner: form.owner, usageType: form.usageType, peruntukan: form.peruntukan,
           projectId: pid
         }]);
-        setNotice(`Aset "${form.name.trim()}" ditambahkan (Fase 3 · Gudang).`);
+        setNotice(`Aset "${form.name.trim()}" berhasil ditambahkan dan masuk ke Fase 3 · Gudang.`);
       } else if (editing) {
         await api.updateAsset(editing.id, {
           name: form.name.trim(), category: form.category.trim(), client: form.client.trim(),
@@ -116,7 +116,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
         });
         // Bind/clear the project only when it changed (uses the dedicated endpoint).
         if ((editing.projectId ?? null) !== pid) await api.setAssetProject(editing.id, pid);
-        setNotice(`Aset ${editing.id} diperbarui.`);
+        setNotice(`Aset ${editing.id} berhasil diperbarui.`);
       }
       setEditing(null);
       onChanged();
@@ -131,7 +131,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
     setErr(null);
     try {
       await api.deleteAsset(a.id);
-      setNotice(`Aset ${a.id} (${a.name}) dihapus.`);
+      setNotice(`Aset ${a.id} (${a.name}) berhasil dihapus.`);
     } catch (e: any) {
       setErr(e?.message || "Gagal menghapus aset.");
     } finally {
@@ -193,7 +193,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
         }))
         .filter(r => r.name && r.client);
       if (!rows.length) {
-        setErr("File tidak berisi baris aset valid (butuh minimal kolom Client & Nama Asset). Pakai Download Template sebagai acuan.");
+        setErr("File tidak memuat baris aset yang valid. Minimal harus ada kolom Client dan Nama Asset. Gunakan Template sebagai acuan.");
         return;
       }
       setPending({ rows });
@@ -208,7 +208,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
     setErr(null);
     try {
       const r = await api.importAssets(mode, pending.rows);
-      setNotice(`Impor "${mode === "replace" ? "Ganti Semua" : "Tambah"}" selesai — ${r.added} aset masuk (Fase 3 · Gudang), ${r.categories} kategori & ${r.clients} client tersinkron ke Master.`);
+      setNotice(`Impor "${mode === "replace" ? "Ganti Semua" : "Tambah"}" selesai. ${r.added} aset masuk ke Fase 3 · Gudang, ${r.categories} kategori dan ${r.clients} client tersinkron ke Master.`);
       setPending(null);
       onChanged();
     } catch (e: any) {
@@ -229,13 +229,13 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
             <Database className="h-5 w-5 text-blue-600" /> Master Data Aset
           </h2>
           <p className="text-slate-400 text-xs mt-0.5">
-            {assets.length} aset terdaftar · sinkron dengan alur 10 fase (aset baru = Fase 3 / Gudang). Kelola lewat Asset Register untuk memajukan fase.
+            {assets.length} aset terdaftar · tersinkron dengan alur 10 fase. Aset baru dimulai di Fase 3 · Gudang. Kelola melalui Asset Register untuk memajukan fasenya.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari ID/nama/client…" className="bg-slate-50 border border-slate-200 pl-8 pr-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 w-44" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari ID, nama, atau client…" className="bg-slate-50 border border-slate-200 pl-8 pr-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 w-44" />
           </div>
           <button onClick={downloadTemplate} className="flex items-center gap-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 px-3 rounded-lg transition">
             <Download className="h-4 w-4" /> Template
@@ -326,28 +326,28 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
             <div className="p-5 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white">
               <div>
                 <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block">{editing === "new" ? "Registrasi Aset Baru" : `Edit ${editing.id}`}</span>
-                <h3 className="text-base font-bold text-slate-950">{editing === "new" ? "Tambah Aset (masuk Fase 3 / Gudang)" : editing.name}</h3>
+                <h3 className="text-base font-bold text-slate-950">{editing === "new" ? "Tambah Aset (masuk ke Fase 3 · Gudang)" : editing.name}</h3>
               </div>
               <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
             </div>
             <form onSubmit={save} className="p-5 grid grid-cols-2 gap-4 text-xs">
               <div className="col-span-2 space-y-1.5">
                 <label className="font-bold text-slate-700">Nama Asset <span className="text-rose-500">*</span></label>
-                <input name="name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={input} placeholder="cth. Saddlebag 80x80" />
+                <input name="name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={input} placeholder="contoh: Saddlebag 80x80" />
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Client <span className="text-rose-500">*</span></label>
-                <input name="client" list="am-clients" value={form.client} onChange={e => setForm({ ...form, client: e.target.value, projectId: "" })} className={input} placeholder="pilih / ketik baru" />
+                <input name="client" list="am-clients" value={form.client} onChange={e => setForm({ ...form, client: e.target.value, projectId: "" })} className={input} placeholder="Pilih atau ketik baru" />
                 <datalist id="am-clients">{clientOptions.map(o => <option key={o} value={o} />)}</datalist>
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Kategori</label>
-                <input list="am-cats" value={form.category} onChange={e => setForm({ ...form, category: e.target.value, peruntukan: form.peruntukanTouched ? form.peruntukan : derivePeruntukan(e.target.value, form.owner) })} className={input} placeholder="pilih / ketik baru" />
+                <input list="am-cats" value={form.category} onChange={e => setForm({ ...form, category: e.target.value, peruntukan: form.peruntukanTouched ? form.peruntukan : derivePeruntukan(e.target.value, form.owner) })} className={input} placeholder="Pilih atau ketik baru" />
                 <datalist id="am-cats">{categoryOptions.map(o => <option key={o} value={o} />)}</datalist>
               </div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Warna</label><input value={form.warna} onChange={e => setForm({ ...form, warna: e.target.value })} className={input} /></div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Merk</label><input value={form.merk} onChange={e => setForm({ ...form, merk: e.target.value })} className={input} /></div>
-              <div className="space-y-1.5"><label className="font-bold text-slate-700">Type</label><input value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className={input} placeholder="cth. PVC" /></div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Type</label><input value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className={input} placeholder="contoh: PVC" /></div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Serial Number</label><input value={form.serialNumber} onChange={e => setForm({ ...form, serialNumber: e.target.value })} className={input} /></div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Fisik</label>
@@ -365,18 +365,18 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Sifat</label>
                 <select value={form.usageType} onChange={e => setForm({ ...form, usageType: e.target.value })} className={`${input} cursor-pointer`}>
-                  <option value="Reusable">Reusable (dipakai ulang → balik gudang)</option>
-                  <option value="Consumable">Consumable (habis pakai → disposal)</option>
+                  <option value="Reusable">Reusable (dipakai ulang, kembali ke Gudang)</option>
+                  <option value="Consumable">Consumable (habis pakai, berakhir di Disposal)</option>
                 </select>
-                <p className="text-[10px] text-slate-400">Reusable ditarik balik (Fase 9); Consumable berakhir di Disposal (Fase 10).</p>
+                <p className="text-[10px] text-slate-400">Reusable ditarik kembali di Fase 9, sedangkan Consumable berakhir di Disposal (Fase 10).</p>
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Peruntukan</label>
                 <select value={form.peruntukan} disabled={form.owner === "Client"} onChange={e => setForm({ ...form, peruntukan: e.target.value, peruntukanTouched: true, projectId: e.target.value === "Internal" ? "" : form.projectId })} className={`${input} cursor-pointer disabled:opacity-60`}>
-                  <option value="Deployment">Deployment (event / distribusi)</option>
+                  <option value="Deployment">Deployment (event atau distribusi)</option>
                   <option value="Internal">Internal (dipegang karyawan)</option>
                 </select>
-                <p className="text-[10px] text-slate-400">Auto dari kategori, bisa diubah. Aset klien selalu Deployment. Internal → menu "Aset Internal".</p>
+                <p className="text-[10px] text-slate-400">Terisi otomatis dari kategori dan bisa diubah. Aset klien selalu Deployment. Internal masuk ke menu "Aset Internal".</p>
               </div>
               {form.peruntukan !== "Internal" && (() => {
                 const opts = projects.filter(p => p.status === "active" && p.mode !== "Internal" && (p.client || "") === form.client.trim());
@@ -387,7 +387,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
                       <option value="">— tanpa proyek —</option>
                       {opts.map(p => <option key={p.id} value={p.id}>{p.name} · {p.mode}</option>)}
                     </select>
-                    <p className="text-[10px] text-slate-400">{form.client.trim() ? (opts.length ? "Mode proyek nentuin alur deployment (Event/Distribusi)." : "Belum ada proyek untuk client ini — buat di Proyek & Lokasi.") : "Pilih Client dulu untuk lihat proyeknya."}</p>
+                    <p className="text-[10px] text-slate-400">{form.client.trim() ? (opts.length ? "Mode proyek menentukan alur deployment (Event atau Distribusi)." : "Belum ada proyek untuk client ini. Buat dulu di menu Proyek & Lokasi.") : "Pilih Client terlebih dahulu untuk melihat proyeknya."}</p>
                   </div>
                 );
               })()}
@@ -433,17 +433,17 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
               <div className="bg-emerald-50 border border-emerald-200 text-emerald-600 p-2 rounded-lg"><FileSpreadsheet className="h-5 w-5" /></div>
               <div>
                 <h3 className="font-extrabold text-slate-900 text-sm">Data Terbaca dari File</h3>
-                <p className="text-[11px] text-slate-500">{pending.rows.length} baris aset. Client/Kategori baru otomatis masuk Master. Pilih cara impor:</p>
+                <p className="text-[11px] text-slate-500">{pending.rows.length} baris aset terbaca. Client dan Kategori baru otomatis masuk ke Master. Pilih cara impor:</p>
               </div>
             </div>
             <div className="space-y-2.5">
               <button onClick={() => doImport("append")} disabled={busy} className="w-full text-left bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-4 py-3 transition disabled:opacity-50">
                 <p className="text-xs font-extrabold text-blue-800">Tambah Data Baru</p>
-                <p className="text-[10.5px] text-blue-600/80 mt-0.5">Aset lama tetap. Baris file ditambah sebagai aset baru (Fase 3 / Gudang).</p>
+                <p className="text-[10.5px] text-blue-600/80 mt-0.5">Aset lama tetap ada. Baris dari file ditambahkan sebagai aset baru di Fase 3 · Gudang.</p>
               </button>
               <button onClick={() => doImport("replace")} disabled={busy} className="w-full text-left bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-4 py-3 transition disabled:opacity-50">
                 <p className="text-xs font-extrabold text-rose-800">Ganti Semua (Hapus Aset Lama)</p>
-                <p className="text-[10.5px] text-rose-600/80 mt-0.5">HATI-HATI: semua aset (termasuk yang sedang berjalan di flow) dihapus, diganti isi file.</p>
+                <p className="text-[10.5px] text-rose-600/80 mt-0.5">Perhatian: semua aset, termasuk yang sedang berjalan dalam alur, akan dihapus dan diganti dengan isi file.</p>
               </button>
             </div>
             <div className="flex justify-end pt-1">

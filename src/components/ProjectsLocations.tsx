@@ -53,7 +53,7 @@ export default function ProjectsLocations({ user }: { user: AuthUser }) {
     <div className="space-y-6">
       <div className="pb-2 border-b border-slate-100">
         <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2"><Briefcase className="h-5 w-5 text-blue-600" /> Proyek &amp; Lokasi</h2>
-        <p className="text-slate-400 text-xs mt-0.5">Fondasi deployment — proyek (mode Internal/Event/Distribusi) + venue/toko/target internal.</p>
+        <p className="text-slate-400 text-xs mt-0.5">Fondasi penempatan aset — kelola proyek beserta venue, toko, dan target internal.</p>
       </div>
       {err && <div className="flex items-center gap-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><AlertTriangle className="h-4 w-4" /> {err}</div>}
       {loading ? (
@@ -111,9 +111,9 @@ function ProjectCard({ projects, clientNames, areaNames, onChange, onErr }: { pr
       if (editing === "new") await api.createProject(payload as any);
       else if (editing) await api.updateProject(editing.id, payload as any);
       setEditing(null); onChange();
-    } catch (e: any) { onErr(e?.message || "Gagal simpan proyek."); } finally { setBusy(false); }
+    } catch (e: any) { onErr(e?.message || "Gagal menyimpan proyek."); } finally { setBusy(false); }
   };
-  const del = async (p: Project) => { try { await api.deleteProject(p.id); setConfirmDel(null); onChange(); } catch (e: any) { onErr(e?.message || "Gagal hapus."); } };
+  const del = async (p: Project) => { try { await api.deleteProject(p.id); setConfirmDel(null); onChange(); } catch (e: any) { onErr(e?.message || "Gagal menghapus."); } };
 
   return (
     <div className="bg-white border border-slate-100 rounded-xl shadow-xs overflow-hidden">
@@ -159,7 +159,7 @@ function ProjectCard({ projects, clientNames, areaNames, onChange, onErr }: { pr
 
       {editing && (
         <Modal title={editing === "new" ? "Tambah Proyek" : editing.name} onClose={() => setEditing(null)}>
-          <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama Proyek <span className="text-rose-500">*</span></label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inp} placeholder="cth. AICE Roadshow Ramadan 2026" /></div>
+          <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama Proyek <span className="text-rose-500">*</span></label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inp} placeholder="contoh: AICE Roadshow Ramadan 2026" /></div>
           <div className="space-y-1.5">
             <label className="font-bold text-slate-700">Mode</label>
             <div className="flex gap-2">
@@ -225,9 +225,9 @@ function LocationCard({ locs, clientNames, areaNames, onChange, onErr }: { locs:
       if (editing === "new") await api.createLocation(payload as any);
       else if (editing) await api.updateLocation(editing.id, payload as any);
       setEditing(null); onChange();
-    } catch (e: any) { onErr(e?.message || "Gagal simpan lokasi."); } finally { setBusy(false); }
+    } catch (e: any) { onErr(e?.message || "Gagal menyimpan lokasi."); } finally { setBusy(false); }
   };
-  const del = async (l: Loc) => { try { await api.deleteLocation(l.id); setConfirmDel(null); onChange(); } catch (e: any) { onErr(e?.message || "Gagal hapus."); } };
+  const del = async (l: Loc) => { try { await api.deleteLocation(l.id); setConfirmDel(null); onChange(); } catch (e: any) { onErr(e?.message || "Gagal menghapus."); } };
 
   const shown = typeFilter ? locs.filter(l => l.type === typeFilter) : locs;
   return (
@@ -266,7 +266,7 @@ function LocationCard({ locs, clientNames, areaNames, onChange, onErr }: { locs:
                   <td className="px-5 py-2.5 text-slate-600">{l.pic || "—"}</td>
                   <td className="px-5 py-2.5">{l.source === "field"
                     ? <span className="text-amber-600 font-bold text-[10px]">Lapangan</span>
-                    : <span className="text-slate-400 text-[10px]">List</span>}</td>
+                    : <span className="text-slate-400 text-[10px]">Daftar</span>}</td>
                   <td className="px-5 py-2.5 text-right">
                     <button onClick={() => openEdit(l)} className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50"><Pencil className="h-3.5 w-3.5" /></button>
                     <button onClick={() => setConfirmDel(l)} className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -280,7 +280,7 @@ function LocationCard({ locs, clientNames, areaNames, onChange, onErr }: { locs:
 
       {editing && (
         <Modal title={editing === "new" ? "Tambah Lokasi" : editing.name} onClose={() => setEditing(null)}>
-          <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama Lokasi <span className="text-rose-500">*</span></label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inp} placeholder="cth. Indomaret Sudirman" /></div>
+          <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama Lokasi <span className="text-rose-500">*</span></label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inp} placeholder="contoh: Indomaret Sudirman" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5"><label className="font-bold text-slate-700">Tipe</label>
               <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value as LocationType })} className={`${inp} cursor-pointer`}>{LOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select>

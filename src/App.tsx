@@ -134,7 +134,7 @@ export default function App() {
       setSettings(cfg);
       setDataError(null);
     } catch (e: any) {
-      setDataError(e?.message || "Gagal memuat data dari server.");
+      setDataError(e?.message || "Gagal memuat data dari server. Silakan coba beberapa saat lagi.");
     }
   }, []);
 
@@ -187,7 +187,7 @@ export default function App() {
       setActivityLogs(r.logs);
       setInitialStageFilter("ALL");
     } catch (e: any) {
-      alert(e?.message || "Reset gagal (butuh Admin).");
+      alert(e?.message || "Reset data gagal. Fitur ini hanya tersedia untuk Admin.");
     }
   };
 
@@ -198,7 +198,7 @@ export default function App() {
       await refresh();
       return { ok: true, id: r?.asset?.id };
     } catch (e: any) {
-      return { ok: false, error: e?.message || "Gagal menambahkan aset." };
+      return { ok: false, error: e?.message || "Gagal menambahkan aset. Silakan coba lagi." };
     }
   };
 
@@ -219,7 +219,7 @@ export default function App() {
       await refresh();
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, error: e?.message || "Gagal memproses transisi fase." };
+      return { ok: false, error: e?.message || "Gagal memproses perpindahan Fase aset." };
     }
   };
 
@@ -250,7 +250,7 @@ export default function App() {
       await refresh();
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, error: e?.message || "Gagal menugaskan pemasangan." };
+      return { ok: false, error: e?.message || "Gagal menugaskan pemasangan kepada Merchandiser." };
     }
   };
 
@@ -264,7 +264,7 @@ export default function App() {
       await refresh();
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, error: e?.message || "Gagal serah-terima internal." };
+      return { ok: false, error: e?.message || "Gagal memproses serah terima internal." };
     }
   };
 
@@ -278,24 +278,24 @@ export default function App() {
       await refresh();
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, error: e?.message || "Gagal kirim ke venue." };
+      return { ok: false, error: e?.message || "Gagal mengirim aset ke Venue." };
     }
   };
   // Fase 2 Event — 2-step ship→arrive between venues + return-to-warehouse (all tracked like Fase 5).
   const handleArriveVenue = async (assetId: string): Promise<{ ok: boolean; error?: string }> => {
     try { await api.arriveVenue(assetId); await refresh(); return { ok: true }; }
-    catch (e: any) { return { ok: false, error: e?.message || "Gagal konfirmasi tiba di venue." }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal mengonfirmasi kedatangan di Venue." }; }
   };
   const handleShipReturn = async (
     assetId: string,
     p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
   ): Promise<{ ok: boolean; error?: string }> => {
     try { await api.shipReturn(assetId, p); await refresh(); return { ok: true }; }
-    catch (e: any) { return { ok: false, error: e?.message || "Gagal kirim balik ke gudang." }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal mengirim aset kembali ke Gudang." }; }
   };
   const handleArriveWarehouse = async (assetId: string): Promise<{ ok: boolean; error?: string }> => {
     try { await api.arriveWarehouse(assetId); await refresh(); return { ok: true }; }
-    catch (e: any) { return { ok: false, error: e?.message || "Gagal konfirmasi tiba di gudang." }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal mengonfirmasi kedatangan di Gudang." }; }
   };
 
   // Fase 3 Distribusi: fan-out placements / report a toko placement / sampling audit.
@@ -305,14 +305,14 @@ export default function App() {
     projectId?: number | null
   ): Promise<{ ok: boolean; error?: string }> => {
     try { await api.distribute(assetId, { placements, projectId }); await refresh(); return { ok: true }; }
-    catch (e: any) { return { ok: false, error: e?.message || "Gagal distribusi." }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses distribusi aset." }; }
   };
   const handlePlaceToko = async (
     assetId: string,
     p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }
   ): Promise<{ ok: boolean; error?: string }> => {
     try { await api.placeAtToko(assetId, p); await refresh(); return { ok: true }; }
-    catch (e: any) { return { ok: false, error: e?.message || "Gagal input pemasangan toko." }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal menyimpan data pemasangan di Toko." }; }
   };
   const handleAuditSample = async (
     assetId: string,
@@ -320,7 +320,7 @@ export default function App() {
     meta?: { method?: "manual" | "auto"; samplePct?: number }
   ): Promise<{ ok: boolean; error?: string }> => {
     try { await api.auditSample(assetId, samples, meta); await refresh(); return { ok: true }; }
-    catch (e: any) { return { ok: false, error: e?.message || "Gagal audit sampling." }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses Audit sampling." }; }
   };
   const handleSetProject = async (assetId: string, projectId: number | null): Promise<{ ok: boolean; error?: string }> => {
     try { await api.setAssetProject(assetId, projectId); await refresh(); return { ok: true }; }
@@ -594,7 +594,7 @@ export default function App() {
               </div>
             </div>
             <p className="text-[10px] text-slate-400 leading-normal">
-              Scan QR/Barcode untuk melihat detail perkembangan aset.
+              Pindai QR atau Barcode untuk melihat detail dan perkembangan aset.
             </p>
             <button
               onClick={() => { setIsQrScannerOpen(true); setScanResultFeedback(null); setScannedAssetDetail(null); }}
@@ -756,7 +756,7 @@ export default function App() {
               onChange={(e) => setSelectedClient(e.target.value)}
               className="bg-transparent text-xs text-slate-700 font-extrabold border-0 outline-none select-none cursor-pointer pr-4 focus:ring-0 leading-tight"
             >
-              <option value="ALL">Semua Korporasi (Global)</option>
+              <option value="ALL">Semua Client</option>
               {clientNames.map(cli => (
                 <option key={cli} value={cli}>{cli.split(' Mitra')[0].split(' (Persero)')[0]}</option>
               ))}
@@ -1021,7 +1021,7 @@ export default function App() {
               ) : scanResultFeedback === "not_found" ? (
                 <div className="text-center space-y-2 z-10 text-rose-400 bg-[#241315]/90 border border-rose-500/30 p-4 rounded-xl leading-relaxed">
                   <AlertTriangle className="h-8 w-8 mx-auto text-rose-400" />
-                  <p className="font-extrabold text-xs">TAG TIDAK DIKENAL</p>
+                  <p className="font-extrabold text-xs">Tag Tidak Dikenal</p>
                   <p className="text-[10px] text-slate-300">QR Code yang Anda masukkan tidak terdaftar di database.</p>
                 </div>
               ) : (
@@ -1034,7 +1034,7 @@ export default function App() {
 
             {/* Scan ID Input Picker */}
             <div className="space-y-2">
-              <label className="font-black text-slate-400 text-[10px] block uppercase tracking-wider">Input ID Aset Secara Manual / Demo Pilih:</label>
+              <label className="font-black text-slate-400 text-[10px] block uppercase tracking-wider">Masukkan ID Aset secara manual atau pilih dari daftar</label>
               <div className="flex gap-2">
                 <select
                   value={scannedAssetCode}
@@ -1083,7 +1083,7 @@ export default function App() {
                     }}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded-lg font-bold text-center flex items-center justify-center gap-1"
                   >
-                    <span>Lacak Alur Traceability</span>
+                    <span>Lacak Alur Aset</span>
                     <ArrowRight className="h-3 w-3" />
                   </button>
                 </div>

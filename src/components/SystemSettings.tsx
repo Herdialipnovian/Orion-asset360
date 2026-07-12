@@ -13,7 +13,7 @@ const SECTIONS: Section[] = [
   {
     title: "Profil Perusahaan",
     icon: Building2,
-    desc: "Tampil di kop semua dokumen (Work Order, Surat Jalan, BAST, dll.)",
+    desc: "Ditampilkan pada kop setiap dokumen, seperti Work Order, Surat Jalan, dan BAST.",
     fields: [
       { key: "company_name", label: "Nama Perusahaan", type: "text" },
       { key: "company_address", label: "Alamat", type: "text" },
@@ -23,12 +23,12 @@ const SECTIONS: Section[] = [
   {
     title: "Parameter Operasional",
     icon: Gauge,
-    desc: "Nilai default yang dipakai perhitungan & indikator di seluruh sistem.",
+    desc: "Nilai bawaan yang digunakan untuk perhitungan dan indikator di seluruh sistem.",
     fields: [
-      { key: "depreciation_pct", label: "Depresiasi / Nilai Sisa Scrap", type: "number", suffix: "%", min: 0, max: 100, hint: "Estimasi nilai sisa aset baru = % ini × harga beli." },
-      { key: "useful_life_months", label: "Umur Ekonomis Aset", type: "number", suffix: "bulan", min: 1, max: 600, hint: "Dipakai untuk depresiasi garis-lurus di Utilisasi Aset (default 60 = 5 tahun)." },
-      { key: "sla_target_pct", label: "Target SLA / Kepatuhan", type: "number", suffix: "%", min: 0, max: 100, hint: "Ambang 'sehat' (hijau) indikator operasional di Dashboard." },
-      { key: "default_timeline_weeks", label: "Default Timeline Pengadaan", type: "number", suffix: "minggu", min: 1, max: 104, hint: "Estimasi durasi default saat membuat pengajuan aset baru." }
+      { key: "depreciation_pct", label: "Depresiasi / Nilai Sisa Scrap", type: "number", suffix: "%", min: 0, max: 100, hint: "Estimasi nilai sisa aset baru dihitung dari persentase ini dikalikan harga beli." },
+      { key: "useful_life_months", label: "Umur Ekonomis Aset", type: "number", suffix: "bulan", min: 1, max: 600, hint: "Digunakan untuk perhitungan depresiasi garis lurus pada Utilisasi Aset. Nilai bawaan 60 bulan setara dengan 5 tahun." },
+      { key: "sla_target_pct", label: "Target SLA / Kepatuhan", type: "number", suffix: "%", min: 0, max: 100, hint: "Batas minimum agar indikator operasional di Dashboard ditampilkan dalam kondisi sehat (hijau)." },
+      { key: "default_timeline_weeks", label: "Estimasi Waktu Pengadaan", type: "number", suffix: "minggu", min: 1, max: 104, hint: "Estimasi durasi bawaan saat membuat pengajuan aset baru." }
     ]
   }
 ];
@@ -49,7 +49,7 @@ export default function SystemSettings({ user, onSaved }: { user: AuthUser; onSa
       try {
         setForm(await api.getSettings());
       } catch (e: any) {
-        setErr(e?.message || "Gagal memuat pengaturan.");
+        setErr(e?.message || "Gagal memuat pengaturan. Silakan coba lagi.");
       } finally {
         setLoading(false);
       }
@@ -64,7 +64,7 @@ export default function SystemSettings({ user, onSaved }: { user: AuthUser; onSa
         </div>
         <h3 className="font-extrabold text-slate-800 text-sm">Akses Terbatas</h3>
         <p className="text-slate-500 text-xs mt-1 leading-relaxed">
-          Pengaturan Sistem hanya dapat diubah oleh <strong>Admin</strong>. Role Anda: {user.role}.
+          Pengaturan Sistem hanya dapat diubah oleh <strong>Admin</strong>. Role Anda saat ini: {user.role}.
         </p>
       </div>
     );
@@ -92,10 +92,10 @@ export default function SystemSettings({ user, onSaved }: { user: AuthUser; onSa
     try {
       const updated = await api.updateSettings(form);
       setForm(updated);
-      setNotice("Pengaturan berhasil disimpan & diterapkan ke seluruh sistem.");
+      setNotice("Pengaturan berhasil disimpan dan diterapkan ke seluruh sistem.");
       onSaved?.();
     } catch (e: any) {
-      setErr(e?.message || "Gagal menyimpan pengaturan.");
+      setErr(e?.message || "Gagal menyimpan pengaturan. Silakan coba lagi.");
     } finally {
       setSaving(false);
     }
@@ -108,7 +108,7 @@ export default function SystemSettings({ user, onSaved }: { user: AuthUser; onSa
           <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
             <SlidersHorizontal className="h-5 w-5 text-blue-600" /> Pengaturan Sistem
           </h2>
-          <p className="text-slate-400 text-xs mt-0.5">Konfigurasi global — perubahan langsung diterapkan ke dokumen, form, & dashboard.</p>
+          <p className="text-slate-400 text-xs mt-0.5">Konfigurasi global. Setiap perubahan langsung diterapkan ke dokumen, formulir, dan Dashboard.</p>
         </div>
         <button
           onClick={save}

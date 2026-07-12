@@ -30,8 +30,8 @@ export const GATE: { [k: number]: GateSpec } = {
   2: {
     stageKey: "production",
     fields: [
-      { k: "prodLead", label: "Prod Lead", type: "text", req: true },
-      { k: "qcInspector", label: "QC Inspector", type: "text", req: true, prefillUser: true },
+      { k: "prodLead", label: "Kepala Produksi", type: "text", req: true },
+      { k: "qcInspector", label: "Inspektur QC", type: "text", req: true, prefillUser: true },
       { k: "qcScore", label: "Skor QC (0-100)", type: "number", req: true, min: 0, max: 100 },
       { k: "productionReportCode", label: "Kode Laporan Produksi", type: "text" },
       { k: "readyDate", label: "Tanggal Siap", type: "date", req: true }
@@ -51,7 +51,7 @@ export const GATE: { [k: number]: GateSpec } = {
     stageKey: "shipping",
     fields: [
       { k: "suratJalanNo", label: "No. Surat Jalan", type: "text", req: true },
-      { k: "driverName", label: "Nama Driver", type: "text", req: true },
+      { k: "driverName", label: "Nama Sopir", type: "text", req: true },
       { k: "vehiclePlate", label: "Plat Kendaraan", type: "text", req: true },
       { k: "vendorShipping", label: "Vendor Pengiriman", type: "text" },
       { k: "departureTime", label: "Waktu Berangkat", type: "date", req: true }
@@ -63,7 +63,7 @@ export const GATE: { [k: number]: GateSpec } = {
       { k: "installTeam", label: "Tim Pemasangan", type: "text", req: true, prefillUser: true },
       { k: "installationDate", label: "Tanggal Pemasangan", type: "date", req: true },
       { k: "planogramMatched", label: "Sesuai Planogram", type: "toggle" },
-      { k: "verifiedItems", label: "Item Terverifikasi (pisah koma)", type: "chips", placeholder: "Kabel ground, Backup UPS, Braket" }
+      { k: "verifiedItems", label: "Item Terverifikasi (pisahkan dengan koma)", type: "chips", placeholder: "Kabel ground, Backup UPS, Braket" }
     ]
   },
   7: {
@@ -72,7 +72,7 @@ export const GATE: { [k: number]: GateSpec } = {
       { k: "auditorName", label: "Nama Auditor", type: "text", req: true, prefillUser: true },
       { k: "lastAuditDate", label: "Tanggal Audit", type: "date", req: true },
       { k: "scoring", label: "Skor Audit (0-100)", type: "number", req: true, min: 0, max: 100 },
-      { k: "findings", label: "Temuan (pisah koma)", type: "chips", placeholder: "Layar buram, Kabel longgar" },
+      { k: "findings", label: "Temuan (pisahkan dengan koma)", type: "chips", placeholder: "Layar buram, Kabel longgar" },
       { k: "recommendation", label: "Rekomendasi", type: "textarea" }
     ]
   },

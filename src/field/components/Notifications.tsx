@@ -46,7 +46,7 @@ export default function Notifications({
       </div>
 
       {items.length === 0 ? (
-        <EmptyState icon={<Bell className="h-8 w-8" />} title="Belum ada notifikasi" hint="Notifikasi tugas & progres pemasangan muncul di sini." />
+        <EmptyState icon={<Bell className="h-8 w-8" />} title="Belum ada notifikasi" hint="Notifikasi tugas dan progres pemasangan akan muncul di sini." />
       ) : (
         <ol className="flex flex-col gap-2">
           {items.map(n => {

@@ -158,7 +158,7 @@ export default function ReportDistribusi({
             </thead>
             <tbody>
               {placements.length === 0 ? (
-                <tr><td colSpan={9} className="px-2 py-6 text-center text-slate-400 border border-slate-200">Belum ada distribusi toko.</td></tr>
+                <tr><td colSpan={9} className="px-2 py-6 text-center text-slate-400 border border-slate-200">Belum ada distribusi ke toko.</td></tr>
               ) : placements.map((p, i) => {
                 const photo = photoByLoc[p.locationId];
                 return (
@@ -182,7 +182,7 @@ export default function ReportDistribusi({
 
           <div className="flex items-center gap-4 mt-4 text-[10px] text-slate-400">
             <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /> Koordinat dari GPS pemasangan / lokasi toko</span>
-            {cov?.method && <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Audit = {cov.method === "auto" ? `sampling auto-random${cov.samplePct ? ` ${cov.samplePct}%` : ""}` : "hasil sampling PIC"}</span>}
+            {cov?.method && <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Audit = {cov.method === "auto" ? `sampling acak otomatis${cov.samplePct ? ` ${cov.samplePct}%` : ""}` : "hasil sampling oleh PIC"}</span>}
           </div>
           <div className="mt-8 grid grid-cols-2 gap-8 text-[11px]">
             <div className="text-center"><div className="h-14" /><div className="border-t border-slate-400 pt-1">Origin Connect</div></div>

@@ -47,7 +47,7 @@ export default function ActionScreen({
   const setField = (k: string, v: any) => setForm(prev => ({ ...prev, [k]: v }));
 
   async function commit() {
-    if (!requiredPhotosDone) return setToast({ msg: "Ambil semua foto WAJIB dulu.", tone: "error" });
+    if (!requiredPhotosDone) return setToast({ msg: "Ambil dulu semua foto yang wajib.", tone: "error" });
     const miss = missingFields(target, form);
     if (miss.length) return setToast({ msg: `Lengkapi: ${miss.join(", ")}.`, tone: "error" });
     setBusy(true);
@@ -93,7 +93,7 @@ export default function ActionScreen({
 
       <header>
         <h1 className="text-xl font-bold text-white">{TRANSITION_VERB[target]}</h1>
-        <p className="mt-1 text-sm text-slate-400">{asset.name} · Fase {asset.currentStage} → {target} ({STAGE_LABELS[target]})</p>
+        <p className="mt-1 text-sm text-slate-400">{asset.name} · Fase {asset.currentStage} ke {target} ({STAGE_LABELS[target]})</p>
         <p className="text-xs text-slate-500">{STAGE_FULL[target]}</p>
       </header>
 
@@ -113,9 +113,9 @@ export default function ActionScreen({
                 <div className="truncate text-sm font-medium text-slate-100">{s.label}</div>
                 <div className="mt-1">
                   {s.optional ? (
-                    <span className="rounded bg-slate-700/50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">OPSIONAL</span>
+                    <span className="rounded bg-slate-700/50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">Opsional</span>
                   ) : (
-                    <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">WAJIB</span>
+                    <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">Wajib</span>
                   )}
                 </div>
               </div>
@@ -146,7 +146,7 @@ export default function ActionScreen({
         className="tap flex items-center justify-center gap-2 rounded-xl bg-[#4d8bff] px-4 text-base font-bold text-white active:scale-[0.98] disabled:opacity-50"
       >
         {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-        {online ? `Kirim & Pindah ke Fase ${target}` : `Simpan Offline → Fase ${target}`}
+        {online ? `Kirim dan Pindah ke Fase ${target}` : `Simpan Offline ke Fase ${target}`}
       </button>
 
       {activeSlot && (

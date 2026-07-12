@@ -16,8 +16,8 @@ import { Toast } from "../ui";
 import CameraCapture from "./CameraCapture";
 
 const SLOTS = [
-  { slot: "before", label: "Foto BEFORE (sebelum dipasang)" },
-  { slot: "after", label: "Foto AFTER (terpasang)" }
+  { slot: "before", label: "Foto sebelum pemasangan" },
+  { slot: "after", label: "Foto setelah terpasang" }
 ];
 
 function SignaturePad({ onChange }: { onChange: (v: string) => void }) {
@@ -61,7 +61,7 @@ function SignaturePad({ onChange }: { onChange: (v: string) => void }) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-400">TTD BAST <span className="text-slate-500">(opsional)</span></span>
+        <span className="text-xs font-semibold text-slate-400">Tanda Tangan BAST <span className="text-slate-500">(opsional)</span></span>
         <button type="button" onClick={clear} className="tap inline-flex items-center gap-1 rounded-lg border border-[#1e2b45] px-2 py-1 text-[11px] text-slate-300">
           <Eraser className="h-3.5 w-3.5" /> Hapus
         </button>
@@ -97,7 +97,7 @@ export default function InstallTask({
   const photosDone = SLOTS.every(s => shots[s.slot]);
 
   async function submit() {
-    if (!photosDone) return setToast({ msg: "Ambil foto BEFORE & AFTER dulu.", tone: "error" });
+    if (!photosDone) return setToast({ msg: "Ambil dulu foto sebelum dan sesudah pemasangan.", tone: "error" });
     setBusy(true);
     try {
       const evidence: EvidenceItem[] = SLOTS.map(s => ({ slot: s.slot, label: s.label, blob: shots[s.slot].blob, meta: shots[s.slot].meta }));
@@ -184,7 +184,7 @@ export default function InstallTask({
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-100">{s.label}</div>
-                <div className="mt-1"><span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">WAJIB</span></div>
+                <div className="mt-1"><span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">Wajib</span></div>
               </div>
               <button onClick={() => setActiveSlot(s)} className="tap flex items-center gap-1.5 rounded-xl border border-[#4d8bff]/40 bg-[#4d8bff]/10 px-3 text-sm font-semibold text-[#8fb4ff] active:scale-95">
                 {shot ? <><CircleDot className="h-4 w-4" /> Ulangi</> : <><Camera className="h-4 w-4" /> Ambil</>}

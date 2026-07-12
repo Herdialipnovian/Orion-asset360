@@ -48,7 +48,7 @@ app.post(
   "/api/auth/login",
   wrap(async (req, res) => {
     const { username, password } = req.body || {};
-    if (!username || !password) return res.status(400).json({ error: "Username & password wajib diisi." });
+    if (!username || !password) return res.status(400).json({ error: "Username dan password wajib diisi." });
     const { rows } = await q(`select * from users where username = $1`, [username]);
     const u = rows[0];
     if (!u || !(await verifyPassword(password, u.password_hash))) {
@@ -107,7 +107,7 @@ app.get(
     const role = String(req.query.role || "");
     const client = String(req.query.client || "");
     const area = String(req.query.area || "").trim();
-    if (!["PIC", "Merchandiser"].includes(role)) return res.status(400).json({ error: "role harus PIC atau Merchandiser." });
+    if (!["PIC", "Merchandiser"].includes(role)) return res.status(400).json({ error: "Role harus PIC atau Merchandiser." });
     const conds = ["role=$1"]; const params: any[] = [role];
     if (client) { params.push(client); conds.push(`client=$${params.length}`); }
     if (area) { params.push(area); conds.push(`area=$${params.length}`); } // per-area scoping for the MD lock
@@ -126,7 +126,7 @@ app.post(
   requireRole("Admin"),
   wrap(async (req, res) => {
     const { username, name, role, password, client, area } = req.body || {};
-    if (!username || !name || !role || !password) return res.status(400).json({ error: "username, name, role, password wajib diisi." });
+    if (!username || !name || !role || !password) return res.status(400).json({ error: "Username, nama, role, dan password wajib diisi." });
     if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: "Role tidak valid." });
     if (String(password).length < 6) return res.status(400).json({ error: "Password minimal 6 karakter." });
     const cli = CLIENT_SCOPED.includes(role) ? String(client || "").trim() : null;
@@ -134,7 +134,7 @@ app.post(
     // Area scope: PIC optional, but Merchandiser REQUIRES an area (per-area lock — an MD may only
     // be assigned/report installs in their own area).
     const ar = CLIENT_SCOPED.includes(role) ? String(area || "").trim() || null : null;
-    if (role === "Merchandiser" && !ar) return res.status(400).json({ error: "Merchandiser wajib punya Area (penguncian per-area)." });
+    if (role === "Merchandiser" && !ar) return res.status(400).json({ error: "Merchandiser wajib memiliki Area karena penugasannya dikunci per-area." });
     try {
       const hash = await hashPassword(password);
       const { rows } = await q(
@@ -144,7 +144,7 @@ app.post(
       );
       res.status(201).json(rows[0]);
     } catch (e: any) {
-      if (e?.code === "23505") return res.status(409).json({ error: "Username sudah dipakai." });
+      if (e?.code === "23505") return res.status(409).json({ error: "Username sudah digunakan." });
       throw e;
     }
   })
@@ -166,7 +166,7 @@ app.patch(
     // Guard: never demote the last Admin
     if (role && role !== "Admin" && target.role === "Admin") {
       const { rows: sa } = await q(`select count(*)::int as n from users where role = 'Admin'`);
-      if (sa[0].n <= 1) return res.status(409).json({ error: "Tidak bisa menurunkan Admin terakhir." });
+      if (sa[0].n <= 1) return res.status(409).json({ error: "Admin terakhir tidak dapat diturunkan perannya." });
     }
 
     const newName = name?.trim() || target.name;
@@ -179,7 +179,7 @@ app.patch(
     const newArea = CLIENT_SCOPED.includes(newRole)
       ? (area !== undefined ? String(area || "").trim() || null : target.area)
       : null;
-    if (newRole === "Merchandiser" && !newArea) return res.status(400).json({ error: "Merchandiser wajib punya Area (penguncian per-area)." });
+    if (newRole === "Merchandiser" && !newArea) return res.status(400).json({ error: "Merchandiser wajib memiliki Area karena penugasannya dikunci per-area." });
 
     if (password) {
       if (String(password).length < 6) return res.status(400).json({ error: "Password minimal 6 karakter." });
@@ -200,13 +200,13 @@ app.delete(
   requireRole("Admin"),
   wrap(async (req, res) => {
     const id = Number(req.params.id);
-    if (id === req.user!.id) return res.status(409).json({ error: "Tidak bisa menghapus akun sendiri." });
+    if (id === req.user!.id) return res.status(409).json({ error: "Anda tidak dapat menghapus akun sendiri." });
     const { rows } = await q(`select * from users where id = $1`, [id]);
     const target = rows[0];
     if (!target) return res.status(404).json({ error: "User tidak ditemukan." });
     if (target.role === "Admin") {
       const { rows: sa } = await q(`select count(*)::int as n from users where role = 'Admin'`);
-      if (sa[0].n <= 1) return res.status(409).json({ error: "Tidak bisa menghapus Admin terakhir." });
+      if (sa[0].n <= 1) return res.status(409).json({ error: "Admin terakhir tidak dapat dihapus." });
     }
     await q(`delete from users where id = $1`, [id]);
     res.json({ ok: true, id });
@@ -369,7 +369,7 @@ app.patch(
     const wasDep: any = (asset.stageDetails as any)?.deployment || {};
     const flippingToInternal = merged.peruntukan === "Internal" && asset.peruntukan !== "Internal";
     if (flippingToInternal && (wasDep.mode === "Event" || wasDep.mode === "Distribusi" || (wasDep.legs || []).length || (wasDep.placements || []).length)) {
-      return res.status(422).json({ error: "Aset sedang di alur deployment — tarik/selesaikan dulu sebelum jadikan Internal." });
+      return res.status(422).json({ error: "Aset sedang berada dalam alur deployment. Tarik atau selesaikan terlebih dahulu sebelum menjadikannya Internal." });
     }
     await updateAssetCore(id, merged);
     assetChanged(id);
@@ -479,7 +479,7 @@ app.patch(
       if (!(req.user!.role === "Admin" && meta?.force === true)) {
         return res.status(422).json({
           code: "illegal_transition",
-          error: `Transisi tidak sah: Fase ${cur} → Fase ${ns}. Lanjutan sah dari Fase ${cur}: ${(TRANSITIONS[cur] || []).join(", ") || "—"}.`
+          error: `Transisi tidak sah: Fase ${cur} ke Fase ${ns}. Lanjutan sah dari Fase ${cur}: ${(TRANSITIONS[cur] || []).join(", ") || "—"}.`
         });
       }
     }
@@ -665,7 +665,7 @@ app.post(
     const role = req.user!.role;
     if (role !== "Admin" && role !== "PIC") return res.status(403).json({ error: "Hanya PIC atau Admin yang boleh menugaskan pemasangan." });
     if (role === "PIC" && (req.user!.client || null) !== (asset.client || null)) {
-      return res.status(403).json({ error: "PIC hanya bisa menugaskan aset milik client-nya sendiri." });
+      return res.status(403).json({ error: "PIC hanya dapat menugaskan aset milik client-nya sendiri." });
     }
 
     // Optimistic concurrency vs a concurrent completion/edit.
@@ -680,7 +680,7 @@ app.post(
     const deploymentPre: any = (asset.stageDetails as any)?.deployment || {};
     const legsPre: any[] = Array.isArray(deploymentPre.legs) ? deploymentPre.legs : [];
     const venueAreaPre: string | null = (legsPre.find((l: any) => l.status === "active") || legsPre[legsPre.length - 1])?.area || null;
-    if (!venueAreaPre) return res.status(422).json({ code: "venue_no_area", error: "Venue aktif belum punya Area — set area venue dulu di Proyek & Lokasi." });
+    if (!venueAreaPre) return res.status(422).json({ code: "venue_no_area", error: "Venue aktif belum memiliki Area. Tetapkan area venue terlebih dahulu di Proyek & Lokasi." });
 
     // Server-side directory: only real Merchandisers of THIS client are assignable.
     const { rows: dir } = await q(`select id, name, area from users where role='Merchandiser' and client=$1`, [asset.client]);
@@ -700,11 +700,11 @@ app.post(
       const mid = Number(r.merchandiserId);
       const qty = Math.floor(Number(r.qty));
       if (!Number.isInteger(mid) || !nameById.has(mid)) return res.status(400).json({ error: "Merchandiser tidak valid untuk client ini." });
-      if (seen.has(mid)) return res.status(400).json({ error: "Merchandiser tidak boleh dobel." });
+      if (seen.has(mid)) return res.status(400).json({ error: "Merchandiser tidak boleh dipilih lebih dari sekali." });
       seen.add(mid);
       // Hard area-lock: MD must have an area, and it MUST match the venue area (guaranteed set above).
       const mdArea = mdById.get(mid)?.area || null;
-      if (!mdArea) return res.status(422).json({ code: "md_no_area", error: `${nameById.get(mid)} belum punya Area — isi dulu di User Management.` });
+      if (!mdArea) return res.status(422).json({ code: "md_no_area", error: `${nameById.get(mid)} belum memiliki Area. Isi terlebih dahulu di User Management.` });
       if (mdArea !== venueArea) return res.status(403).json({ code: "area_mismatch", error: `${nameById.get(mid)} (area ${mdArea}) tidak boleh ditugaskan di venue area ${venueArea}.` });
       if (!Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: "Qty tiap Merchandiser harus bilangan bulat > 0." });
       const prev = existingById.get(mid);
@@ -762,7 +762,7 @@ app.post(
     let targetId: number;
     if (role === "Merchandiser") targetId = req.user!.id;
     else if (role === "Admin") targetId = Number(req.body?.merchandiserId);
-    else return res.status(403).json({ error: "Hanya Merchandiser (atau Admin) yang bisa melaporkan pemasangan." });
+    else return res.status(403).json({ error: "Hanya Merchandiser (atau Admin) yang dapat melaporkan pemasangan." });
     if (!Number.isInteger(targetId)) return res.status(400).json({ error: "merchandiserId wajib." });
 
     const { signatureBase64, note } = req.body || {};
@@ -944,7 +944,7 @@ function registerMaster(pathName: string, table: string, assetCol: string) {
       if (!rows[0]) return res.status(404).json({ error: "Data tidak ditemukan." });
       const name = rows[0].name;
       const { rows: used } = await q(`select count(*)::int as n from assets where ${assetCol} = $1`, [name]);
-      if (used[0].n > 0) return res.status(409).json({ error: `Tidak bisa dihapus — masih dipakai oleh ${used[0].n} aset.` });
+      if (used[0].n > 0) return res.status(409).json({ error: `Tidak dapat dihapus karena masih digunakan oleh ${used[0].n} aset.` });
       await q(`delete from ${table} where id = $1`, [id]);
       res.json({ ok: true, id });
     })
@@ -992,7 +992,7 @@ app.delete("/api/areas/:id", requireAuth, requireRole("Admin"), wrap(async (req,
   const { rows } = await q(`select name from areas where id=$1`, [id]);
   if (!rows[0]) return res.status(404).json({ error: "Area tidak ditemukan." });
   const { rows: used } = await q(`select count(*)::int as n from users where area=$1`, [rows[0].name]);
-  if (used[0].n > 0) return res.status(409).json({ error: `Tidak bisa dihapus — masih dipakai ${used[0].n} user.` });
+  if (used[0].n > 0) return res.status(409).json({ error: `Tidak dapat dihapus karena masih digunakan oleh ${used[0].n} user.` });
   await q(`delete from areas where id=$1`, [id]);
   res.json({ ok: true, id });
 }));
@@ -1097,7 +1097,7 @@ app.delete("/api/clients/:id", requireAuth, requireRole("Admin"), wrap(async (re
   const { rows } = await q(`select name from clients where id=$1`, [id]);
   if (!rows[0]) return res.status(404).json({ error: "Client tidak ditemukan." });
   const { rows: used } = await q(`select count(*)::int as n from assets where client=$1`, [rows[0].name]);
-  if (used[0].n > 0) return res.status(409).json({ error: `Tidak bisa dihapus — masih dipakai ${used[0].n} aset.` });
+  if (used[0].n > 0) return res.status(409).json({ error: `Tidak dapat dihapus karena masih digunakan oleh ${used[0].n} aset.` });
   await q(`delete from clients where id=$1`, [id]);
   res.json({ ok: true, id });
 }));
@@ -1163,7 +1163,7 @@ app.patch("/api/projects/:id", requireAuth, requireRole("Admin", "Logistik"), wr
 app.delete("/api/projects/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   const id = Number(req.params.id);
   const { rows: used } = await q(`select count(*)::int as n from assets where project_id=$1`, [id]);
-  if (used[0].n > 0) return res.status(409).json({ error: `Tidak bisa dihapus — masih dipakai ${used[0].n} aset.` });
+  if (used[0].n > 0) return res.status(409).json({ error: `Tidak dapat dihapus karena masih digunakan oleh ${used[0].n} aset.` });
   const { rowCount } = await q(`delete from projects where id=$1`, [id]);
   if (!rowCount) return res.status(404).json({ error: "Proyek tidak ditemukan." });
   res.json({ ok: true, id });
@@ -1254,12 +1254,12 @@ app.post("/api/assets/:id/handover", requireAuth, requireRole("Admin", "Logistik
   const asset = await getAsset(req.params.id);
   if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
   if (asset.peruntukan !== "Internal") return res.status(422).json({ error: "Serah-terima custodian hanya untuk aset ber-peruntukan Internal." });
-  if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Serah-terima internal hanya dari Fase 3–6 (gudang → dipegang karyawan)." });
+  if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Serah-terima internal hanya dari Fase 3–6 (dari gudang ke pemegang aset)." });
   const b = req.body || {};
   const empId = Number(b.custodianId);
   if (!empId) return res.status(400).json({ error: "Custodian (karyawan) wajib dipilih." });
   const { rows: er } = await q(`select id, name, department from employees where id=$1 and active=true`, [empId]);
-  if (!er[0]) return res.status(400).json({ error: "Karyawan tidak ditemukan / non-aktif." });
+  if (!er[0]) return res.status(400).json({ error: "Karyawan tidak ditemukan atau non-aktif." });
   const emp = er[0];
   let projectName: string | null = null, projectId: number | null = null;
   if (b.projectId != null) {
@@ -1318,7 +1318,7 @@ app.post("/api/assets/:id/return-internal", requireAuth, requireRole("Admin", "L
   const asset = await getAsset(req.params.id);
   if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
   const dep: any = { ...((asset.stageDetails as any).deployment || {}) };
-  if (asset.peruntukan !== "Internal") return res.status(422).json({ error: "Hanya aset ber-peruntukan Internal yang bisa ditarik lewat menu ini." });
+  if (asset.peruntukan !== "Internal") return res.status(422).json({ error: "Hanya aset ber-peruntukan Internal yang dapat ditarik melalui menu ini." });
   if (!dep.custodianName) return res.status(422).json({ error: "Aset ini tidak sedang dipegang karyawan." });
   const who = dep.custodianName;
   // Clear the active custodian + mode (opname history kept). mode cleared so a later legitimate
@@ -1341,13 +1341,13 @@ app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logi
   if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
   // Client-scope FIRST, so state-dependent guards below can't leak an out-of-client asset's stage/mode.
   if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
-  if (pre.currentStage < 3 || pre.currentStage > 6) return res.status(422).json({ error: "Setup/relokasi venue hanya dari Fase 3–6." });
-  if (pre.peruntukan === "Internal") return res.status(422).json({ error: "Aset Internal tidak masuk alur deployment (event/distribusi)." });
+  if (pre.currentStage < 3 || pre.currentStage > 6) return res.status(422).json({ error: "Pengaturan atau relokasi venue hanya dari Fase 3–6." });
+  if (pre.peruntukan === "Internal") return res.status(422).json({ error: "Aset Internal tidak masuk alur deployment (Event atau Distribusi)." });
   // Mode invariant: don't corrupt a Distribusi asset into a hybrid. (Transit invariants are
   // re-validated authoritatively inside the row lock below — a pre-read check would be TOCTOU-racy.)
   const preDep: any = (pre.stageDetails as any)?.deployment || {};
   if (preDep.mode && preDep.mode !== "Event") return res.status(422).json({ error: "Aset bukan mode Event." });
-  if (Array.isArray(preDep.placements) && preDep.placements.length) return res.status(422).json({ error: "Aset sudah mode Distribusi (ada placement)." });
+  if (Array.isArray(preDep.placements) && preDep.placements.length) return res.status(422).json({ error: "Aset sudah dalam mode Distribusi." });
   const b = req.body || {};
   const locId = Number(b.locationId);
   if (!locId) return res.status(400).json({ error: "Venue wajib dipilih." });
@@ -1418,7 +1418,7 @@ app.post("/api/assets/:id/arrive-venue", requireAuth, requireRole("Admin", "Logi
   if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
   // Stage guard: a venue shipment only exists while the asset is Fase 6 — blocks using a transit
   // marker stranded on an asset that was moved out of Fase 6 to force an illegal transition back.
-  if (pre.currentStage !== 6) return res.status(422).json({ error: "Konfirmasi tiba hanya untuk aset yang sedang dikirim (Fase 6)." });
+  if (pre.currentStage !== 6) return res.status(422).json({ error: "Konfirmasi kedatangan hanya untuk aset yang sedang dikirim." });
   const now = new Date().toISOString().slice(0, 10);
   const result = await tx(async c => {
     const { rows } = await c.query(`select stage_details, current_stage from assets where id=$1 for update`, [id]);
@@ -1450,9 +1450,9 @@ app.post("/api/assets/:id/ship-return", requireAuth, requireRole("Admin", "Logis
   if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
   // Client-scope FIRST (avoid leaking an out-of-client asset's stage/mode via the guards below).
   if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
-  if (pre.currentStage !== 6) return res.status(422).json({ error: "Pengiriman balik ke gudang hanya dari Fase 6 (deployed)." });
+  if (pre.currentStage !== 6) return res.status(422).json({ error: "Pengiriman kembali ke gudang hanya dari Fase 6." });
   const preDep: any = (pre.stageDetails as any)?.deployment || {};
-  if (preDep.mode !== "Event") return res.status(422).json({ error: "Hanya aset mode Event yang dikirim balik dari venue." });
+  if (preDep.mode !== "Event") return res.status(422).json({ error: "Hanya aset mode Event yang dikirim kembali dari venue." });
   // (transit invariants re-validated authoritatively inside the row lock below)
   const b = req.body || {};
   const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
@@ -1488,9 +1488,9 @@ app.post("/api/assets/:id/arrive-warehouse", requireAuth, requireRole("Admin", "
   if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
   // A return shipment only exists while the asset is Fase 6 (in transit back) — stage guard blocks
   // using a stranded returnShipment marker to force an illegal jump to Fase 3 from elsewhere.
-  if (pre.currentStage !== 6) return res.status(422).json({ error: "Konfirmasi tiba di gudang hanya untuk aset yang sedang dikirim balik (Fase 6)." });
+  if (pre.currentStage !== 6) return res.status(422).json({ error: "Konfirmasi kedatangan di gudang hanya untuk aset yang sedang dikirim kembali." });
   const preDep: any = (pre.stageDetails as any)?.deployment || {};
-  if (preDep.returnShipment?.status !== "transit") return res.status(422).json({ error: "Tidak ada pengiriman balik ke gudang yang sedang berjalan." });
+  if (preDep.returnShipment?.status !== "transit") return res.status(422).json({ error: "Tidak ada pengiriman kembali ke gudang yang sedang berjalan." });
   const b = req.body || {};
   const loc = b.warehouse ? String(b.warehouse).trim() : "Gudang Utama Origin";
   const now = new Date().toISOString().slice(0, 10);
@@ -1537,9 +1537,9 @@ app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logist
   if (req.user!.role === "PIC" && (req.user!.client || null) !== (asset.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
   const curDep: any = (asset.stageDetails as any)?.deployment || {};
   if (curDep.mode && curDep.mode !== "Distribusi") return res.status(422).json({ error: "Aset bukan mode Distribusi." });
-  if (Array.isArray(curDep.legs) && curDep.legs.length) return res.status(422).json({ error: "Aset sudah mode Event (ada venue leg)." });
+  if (Array.isArray(curDep.legs) && curDep.legs.length) return res.status(422).json({ error: "Aset sudah dalam mode Event." });
   const rows: any[] = Array.isArray(req.body?.placements) ? req.body.placements : [];
-  if (!rows.length) return res.status(400).json({ error: "Minimal 1 toko." });
+  if (!rows.length) return res.status(400).json({ error: "Minimal 1 toko harus dipilih." });
   // resolve toko + merchandiser names
   const locIds = [...new Set(rows.map(r => Number(r.locationId)).filter(Boolean))];
   const { rows: locs } = locIds.length ? await q(`select id, name, area from locations where id = any($1)`, [locIds]) : { rows: [] };
@@ -1565,15 +1565,15 @@ app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logist
     const loc: any = locMap.get(lid);
     const prev = byLoc.get(lid);
     const dq = prev ? Number(prev.doneQty) || 0 : 0;
-    if (qty < dq) return res.status(422).json({ error: `Qty toko ${loc.name} (${qty}) < yang sudah terpasang (${dq}).` });
+    if (qty < dq) return res.status(422).json({ error: `Qty toko ${loc.name} (${qty}) lebih kecil dari yang sudah terpasang (${dq}).` });
     const mid = Number(r.merchandiserId) || undefined;
     // Hard area-lock: an assigned MD must belong to THIS client, have an area, and match the toko's area.
     if (mid) {
       if (!merchMap.has(mid)) return res.status(400).json({ error: "Merchandiser tidak valid untuk client ini." });
       const mdArea = merchAreaMap.get(mid) || null;
-      if (!mdArea) return res.status(422).json({ code: "md_no_area", error: `${merchMap.get(mid)} belum punya Area — isi dulu di User Management.` });
+      if (!mdArea) return res.status(422).json({ code: "md_no_area", error: `${merchMap.get(mid)} belum memiliki Area. Isi terlebih dahulu di User Management.` });
       if (loc.area && mdArea !== loc.area) return res.status(403).json({ code: "area_mismatch", error: `${merchMap.get(mid)} (area ${mdArea}) tidak boleh ditugaskan ke toko ${loc.name} (area ${loc.area}).` });
-      if (!loc.area) return res.status(422).json({ code: "toko_no_area", error: `Toko ${loc.name} belum punya Area — set area toko dulu di Proyek & Lokasi.` });
+      if (!loc.area) return res.status(422).json({ code: "toko_no_area", error: `Toko ${loc.name} belum memiliki Area. Tetapkan area toko terlebih dahulu di Proyek & Lokasi.` });
     }
     byLoc.set(lid, {
       ...(prev || {}),
@@ -1678,7 +1678,7 @@ app.post("/api/assets/:id/audit-sample", requireAuth, requireRole("Admin", "Logi
   const pls: any[] = Array.isArray(dep.placements) ? dep.placements.map((p: any) => ({ ...p })) : [];
   if (!pls.length) return res.status(422).json({ error: "Belum ada placement untuk diaudit." });
   const samples: any[] = Array.isArray(req.body?.samples) ? req.body.samples : [];
-  if (!samples.length) return res.status(400).json({ error: "Minimal 1 toko sampel." });
+  if (!samples.length) return res.status(400).json({ error: "Minimal 1 toko sampel harus dipilih." });
   for (const s of samples) {
     const p = pls.find(x => Number(x.locationId) === Number(s.locationId));
     if (p) { p.audited = true; p.auditCompliant = !!s.compliant; }
@@ -1772,7 +1772,7 @@ app.post(
     if (mode !== "replace" && mode !== "append") return res.status(400).json({ error: "mode harus 'replace' atau 'append'." });
     const categories = Array.isArray(req.body?.categories) ? req.body.categories : [];
     const clients = Array.isArray(req.body?.clients) ? req.body.clients : [];
-    if (!categories.length && !clients.length) return res.status(400).json({ error: "Tidak ada data kategori/client yang bisa diimpor dari file." });
+    if (!categories.length && !clients.length) return res.status(400).json({ error: "Tidak ada data kategori atau client yang dapat diimpor dari file." });
     const result = await tx(async c => ({
       categories: await applyImport(c, "categories", "category", categories, mode),
       clients: await applyImport(c, "clients", "client", clients, mode)

@@ -54,16 +54,16 @@ const STAGE_ICONS: { [key: number]: any } = {
 };
 
 const STAGE_LABELS: { [key: number]: string } = {
-  1: "Request & WO-Project",
-  2: "Fase Perakitan/Produksi",
-  3: "Inventory & Gudang",
-  4: "Pengiriman/Surat Jalan",
+  1: "Permintaan & Work Order Proyek",
+  2: "Perakitan / Produksi",
+  3: "Inventaris & Gudang",
+  4: "Pengiriman / Surat Jalan",
   5: "Transit / Pelacakan Kiriman",
-  6: "Pemasangan Deployed",
+  6: "Pemasangan / Terpasang",
   7: "Audit & Kepatuhan",
   8: "Pemeliharaan Aktif",
-  9: "Penarikan Relokasi",
-  10: "Pemusnahan/Disposal"
+  9: "Penarikan & Relokasi",
+  10: "Pemusnahan / Disposal"
 };
 
 const cleanLabel = (s: number) => (STAGE_LABELS[s] || "").replace(/&amp;/g, "&");
@@ -91,9 +91,9 @@ const TRANSITION_VERB: { [k: number]: string } = {
   5: "Input Tracking / Transit",
   6: "Konfirmasi Pemasangan",
   7: "Lakukan Audit",
-  8: "Buka Tiket Maintenance",
+  8: "Buka Tiket Pemeliharaan",
   9: "Tarik / Relokasi Aset",
-  10: "Disposal / Retire Aset"
+  10: "Disposal / Pemusnahan Aset"
 };
 
 type FieldDef = {
@@ -130,7 +130,7 @@ const GATE_FORMS: { [target: number]: { stageKey: string; title: string; fields:
     stageKey: "production",
     title: "Mulai Produksi / Perakitan",
     fields: [
-      { key: "prodLead", label: "Leader Produksi", type: "text", required: true, placeholder: "cth. Gerry Pratama" },
+      { key: "prodLead", label: "Leader Produksi", type: "text", required: true, placeholder: "contoh: Gerry Pratama" },
       { key: "qcInspector", label: "QC Inspector", type: "text", required: true },
       { key: "qcScore", label: "Skor QC (0–100)", type: "number", required: true, min: 0, max: 100, def: 95 },
       { key: "productionReportCode", label: "Kode Laporan Produksi", type: "text" },
@@ -166,8 +166,8 @@ const GATE_FORMS: { [target: number]: { stageKey: string; title: string; fields:
     fields: [
       { key: "courier", label: "Kurir / Vendor Pengiriman", type: "select", required: true, options: COURIERS },
       { key: "trackingUrl", label: "Link Tracking (tempel dari kurir)", type: "text", required: true, full: true, placeholder: "https://… link resi/tracking dari kurir" },
-      { key: "trackingNo", label: "Nomor Resi (opsional)", type: "text", placeholder: "cth. JX1234567890" },
-      { key: "eta", label: "Estimasi Tiba (ETA)", type: "text", required: true, placeholder: "cth. 2 hari / 25 Jul" }
+      { key: "trackingNo", label: "Nomor Resi (opsional)", type: "text", placeholder: "contoh: JX1234567890" },
+      { key: "eta", label: "Estimasi Tiba (ETA)", type: "text", required: true, placeholder: "contoh: 2 hari / 25 Jul" }
     ]
   },
   6: {
@@ -175,7 +175,7 @@ const GATE_FORMS: { [target: number]: { stageKey: string; title: string; fields:
     title: "Tugaskan Pemasangan / Setup",
     fields: [
       { key: "installationDate", label: "Tanggal Rencana Pasang", type: "date", required: true },
-      { key: "assignments", label: "Tugaskan ke Merchandiser (bagi per qty)", type: "assignments", full: true, required: true, hint: "Merchandiser menyelesaikan porsinya via aplikasi mobile (foto + TTD BAST). Total qty harus = qty aset." },
+      { key: "assignments", label: "Tugaskan ke Merchandiser (bagi per qty)", type: "assignments", full: true, required: true, hint: "Merchandiser menyelesaikan porsinya melalui aplikasi mobile (foto beserta tanda tangan BAST). Total qty harus sama dengan qty aset." },
       { key: "planogramMatched", label: "Wajib sesuai Planogram / Tata Ruang", type: "checkbox", def: true, full: true },
       { key: "verifiedItems", label: "Item yang harus diverifikasi (pisahkan dengan koma)", type: "tags", full: true, placeholder: "Braket, UPS, Kabel LAN" }
     ]
@@ -577,13 +577,13 @@ export default function LifecycleManager({
     const rows = distRows.filter(r => r.locationId).map(r => ({ locationId: Number(r.locationId), merchandiserId: r.merchandiserId ? Number(r.merchandiserId) : undefined, qty: Number(r.qty) || 0 }));
     if (!rows.length) return setDistError("Pilih minimal 1 toko.");
     const ids = rows.map(r => r.locationId);
-    if (new Set(ids).size !== ids.length) return setDistError("Ada toko yang dobel.");
+    if (new Set(ids).size !== ids.length) return setDistError("Ada toko yang terpilih lebih dari sekali.");
     const tot = rows.reduce((s, r) => s + r.qty, 0);
-    if (tot > (detailAsset.quantity || 0)) return setDistError(`Total (${tot}) melebihi qty aset (${detailAsset.quantity}). Boleh kurang.`);
+    if (tot > (detailAsset.quantity || 0)) return setDistError(`Total (${tot}) melebihi qty aset (${detailAsset.quantity}). Jumlah boleh lebih sedikit.`);
     setDistBusy(true); setDistError(null);
     const res = await onDistribute(detailAsset.id, rows, detailAsset.projectId ?? undefined);
     setDistBusy(false);
-    if (!res.ok) return setDistError(res.error || "Gagal distribusi.");
+    if (!res.ok) return setDistError(res.error || "Gagal menyimpan distribusi.");
     setDistOpen(false);
   };
 
@@ -619,12 +619,12 @@ export default function LifecycleManager({
     e.preventDefault();
     if (!detailAsset || !onAuditSample) return;
     const samples = Object.entries(sampleSel).filter(([, v]) => v).map(([lid, v]) => ({ locationId: Number(lid), compliant: v === "compliant" }));
-    if (!samples.length) return setSampleError("Pilih minimal 1 toko sampel + status.");
+    if (!samples.length) return setSampleError("Pilih minimal 1 toko sampel dan tentukan statusnya.");
     setSampleBusy(true); setSampleError(null);
     const meta = sampleMethod === "auto" ? { method: "auto" as const, samplePct: autoPct ?? undefined } : { method: "manual" as const };
     const res = await onAuditSample(detailAsset.id, samples, meta);
     setSampleBusy(false);
-    if (!res.ok) return setSampleError(res.error || "Gagal audit sampling.");
+    if (!res.ok) return setSampleError(res.error || "Gagal menyimpan audit sampling.");
     setSampleOpen(false);
   };
 
@@ -656,7 +656,7 @@ export default function LifecycleManager({
       projectId: detailAsset.projectId ?? undefined
     });
     setHandoverBusy(false);
-    if (!res.ok) return setHandoverError(res.error || "Gagal serah-terima.");
+    if (!res.ok) return setHandoverError(res.error || "Gagal memproses serah-terima.");
     setHandoverOpen(false);
   };
 
@@ -688,7 +688,7 @@ export default function LifecycleManager({
       eta: venueForm.eta.trim() || undefined
     });
     setVenueBusy(false);
-    if (!res.ok) return setVenueError(res.error || "Gagal kirim ke venue.");
+    if (!res.ok) return setVenueError(res.error || "Gagal mengirim aset ke venue.");
     setVenueOpen(false);
   };
   const openReturn = () => {
@@ -710,7 +710,7 @@ export default function LifecycleManager({
       eta: returnForm.eta.trim() || undefined
     });
     setReturnBusy(false);
-    if (!res.ok) return setReturnError(res.error || "Gagal kirim balik ke gudang.");
+    if (!res.ok) return setReturnError(res.error || "Gagal mengirim aset kembali ke gudang.");
     setReturnOpen(false);
   };
   const doArriveVenue = async () => {
@@ -718,14 +718,14 @@ export default function LifecycleManager({
     setArriveBusy(true); setArriveError(null);
     const res = await onArriveVenue(detailAsset.id);
     setArriveBusy(false);
-    if (!res.ok) setArriveError(res.error || "Gagal konfirmasi tiba di venue.");
+    if (!res.ok) setArriveError(res.error || "Gagal mengonfirmasi kedatangan di venue.");
   };
   const doArriveWarehouse = async () => {
     if (!detailAsset || !onArriveWarehouse || arriveBusy) return;
     setArriveBusy(true); setArriveError(null);
     const res = await onArriveWarehouse(detailAsset.id);
     setArriveBusy(false);
-    if (!res.ok) setArriveError(res.error || "Gagal konfirmasi tiba di gudang.");
+    if (!res.ok) setArriveError(res.error || "Gagal mengonfirmasi kedatangan di gudang.");
   };
 
   const [newForm, setNewForm] = React.useState({
@@ -840,7 +840,7 @@ export default function LifecycleManager({
 
     const result = await onAddAsset(newlyCreatedAsset);
     if (!result.ok) {
-      setFormError(result.error || "Gagal menyimpan aset ke server.");
+      setFormError(result.error || "Gagal menyimpan aset.");
       return;
     }
     setIsNewAssetModalOpen(false);
@@ -892,7 +892,7 @@ export default function LifecycleManager({
     for (const f of cfg.fields) {
       const raw = gateForm[f.key];
       if (f.required && f.type !== "checkbox" && f.type !== "destinations" && f.type !== "assignments" && (raw === undefined || raw === null || String(raw).trim() === "")) {
-        return setGateError(`Field "${f.label}" wajib diisi.`);
+        return setGateError(`Kolom "${f.label}" wajib diisi.`);
       }
       if (f.type === "number" && raw !== "" && raw != null) {
         const n = Number(raw);
@@ -911,7 +911,7 @@ export default function LifecycleManager({
         if (rows.length === 0) return setGateError("Tambahkan minimal 1 tujuan pengiriman.");
         for (const r of rows) {
           if (!String(r.area || "").trim() || !String(r.picPenerima || "").trim())
-            return setGateError("Setiap tujuan wajib diisi: Tujuan/Area & PIC Penerima.");
+            return setGateError("Setiap tujuan wajib diisi: Tujuan/Area dan PIC Penerima.");
           if (!(Number(r.qty) > 0)) return setGateError("Qty tiap tujuan harus lebih dari 0.");
         }
       }
@@ -921,8 +921,8 @@ export default function LifecycleManager({
         const seen = new Set<string>();
         let tot = 0;
         for (const r of rows) {
-          if (!r.merchandiserId) return setGateError("Setiap baris wajib pilih Merchandiser.");
-          if (seen.has(String(r.merchandiserId))) return setGateError("Merchandiser tidak boleh dobel.");
+          if (!r.merchandiserId) return setGateError("Setiap baris wajib memilih Merchandiser.");
+          if (seen.has(String(r.merchandiserId))) return setGateError("Merchandiser tidak boleh dipilih lebih dari sekali.");
           seen.add(String(r.merchandiserId));
           if (!(Number(r.qty) > 0)) return setGateError("Qty tiap Merchandiser harus lebih dari 0.");
           const dq = Number(r.doneQty) || 0;
@@ -1040,7 +1040,7 @@ export default function LifecycleManager({
 
     const result = await onUpdateAssetStage(detailAsset.id, transitionTarget as AssetStage, updatedDetails, meta);
     if (!result.ok) {
-      setGateError(result.error || "Gagal memproses transisi di server.");
+      setGateError(result.error || "Gagal memproses perpindahan fase.");
       return;
     }
     closeGate();
@@ -1107,8 +1107,8 @@ export default function LifecycleManager({
           <button
             type="button"
             onClick={() => set(genSuratJalan())}
-            title="Generate ulang nomor surat jalan"
-            aria-label="Generate ulang nomor surat jalan"
+            title="Buat ulang nomor surat jalan"
+            aria-label="Buat ulang nomor surat jalan"
             className="shrink-0 h-[34px] w-[34px] grid place-items-center rounded-lg border border-slate-200 bg-white text-blue-600 hover:bg-blue-50 transition"
           >
             <RefreshCw className="h-4 w-4" />
@@ -1286,7 +1286,7 @@ export default function LifecycleManager({
                   onClick={() => set({ ...map, [it]: !p })}
                   className={`text-[10px] font-bold px-2.5 py-1 rounded transition ${p ? "bg-emerald-500 text-white" : "bg-rose-500 text-white"}`}
                 >
-                  {p ? "LULUS" : "TIDAK"}
+                  {p ? "Lulus" : "Tidak"}
                 </button>
               </div>
             );
@@ -1362,7 +1362,7 @@ export default function LifecycleManager({
           </div>
 
           <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-1.5">
-            <span className="text-[10px] text-slate-500 font-bold px-1 uppercase tracking-wider">Step/Fase:</span>
+            <span className="text-[10px] text-slate-500 font-bold px-1 uppercase tracking-wider">Fase:</span>
             <select
               value={filterStage}
               onChange={e => setFilterStage(e.target.value)}
@@ -1418,7 +1418,7 @@ export default function LifecycleManager({
 
                 <div className="px-5 py-4 bg-slate-50/50 flex justify-between items-center text-xs">
                   <div>
-                    <p className="text-[10px] text-slate-400 uppercase font-medium">Banyak / Biaya</p>
+                    <p className="text-[10px] text-slate-400 uppercase font-medium">Jumlah / Biaya</p>
                     <p className="font-bold text-slate-800">
                       {asset.quantity} unit <span className="font-normal text-slate-400 text-[10px]">· {formatRupiah(asset.financials.purchaseCost)}</span>
                     </p>
@@ -1488,12 +1488,12 @@ export default function LifecycleManager({
                 <div className="bg-slate-100 w-32 h-32 mx-auto rounded-lg border border-slate-200 flex flex-col items-center justify-center relative p-2">
                   <QrCode className="h-28 w-28 text-slate-800" />
                   <span className="absolute bottom-1 bg-blue-600 text-[8px] font-bold text-white px-1.5 rounded uppercase">
-                    Step {detailAsset.currentStage} Live
+                    Fase {detailAsset.currentStage} Aktif
                   </span>
                 </div>
                 <div>
                   <p className="text-xs font-mono font-bold text-slate-700 select-all">{detailAsset.qrcode}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Scan tag QR ini pada fisik unit untuk verifikasi check-point audit.</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Pindai tag QR ini pada unit fisik untuk verifikasi saat audit di lapangan.</p>
                 </div>
               </div>
 
@@ -1516,7 +1516,7 @@ export default function LifecycleManager({
               </div>
 
               <div className="space-y-3 text-xs pt-2">
-                <h5 className="font-extrabold text-slate-800 uppercase tracking-widest border-b border-slate-200 pb-1">Arsip Kas &amp; Nilai Buku:</h5>
+                <h5 className="font-extrabold text-slate-800 uppercase tracking-widest border-b border-slate-200 pb-1">Catatan Keuangan &amp; Nilai Buku:</h5>
                 <div className="space-y-2 text-slate-600">
                   <div className="flex justify-between">
                     <span className="text-slate-400 font-medium">Harga Pengadaan:</span> <strong className="font-bold text-slate-800">{formatRupiah(detailAsset.financials.purchaseCost)}</strong>
@@ -1536,8 +1536,8 @@ export default function LifecycleManager({
               <div className="space-y-5">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-100">
                   <div>
-                    <h4 className="font-extrabold text-slate-900 text-base">URUTAN PENUH LIFECYCLE (1-10)</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">Kelola perpindahan fase aset end-to-end</p>
+                    <h4 className="font-extrabold text-slate-900 text-base">Alur Lifecycle Penuh (Fase 1–10)</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">Kelola perpindahan fase aset dari awal hingga akhir</p>
                   </div>
                   <button
                     onClick={() => setDetailAssetId(null)}
@@ -1653,7 +1653,7 @@ export default function LifecycleManager({
                               <span className={`h-6 w-6 shrink-0 grid place-items-center rounded-full text-[9px] font-extrabold text-white ${circle}`}>{dq}/{a.qty}</span>
                               <div className="min-w-0 flex-1">
                                 <p className="text-[11px] font-bold text-slate-800 truncate">{a.merchandiser}</p>
-                                <p className="text-[9px] text-slate-400">{dq}/{a.qty} unit{done && a.completedAt ? ` · selesai ${new Date(a.completedAt).toLocaleDateString("id-ID")}` : partial && a.lastReportAt ? ` · update ${new Date(a.lastReportAt).toLocaleDateString("id-ID")}` : ""}</p>
+                                <p className="text-[9px] text-slate-400">{dq}/{a.qty} unit{done && a.completedAt ? ` · selesai ${new Date(a.completedAt).toLocaleDateString("id-ID")}` : partial && a.lastReportAt ? ` · diperbarui ${new Date(a.lastReportAt).toLocaleDateString("id-ID")}` : ""}</p>
                               </div>
                               {a.signature && (done || partial) && <img src={a.signature} alt="TTD" className="h-7 bg-white border border-slate-200 rounded" />}
                               <span className={`shrink-0 text-[9px] font-bold px-2 py-0.5 rounded-full ${pill}`}>{done ? "Selesai" : partial ? `Sebagian ${dq}/${a.qty}` : "Menunggu"}</span>
@@ -1677,7 +1677,7 @@ export default function LifecycleManager({
                       <div className="flex items-center gap-2">
                         <span className="bg-indigo-500 text-white p-1.5 rounded-lg"><MapPin className="h-3.5 w-3.5" /></span>
                         <div>
-                          <p className="text-xs font-extrabold text-slate-800">Pemasangan / Setup (BAST)</p>
+                          <p className="text-xs font-extrabold text-slate-800">Pemasangan / Instalasi (BAST)</p>
                           <p className="text-[10px] text-slate-500">
                             Tim: <strong className="text-slate-700">{d.installTeam}</strong>
                             {d.installationDate ? ` · ${d.installationDate}` : ""} · Planogram: <strong className="text-slate-700">{d.planogramMatched ? "Sesuai" : "Belum"}</strong>
@@ -1691,7 +1691,7 @@ export default function LifecycleManager({
                           ))}
                         </div>
                       )}
-                      {d.bastSignature && <img src={d.bastSignature} alt="TTD BAST pemasangan" className="h-16 bg-white border border-slate-200 rounded" />}
+                      {d.bastSignature && <img src={d.bastSignature} alt="Tanda tangan BAST pemasangan" className="h-16 bg-white border border-slate-200 rounded" />}
                     </div>
                   );
                 })() : null}
@@ -1713,7 +1713,7 @@ export default function LifecycleManager({
                       </div>
                       {d.projectName && <p className="text-[10px] text-slate-500">Proyek: <strong className="text-slate-700">{d.projectName}</strong></p>}
                       {d.handoverNote && <p className="text-[10px] text-slate-500 italic">"{d.handoverNote}"</p>}
-                      {d.handoverSignature && <img src={d.handoverSignature} alt="TTD BAST serah-terima" className="h-16 bg-white border border-slate-200 rounded" />}
+                      {d.handoverSignature && <img src={d.handoverSignature} alt="Tanda tangan BAST serah-terima" className="h-16 bg-white border border-slate-200 rounded" />}
                     </div>
                   );
                 })()}
@@ -1727,8 +1727,8 @@ export default function LifecycleManager({
                       <div className="flex items-center gap-2">
                         <span className="bg-amber-500 text-white p-1.5 rounded-lg"><Compass className="h-3.5 w-3.5" /></span>
                         <div>
-                          <p className="text-xs font-extrabold text-slate-800">Roadshow / Venue Timeline</p>
-                          <p className="text-[10px] text-slate-500">{legs.length} venue · sekarang di <strong className="text-amber-700">leg {d.currentLegSeq || legs[legs.length - 1]?.seq}</strong></p>
+                          <p className="text-xs font-extrabold text-slate-800">Linimasa Roadshow / Venue</p>
+                          <p className="text-[10px] text-slate-500">{legs.length} venue · sekarang di <strong className="text-amber-700">venue ke-{d.currentLegSeq || legs[legs.length - 1]?.seq}</strong></p>
                         </div>
                       </div>
                       <div className="space-y-2 relative pl-4 border-l-2 border-amber-200">
@@ -1746,7 +1746,7 @@ export default function LifecycleManager({
                                 <span className={`ml-auto text-[9px] font-bold px-2 py-0.5 rounded-full border ${tone}`}>{badge}</span>
                               </div>
                               <p className="text-[10px] text-slate-500">
-                                {lg.pic ? `PIC: ${lg.pic}` : "PIC: —"}{lg.status === "transit" && lg.shipping?.shippedAt ? ` · dikirim ${lg.shipping.shippedAt}${lg.shipping.eta ? ` · ETA ${lg.shipping.eta}` : ""}` : ""}{lg.setupDate ? ` · setup ${lg.setupDate}` : ""}{lg.teardownDate ? ` → bongkar ${lg.teardownDate}` : ""}
+                                {lg.pic ? `PIC: ${lg.pic}` : "PIC: —"}{lg.status === "transit" && lg.shipping?.shippedAt ? ` · dikirim ${lg.shipping.shippedAt}${lg.shipping.eta ? ` · ETA ${lg.shipping.eta}` : ""}` : ""}{lg.setupDate ? ` · setup ${lg.setupDate}` : ""}{lg.teardownDate ? ` · bongkar ${lg.teardownDate}` : ""}
                               </p>
                             </div>
                           );
@@ -1778,7 +1778,7 @@ export default function LifecycleManager({
                       <div className="flex items-center gap-2">
                         <span className="bg-blue-500 text-white p-1.5 rounded-lg"><Truck className="h-3.5 w-3.5" /></span>
                         <div className="min-w-0">
-                          <p className="text-xs font-extrabold text-slate-800">Pelacakan Kiriman {toGudang ? "→ Gudang" : "→ Venue"}</p>
+                          <p className="text-xs font-extrabold text-slate-800">Pelacakan Kiriman {toGudang ? "ke Gudang" : "ke Venue"}</p>
                           <p className="text-[10px] text-slate-500">
                             Tujuan: <strong className="text-slate-700">{destName}</strong>
                             {ship?.courier ? ` · ${ship.courier}` : ""}{ship?.trackingNo ? ` · Resi ${ship.trackingNo}` : ""}{ship?.eta ? ` · ETA ${ship.eta}` : ""}
@@ -1946,12 +1946,12 @@ export default function LifecycleManager({
                             className="w-full flex items-center gap-2 text-left bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white border border-emerald-600 rounded-lg px-3 py-2.5 transition shadow-sm">
                             <Check className="h-4 w-4 shrink-0" />
                             <span className="min-w-0">
-                              <span className="block text-[11px] font-bold leading-tight">Konfirmasi Tiba di Gudang</span>
+                              <span className="block text-[11px] font-bold leading-tight">Konfirmasi Kedatangan di Gudang</span>
                               <span className="block text-[9px] text-emerald-50 leading-tight">Aset kembali ke Fase 3 (Gudang) — roadshow selesai</span>
                             </span>
                           </button>
                         ) : (
-                          <div className="w-full flex items-center gap-2 bg-cyan-50 border border-cyan-200 text-cyan-700 rounded-lg px-3 py-2.5 text-[11px] font-semibold"><Home className="h-4 w-4 shrink-0" /><span>Dalam pengiriman balik ke gudang — menunggu <strong>Logistik/Admin</strong> konfirmasi tiba.</span></div>
+                          <div className="w-full flex items-center gap-2 bg-cyan-50 border border-cyan-200 text-cyan-700 rounded-lg px-3 py-2.5 text-[11px] font-semibold"><Home className="h-4 w-4 shrink-0" /><span>Dalam pengiriman kembali ke gudang — menunggu <strong>Logistik/Admin</strong> mengonfirmasi kedatangan.</span></div>
                         )}
                       </>
                     );
@@ -1963,8 +1963,8 @@ export default function LifecycleManager({
                           className="w-full flex items-center gap-2 text-left bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white border border-emerald-600 rounded-lg px-3 py-2.5 transition shadow-sm">
                           <Check className="h-4 w-4 shrink-0" />
                           <span className="min-w-0">
-                            <span className="block text-[11px] font-bold leading-tight">Konfirmasi Tiba di Venue</span>
-                            <span className="block text-[9px] text-emerald-50 leading-tight">{transitLeg.venue}{transitLeg.area ? ` · ${transitLeg.area}` : ""} — set aktif di venue</span>
+                            <span className="block text-[11px] font-bold leading-tight">Konfirmasi Kedatangan di Venue</span>
+                            <span className="block text-[9px] text-emerald-50 leading-tight">{transitLeg.venue}{transitLeg.area ? ` · ${transitLeg.area}` : ""} — aset menjadi aktif di venue</span>
                           </span>
                         </button>
                       </>
@@ -1978,8 +1978,8 @@ export default function LifecycleManager({
                           className="w-full flex items-center gap-2 text-left bg-amber-500 hover:bg-amber-600 text-white border border-amber-500 rounded-lg px-3 py-2.5 transition shadow-sm">
                           <Truck className="h-4 w-4 shrink-0" />
                           <span className="min-w-0">
-                            <span className="block text-[11px] font-bold leading-tight">{hasLegs ? "Kirim ke Venue Berikutnya" : "Kirim ke Venue (Setup Event)"}</span>
-                            <span className="block text-[9px] text-amber-50 leading-tight">{hasLegs ? "Kirim aset + tracking ke venue berikutnya (roadshow)" : "Kirim aset + tracking ke venue #1 (aset ke Fase 6)"}</span>
+                            <span className="block text-[11px] font-bold leading-tight">{hasLegs ? "Kirim ke Venue Berikutnya" : "Kirim ke Venue (Mulai Event)"}</span>
+                            <span className="block text-[9px] text-amber-50 leading-tight">{hasLegs ? "Kirim aset beserta tracking ke venue berikutnya (roadshow)" : "Kirim aset beserta tracking ke venue pertama"}</span>
                           </span>
                         </button>
                         {activeLeg && onShipReturn && gudangRole && (
@@ -1987,8 +1987,8 @@ export default function LifecycleManager({
                             className="w-full flex items-center gap-2 text-left bg-white hover:bg-cyan-50 text-cyan-700 border border-cyan-300 rounded-lg px-3 py-2.5 transition shadow-sm">
                             <Home className="h-4 w-4 shrink-0" />
                             <span className="min-w-0">
-                              <span className="block text-[11px] font-bold leading-tight">Kirim Balik ke Gudang</span>
-                              <span className="block text-[9px] text-cyan-600 leading-tight">Roadshow selesai — kirim aset + tracking balik ke gudang</span>
+                              <span className="block text-[11px] font-bold leading-tight">Kirim Kembali ke Gudang</span>
+                              <span className="block text-[9px] text-cyan-600 leading-tight">Roadshow selesai — kirim aset beserta tracking kembali ke gudang</span>
                             </span>
                           </button>
                         )}
@@ -2007,7 +2007,7 @@ export default function LifecycleManager({
                         <MapPin className="h-4 w-4 shrink-0" />
                         <span className="min-w-0">
                           <span className="block text-[11px] font-bold leading-tight">{hasPls ? "Kelola Distribusi Toko" : "Distribusi ke Toko"}</span>
-                          <span className="block text-[9px] text-teal-50 leading-tight">{hasPls ? "Tambah / ubah pembagian per-toko (progres aman)" : "Bagi qty ke toko + merchandiser; mereka pasang di lapangan"}</span>
+                          <span className="block text-[9px] text-teal-50 leading-tight">{hasPls ? "Tambah atau ubah pembagian per-toko (progres tetap aman)" : "Bagi qty ke toko dan merchandiser; mereka memasang di lapangan"}</span>
                         </span>
                       </button>
                     );
@@ -2022,7 +2022,7 @@ export default function LifecycleManager({
                       <ShieldCheck className="h-4 w-4 shrink-0" />
                       <span className="min-w-0">
                         <span className="block text-[11px] font-bold leading-tight">Audit Sampling Toko</span>
-                        <span className="block text-[9px] text-teal-600 leading-tight">Cek sebagian toko (10–20%) → coverage &amp; kepatuhan</span>
+                        <span className="block text-[9px] text-teal-600 leading-tight">Cek sebagian toko (10–20%) untuk cakupan dan kepatuhan</span>
                       </span>
                     </button>
                   )}
@@ -2036,8 +2036,8 @@ export default function LifecycleManager({
                       >
                         <MapPin className="h-4 w-4 shrink-0" />
                         <span className="min-w-0">
-                          <span className="block text-[11px] font-bold leading-tight">{hasAsg ? "Kelola Penugasan Pemasangan" : "Tugaskan Pemasangan / Setup"}</span>
-                          <span className="block text-[9px] text-indigo-100 leading-tight">{hasAsg ? "Tambah / ubah pembagian Merchandiser (progres tetap aman)" : "Bagi qty ke Merchandiser; mereka lapor via mobile (tetap Fase 6)"}</span>
+                          <span className="block text-[11px] font-bold leading-tight">{hasAsg ? "Kelola Penugasan Pemasangan" : "Tugaskan Pemasangan"}</span>
+                          <span className="block text-[9px] text-indigo-100 leading-tight">{hasAsg ? "Tambah atau ubah pembagian Merchandiser (progres tetap aman)" : "Bagi qty ke Merchandiser; mereka melapor melalui aplikasi mobile"}</span>
                         </span>
                       </button>
                     );
@@ -2076,7 +2076,7 @@ export default function LifecycleManager({
                   ) : (
                     <div className="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-lg p-3 flex items-center gap-2">
                       <Check className="h-4 w-4 text-emerald-500" />
-                      Aset sudah di fase akhir (Disposal). Data diarsipkan permanen — tidak ada transisi lanjutan.
+                      Aset sudah di fase akhir (Disposal). Data diarsipkan permanen — tidak ada perpindahan fase lanjutan.
                     </div>
                   )}
                 </div>
@@ -2109,7 +2109,7 @@ export default function LifecycleManager({
                             <IconComponent className="h-3.5 w-3.5" />
                             {cleanLabel(stepNumber)}
                             {isActive && (
-                              <span className="bg-blue-50 text-blue-600 px-1.5 py-0.2 rounded-full text-[9px] font-extrabold uppercase animate-pulse">SEDANG JALAN</span>
+                              <span className="bg-blue-50 text-blue-600 px-1.5 py-0.2 rounded-full text-[9px] font-extrabold uppercase animate-pulse">Sedang Berjalan</span>
                             )}
                             {isCompleted && <span className="text-emerald-500 font-bold text-[10px]">✓ Selesai</span>}
                           </h5>
@@ -2118,7 +2118,7 @@ export default function LifecycleManager({
                             <div className="mt-1 bg-slate-50 rounded-lg p-2.5 border border-slate-200/50 space-y-1.5 text-[11px] text-slate-600">
                               {stepNumber === 1 && (
                                 <p>
-                                  Code WO: <strong className="font-mono text-slate-800">{detailAsset.projectCode}</strong> · ID Req:{" "}
+                                  Kode WO: <strong className="font-mono text-slate-800">{detailAsset.projectCode}</strong> · ID Req:{" "}
                                   <strong className="font-mono">{detailAsset.stageDetails.request.reqId}</strong>
                                   <br />
                                   PIC: <strong>{detailAsset.stageDetails.request.picName}</strong> · Vendor: <strong>{detailAsset.stageDetails.request.vendorName}</strong>
@@ -2293,7 +2293,7 @@ export default function LifecycleManager({
                   <option value="">— pilih karyawan —</option>
                   {employees.map(e => <option key={e.id} value={e.id}>{e.name}{e.department ? ` · ${e.department}` : ""}</option>)}
                 </select>
-                {employees.length === 0 && <p className="text-[10px] text-amber-600">Belum ada karyawan. Tambahkan dulu di menu Organisasi → Karyawan.</p>}
+                {employees.length === 0 && <p className="text-[10px] text-amber-600">Belum ada karyawan. Tambahkan dulu di menu Organisasi, bagian Karyawan.</p>}
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Tanggal Serah-Terima</label>
@@ -2301,7 +2301,7 @@ export default function LifecycleManager({
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Catatan (opsional)</label>
-                <textarea value={handoverForm.note} onChange={e => setHandoverForm({ ...handoverForm, note: e.target.value })} rows={2} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 resize-none" placeholder="cth. Laptop Lenovo + charger + tas" />
+                <textarea value={handoverForm.note} onChange={e => setHandoverForm({ ...handoverForm, note: e.target.value })} rows={2} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 resize-none" placeholder="contoh: Laptop Lenovo, charger, dan tas" />
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Tanda Tangan BAST (opsional)</label>
@@ -2310,7 +2310,7 @@ export default function LifecycleManager({
               {handoverError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{handoverError}</span></div>}
               <div className="p-2.5 bg-slate-50 border border-slate-200/70 rounded-lg text-[10.5px] text-slate-500 flex items-start gap-2">
                 <FileText className="h-3.5 w-3.5 text-slate-500 flex-shrink-0 mt-0.5" />
-                <span>Aset akan pindah ke <strong className="text-slate-700">Fase 6 · Terpasang/Dipakai</strong> dengan custodian tercatat (skip surat jalan/transit untuk aset internal).</span>
+                <span>Aset akan pindah ke <strong className="text-slate-700">Fase 6 · Terpasang/Dipakai</strong> dengan custodian tercatat (melewati surat jalan dan transit untuk aset internal).</span>
               </div>
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setHandoverOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
@@ -2330,7 +2330,7 @@ export default function LifecycleManager({
             <div className="p-5 border-b border-slate-100 flex justify-between items-center">
               <div>
                 <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest block">Event / Roadshow · Kirim</span>
-                <h3 className="text-base font-bold text-slate-950">{hasLegs ? "Kirim ke Venue Berikutnya" : "Kirim ke Venue (Setup)"}</h3>
+                <h3 className="text-base font-bold text-slate-950">{hasLegs ? "Kirim ke Venue Berikutnya" : "Kirim ke Venue (Mulai Event)"}</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>
               </div>
               <button onClick={() => setVenueOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
@@ -2351,7 +2351,7 @@ export default function LifecycleManager({
                     {(venueForm.pic && !picOptions.includes(venueForm.pic) ? [venueForm.pic, ...picOptions] : picOptions).map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Rencana Setup</label><input type="date" value={venueForm.setupDate} onChange={e => setVenueForm({ ...venueForm, setupDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Rencana Pemasangan</label><input type="date" value={venueForm.setupDate} onChange={e => setVenueForm({ ...venueForm, setupDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500" /></div>
               </div>
               {/* Tracking kiriman (seperti Fase 5 Pengiriman) — aset dikirim ke venue tujuan */}
               <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-2.5">
@@ -2363,20 +2363,20 @@ export default function LifecycleManager({
                       {COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
-                  <div className="space-y-1.5"><label className="font-bold text-slate-700">ETA (estimasi tiba)</label><input value={venueForm.eta} onChange={e => setVenueForm({ ...venueForm, eta: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="cth. 2 hari / 25 Jul" /></div>
+                  <div className="space-y-1.5"><label className="font-bold text-slate-700">ETA (estimasi tiba)</label><input value={venueForm.eta} onChange={e => setVenueForm({ ...venueForm, eta: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: 2 hari / 25 Jul" /></div>
                 </div>
                 <div className="space-y-1.5"><label className="font-bold text-slate-700">Link Tracking (tempel dari kurir)</label><input value={venueForm.trackingUrl} onChange={e => setVenueForm({ ...venueForm, trackingUrl: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://… link resi/tracking" /></div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Nomor Resi (opsional)</label><input value={venueForm.trackingNo} onChange={e => setVenueForm({ ...venueForm, trackingNo: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="cth. JX1234567890" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Nomor Resi (opsional)</label><input value={venueForm.trackingNo} onChange={e => setVenueForm({ ...venueForm, trackingNo: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: JX1234567890" /></div>
               </div>
-              <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={venueForm.note} onChange={e => setVenueForm({ ...venueForm, note: e.target.value })} rows={2} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 resize-none" placeholder="cth. Tenda + sound + booth" /></div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={venueForm.note} onChange={e => setVenueForm({ ...venueForm, note: e.target.value })} rows={2} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 resize-none" placeholder="contoh: tenda, sound, dan booth" /></div>
               {venueError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{venueError}</span></div>}
               <div className="p-2.5 bg-amber-50 border border-amber-200/70 rounded-lg text-[10.5px] text-amber-700 flex items-start gap-2">
                 <Truck className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-                <span>{hasLegs ? "Venue aktif ditutup, aset DIKIRIM ke venue berikutnya (status: dalam pengiriman). Konfirmasi “Tiba di Venue” saat sampai." : "Aset dikirim ke venue #1 (aset ke Fase 6, status dalam pengiriman). Konfirmasi “Tiba di Venue” saat sampai."}</span>
+                <span>{hasLegs ? "Venue aktif ditutup dan aset dikirim ke venue berikutnya. Konfirmasi “Kedatangan di Venue” saat aset sampai." : "Aset dikirim ke venue pertama. Konfirmasi “Kedatangan di Venue” saat aset sampai."}</span>
               </div>
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setVenueOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
-                <button type="submit" disabled={venueBusy} className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />{hasLegs ? "Kirim ke Venue" : "Kirim & Setup"}</button>
+                <button type="submit" disabled={venueBusy} className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />{hasLegs ? "Kirim ke Venue" : "Kirim & Pasang"}</button>
               </div>
             </form>
           </div>
@@ -2391,7 +2391,7 @@ export default function LifecycleManager({
             <div className="p-5 border-b border-slate-100 flex justify-between items-center">
               <div>
                 <span className="text-[10px] font-bold text-cyan-600 uppercase tracking-widest block">Event / Roadshow · Selesai</span>
-                <h3 className="text-base font-bold text-slate-950">Kirim Balik ke Gudang</h3>
+                <h3 className="text-base font-bold text-slate-950">Kirim Kembali ke Gudang</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>
               </div>
               <button onClick={() => setReturnOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
@@ -2406,19 +2406,19 @@ export default function LifecycleManager({
                       {COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
-                  <div className="space-y-1.5"><label className="font-bold text-slate-700">ETA (estimasi tiba)</label><input value={returnForm.eta} onChange={e => setReturnForm({ ...returnForm, eta: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="cth. 2 hari / 25 Jul" /></div>
+                  <div className="space-y-1.5"><label className="font-bold text-slate-700">ETA (estimasi tiba)</label><input value={returnForm.eta} onChange={e => setReturnForm({ ...returnForm, eta: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: 2 hari / 25 Jul" /></div>
                 </div>
                 <div className="space-y-1.5"><label className="font-bold text-slate-700">Link Tracking (tempel dari kurir)</label><input value={returnForm.trackingUrl} onChange={e => setReturnForm({ ...returnForm, trackingUrl: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://… link resi/tracking" /></div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Nomor Resi (opsional)</label><input value={returnForm.trackingNo} onChange={e => setReturnForm({ ...returnForm, trackingNo: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="cth. JX1234567890" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Nomor Resi (opsional)</label><input value={returnForm.trackingNo} onChange={e => setReturnForm({ ...returnForm, trackingNo: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: JX1234567890" /></div>
               </div>
               {returnError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{returnError}</span></div>}
               <div className="p-2.5 bg-cyan-50 border border-cyan-200/70 rounded-lg text-[10.5px] text-cyan-700 flex items-start gap-2">
                 <Home className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-                <span>Venue aktif ditutup & aset dikirim balik ke gudang (status: dalam pengiriman). Konfirmasi “Tiba di Gudang” saat sampai — aset kembali ke Fase 3.</span>
+                <span>Venue aktif ditutup dan aset dikirim kembali ke gudang. Konfirmasi “Kedatangan di Gudang” saat aset sampai — aset kembali ke Fase 3.</span>
               </div>
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setReturnOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
-                <button type="submit" disabled={returnBusy} className="bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />Kirim Balik</button>
+                <button type="submit" disabled={returnBusy} className="bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />Kirim Kembali</button>
               </div>
             </form>
           </div>
@@ -2468,7 +2468,7 @@ export default function LifecycleManager({
                     <button type="button" onClick={() => setDistRows(rows => rows.length > 1 ? rows.filter((_, j) => j !== i) : rows)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                     {noMd && <p className="text-[11px] text-amber-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3 shrink-0" /> Belum ada MD di area <strong>{tokoArea}</strong> — tambahkan user Merchandiser area itu di User Management.</p>}
-                    {tokoNoArea && <p className="text-[11px] text-amber-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3 shrink-0" /> Toko ini belum punya Area — set area toko dulu di Proyek &amp; Lokasi.</p>}
+                    {tokoNoArea && <p className="text-[11px] text-amber-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3 shrink-0" /> Toko ini belum punya Area — tetapkan area toko dulu di Proyek &amp; Lokasi.</p>}
                   </div>
                   );
                 })}

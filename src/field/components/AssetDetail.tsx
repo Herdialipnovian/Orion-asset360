@@ -119,7 +119,7 @@ export default function AssetDetail({
             <Users className="h-5 w-5 shrink-0 text-[#8fb4ff]" />
             <div className="min-w-0 flex-1">
               <div className="font-semibold text-white">Atur Penugasan Pemasangan</div>
-              <div className="text-xs text-slate-400">Bagi qty ke Merchandiser (PIC)</div>
+              <div className="text-xs text-slate-400">Bagi jumlah unit ke Merchandiser (PIC)</div>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-[#8fb4ff]" />
           </button>
@@ -132,7 +132,7 @@ export default function AssetDetail({
             <Wrench className="h-5 w-5 shrink-0 text-emerald-300" />
             <div className="min-w-0 flex-1">
               <div className="font-semibold text-white">Selesaikan Pemasangan Saya</div>
-              <div className="text-xs text-slate-400">Jatah kamu {installTask.qty} unit · foto before/after + TTD BAST</div>
+              <div className="text-xs text-slate-400">Bagian Anda {installTask.qty} unit · foto sebelum dan sesudah beserta TTD BAST</div>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-emerald-300" />
           </button>
@@ -145,7 +145,7 @@ export default function AssetDetail({
             <MapPin className="h-5 w-5 shrink-0 text-teal-300" />
             <div className="min-w-0 flex-1">
               <div className="font-semibold text-white">Pasang di Toko</div>
-              <div className="text-xs text-slate-400">{placementTasks.length} toko belum selesai · foto + GPS</div>
+              <div className="text-xs text-slate-400">{placementTasks.length} toko belum selesai · foto dan GPS</div>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-teal-300" />
           </button>
@@ -157,8 +157,8 @@ export default function AssetDetail({
           >
             <Compass className="h-5 w-5 shrink-0 text-emerald-300" />
             <div className="min-w-0 flex-1">
-              <div className="font-semibold text-white">Konfirmasi Tiba di Venue</div>
-              <div className="text-xs text-slate-400">{tLeg ? `Kiriman → ${tLeg.venue}${tLeg.shipping?.courier ? ` · ${tLeg.shipping.courier}` : ""} · set aktif` : "Set aktif di venue"}</div>
+              <div className="font-semibold text-white">Konfirmasi Kedatangan di Venue</div>
+              <div className="text-xs text-slate-400">{tLeg ? `Kiriman ke ${tLeg.venue}${tLeg.shipping?.courier ? ` · ${tLeg.shipping.courier}` : ""} · tandai aktif` : "Tandai set aktif di venue"}</div>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-emerald-300" />
           </button>
@@ -171,7 +171,7 @@ export default function AssetDetail({
             <Compass className="h-5 w-5 shrink-0 text-amber-300" />
             <div className="min-w-0 flex-1">
               <div className="font-semibold text-white">Kirim ke Venue (Roadshow)</div>
-              <div className="text-xs text-slate-400">{leg ? `Sekarang: ${leg.venue} (leg ${leg.seq}) · kirim ke venue berikutnya + tracking` : "Kirim ke venue berikutnya + tracking"}</div>
+              <div className="text-xs text-slate-400">{leg ? `Sekarang: ${leg.venue} (leg ${leg.seq}) · kirim ke venue berikutnya dan Tracking` : "Kirim ke venue berikutnya dan Tracking"}</div>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-amber-300" />
           </button>
@@ -182,14 +182,14 @@ export default function AssetDetail({
               {pending.status === "conflict" || pending.status === "error" ? <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-400" /> : <CloudUpload className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />}
               <div className="text-sm text-slate-200">
                 <div className="font-semibold text-white">
-                  {pending.status === "conflict" ? "Konflik sinkronisasi" : pending.status === "error" ? "Gagal sinkron" : "Menunggu sinkron"} → Fase {pending.target} ({STAGE_LABELS[pending.target]})
+                  {pending.status === "conflict" ? "Konflik sinkronisasi" : pending.status === "error" ? "Gagal sinkron" : "Menunggu sinkron"} ke Fase {pending.target} ({STAGE_LABELS[pending.target]})
                 </div>
                 <p className="text-xs text-slate-400">
                   {pending.status === "conflict"
-                    ? "Aset berubah di server. Selesaikan di Sinkronisasi lalu ulangi."
+                    ? "Data aset berubah di server. Selesaikan konflik di menu Sinkronisasi, lalu coba lagi."
                     : pending.status === "error"
-                    ? "Ada masalah saat mengirim. Cek Sinkronisasi."
-                    : "Aksi lain terkunci sampai perubahan ini terkirim ke server."}
+                    ? "Terjadi masalah saat mengirim. Silakan periksa menu Sinkronisasi."
+                    : "Aksi lain akan terkunci sampai perubahan ini berhasil terkirim ke server."}
                 </p>
               </div>
             </div>
@@ -200,7 +200,7 @@ export default function AssetDetail({
         ) : actions.length === 0 && handoffs.length === 0 ? (
           !installTask && !canAssign && !canVenue && placementTasks.length === 0 && (
             <div className="rounded-xl border border-[#1e2b45] bg-[#0f1728] px-4 py-3 text-sm text-slate-400">
-              Tidak ada aksi lapangan untuk aset di fase ini{user.role !== "Admin" ? ` bagi role ${ROLE_SHORT[user.role]}` : ""}.
+              Tidak ada aksi lapangan untuk aset pada fase ini{user.role !== "Admin" ? ` untuk role ${ROLE_SHORT[user.role]}` : ""}.
             </div>
           )
         ) : (
@@ -215,7 +215,7 @@ export default function AssetDetail({
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-white">{act.verb}</div>
                   <div className="text-xs text-slate-400">
-                    {act.requiredSlots.length} foto wajib · Fase {asset.currentStage} → {act.target}
+                    {act.requiredSlots.length} foto wajib · Fase {asset.currentStage} ke {act.target}
                   </div>
                 </div>
                 <ChevronRight className="h-5 w-5 shrink-0 text-[#8fb4ff]" />

@@ -49,12 +49,12 @@ export default function AddLocation({
     const g = await getGeo();
     setGps(g);
     setLocating(false);
-    if (!g) setToast({ msg: "GPS tidak tersedia — bisa lanjut tanpa koordinat.", tone: "info" });
+    if (!g) setToast({ msg: "GPS tidak tersedia. Anda tetap dapat melanjutkan tanpa koordinat.", tone: "info" });
   };
 
   async function submit() {
     if (!name.trim()) return setToast({ msg: `Nama ${type.toLowerCase()} wajib diisi.`, tone: "error" });
-    if (!online) return setToast({ msg: "Tambah lokasi butuh koneksi online.", tone: "error" });
+    if (!online) return setToast({ msg: "Menambah lokasi memerlukan koneksi internet.", tone: "error" });
     setBusy(true);
     try {
       await fieldApi.addLocation({
@@ -88,7 +88,7 @@ export default function AddLocation({
 
       <header>
         <h1 className="text-xl font-bold text-white flex items-center gap-2"><Store className="h-5 w-5 text-[#4d8bff]" /> Tambah {type}</h1>
-        <p className="mt-1 text-sm text-slate-400">Lokasi baru masuk master {user.client ? `client ${user.client}` : ""} — langsung siap dipakai.</p>
+        <p className="mt-1 text-sm text-slate-400">Lokasi baru tersimpan ke master {user.client ? `client ${user.client}` : ""} dan langsung siap digunakan.</p>
       </header>
 
       {/* Type toggle */}
@@ -100,7 +100,7 @@ export default function AddLocation({
 
       <label className="flex flex-col gap-1.5">
         <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Nama {type}</span>
-        <input value={name} onChange={e => setName(e.target.value)} placeholder={type === "Toko" ? "mis. Alfamart Sudirman" : "mis. Atrium Mall"} className="rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-[#4d8bff]" />
+        <input value={name} onChange={e => setName(e.target.value)} placeholder={type === "Toko" ? "contoh: Alfamart Sudirman" : "contoh: Atrium Mall"} className="rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-[#4d8bff]" />
       </label>
 
       <label className="flex flex-col gap-1.5">
@@ -109,7 +109,7 @@ export default function AddLocation({
           <option value="">— pilih area —</option>
           {areaOpts.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
         </select>
-        {areaOpts.length === 0 && <span className="text-[11px] text-amber-300">Belum ada master Area. Minta Admin tambah di menu Organisasi dulu.</span>}
+        {areaOpts.length === 0 && <span className="text-[11px] text-amber-300">Belum ada master Area. Silakan minta Admin menambahkannya di menu Organisasi terlebih dahulu.</span>}
       </label>
 
       <label className="flex flex-col gap-1.5">
@@ -134,7 +134,7 @@ export default function AddLocation({
 
       <button onClick={submit} disabled={busy} className="tap flex items-center justify-center gap-2 rounded-xl bg-[#4d8bff] px-4 py-3 text-base font-bold text-white active:scale-[0.98] disabled:opacity-50">
         {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Store className="h-5 w-5" />}
-        {online ? `Simpan ${type}` : "Butuh online"}
+        {online ? `Simpan ${type}` : "Perlu koneksi"}
       </button>
 
       {toast && <Toast msg={toast.msg} tone={toast.tone} onDone={() => setToast(null)} />}

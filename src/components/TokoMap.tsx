@@ -138,7 +138,7 @@ export default function TokoMap({
           <MapPin className="h-4 w-4 text-teal-600" />
           <div>
             <h3 className="font-bold text-slate-900 text-sm">Peta Sebaran Toko</h3>
-            <p className="text-[10px] text-slate-400">{pinned.length}/{placements.length} toko ter-pin · terpasang {installed}/{quantity} unit</p>
+            <p className="text-[10px] text-slate-400">{pinned.length}/{placements.length} toko dipetakan · terpasang {installed}/{quantity} unit</p>
           </div>
           <div className="ml-auto hidden sm:flex items-center gap-3 text-[10px] font-semibold text-slate-500">
             <span className="inline-flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Selesai</span>

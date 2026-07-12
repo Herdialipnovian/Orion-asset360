@@ -103,7 +103,7 @@ export default function CameraCapture({
           <div className="absolute inset-0 grid place-items-center px-8 text-center text-white">
             <div className="flex flex-col items-center gap-3">
               <CameraOff className="h-9 w-9 text-slate-400" />
-              <p className="text-sm text-slate-300">Kamera tidak bisa diakses. Aktifkan izin kamera lalu coba lagi.</p>
+              <p className="text-sm text-slate-300">Kamera tidak dapat diakses. Aktifkan izin kamera, lalu coba lagi.</p>
               <button onClick={startLive} className="tap rounded-xl bg-white/15 px-5 font-semibold">Coba Lagi</button>
             </div>
           </div>

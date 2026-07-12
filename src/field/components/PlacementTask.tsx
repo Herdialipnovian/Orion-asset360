@@ -114,8 +114,8 @@ export default function PlacementTask({
   const photosDone = SLOTS.every(s => shots[s.slot]);
 
   async function submit() {
-    if (!sel || !tasks.some(t => t.locationId === selId)) return setToast({ msg: "Toko tidak valid — pilih ulang.", tone: "error" });
-    if (!photosDone) return setToast({ msg: "Ambil foto terpasang dulu.", tone: "error" });
+    if (!sel || !tasks.some(t => t.locationId === selId)) return setToast({ msg: "Toko tidak valid. Silakan pilih ulang.", tone: "error" });
+    if (!photosDone) return setToast({ msg: "Silakan ambil foto terpasang terlebih dahulu.", tone: "error" });
     setBusy(true);
     try {
       // Tag the evidence slot with the toko id so the client report can map each photo → toko.
@@ -144,7 +144,7 @@ export default function PlacementTask({
       });
       onQueued(!online);
     } catch (e: any) {
-      setToast({ msg: e?.message || "Gagal menyimpan ke antrean.", tone: "error" });
+      setToast({ msg: e?.message || "Gagal menyimpan laporan ke antrean.", tone: "error" });
       setBusy(false);
     }
   }
@@ -232,7 +232,7 @@ export default function PlacementTask({
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-100">{s.label}</div>
                 <div className="mt-1 flex items-center gap-2">
-                  <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">WAJIB</span>
+                  <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">Wajib</span>
                   {shot?.meta?.gpsLat != null && <span className="inline-flex items-center gap-0.5 text-[10px] text-teal-300"><MapPin className="h-3 w-3" /> GPS</span>}
                 </div>
               </div>

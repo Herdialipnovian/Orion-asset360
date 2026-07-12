@@ -47,19 +47,19 @@ export default function AssignTask({
   const chosen = new Set(rows.map(r => String(r.merchandiserId)).filter(Boolean));
 
   async function submit() {
-    if (!online) return setToast({ msg: "Butuh online untuk menugaskan.", tone: "error" });
+    if (!online) return setToast({ msg: "Perlu koneksi internet untuk menugaskan.", tone: "error" });
     for (const r of rows) {
-      if (!r.merchandiserId) return setToast({ msg: "Setiap baris pilih Merchandiser.", tone: "error" });
-      if (!(Number(r.qty) > 0)) return setToast({ msg: "Qty harus > 0.", tone: "error" });
-      if (Number(r.qty) < r.doneQty) return setToast({ msg: `Qty tidak boleh di bawah yang sudah dikerjakan (${r.doneQty}).`, tone: "error" });
+      if (!r.merchandiserId) return setToast({ msg: "Silakan pilih Merchandiser pada setiap baris.", tone: "error" });
+      if (!(Number(r.qty) > 0)) return setToast({ msg: "Jumlah unit harus lebih dari 0.", tone: "error" });
+      if (Number(r.qty) < r.doneQty) return setToast({ msg: `Jumlah tidak boleh kurang dari yang sudah dikerjakan (${r.doneQty}).`, tone: "error" });
     }
-    if (total > qty) return setToast({ msg: `Total ${total} melebihi qty aset (${qty}).`, tone: "error" });
+    if (total > qty) return setToast({ msg: `Total ${total} melebihi jumlah unit aset (${qty}).`, tone: "error" });
     setBusy(true);
     try {
       await fieldApi.assignInstall(asset.id, { assignments: rows.map(r => ({ merchandiserId: Number(r.merchandiserId), qty: Number(r.qty) })), baseUpdatedAt: asset.updatedAt });
       onDone();
     } catch (e: any) {
-      setToast({ msg: e?.status === 409 ? "Aset berubah di server — muat ulang lalu ulangi." : e?.message || "Gagal menugaskan.", tone: "error" });
+      setToast({ msg: e?.status === 409 ? "Data aset telah berubah di server. Silakan muat ulang lalu coba lagi." : e?.message || "Gagal menyimpan penugasan.", tone: "error" });
       setBusy(false);
     }
   }
@@ -99,7 +99,7 @@ export default function AssignTask({
                   <option key={m.id} value={m.id} disabled={chosen.has(String(m.id)) && String(r.merchandiserId) !== String(m.id)}>{m.name}</option>
                 ))}
               </select>
-              {r.doneQty > 0 && <span className="mt-0.5 block text-[10px] font-semibold text-emerald-400">sudah pasang {r.doneQty}/{r.qty}</span>}
+              {r.doneQty > 0 && <span className="mt-0.5 block text-[10px] font-semibold text-emerald-400">sudah dipasang {r.doneQty}/{r.qty}</span>}
             </div>
             <input
               type="number"
@@ -122,14 +122,14 @@ export default function AssignTask({
             <Plus className="h-4 w-4" /> Tambah Merchandiser
           </button>
           <span className={`text-[12px] font-semibold ${total > qty ? "text-rose-400" : sisa === 0 ? "text-emerald-400" : "text-amber-300"}`}>
-            {total}/{qty}{total > qty ? " (lebih!)" : sisa > 0 ? ` · sisa ${sisa}` : ""}
+            {total}/{qty}{total > qty ? " (berlebih)" : sisa > 0 ? ` · sisa ${sisa}` : ""}
           </span>
         </div>
       </section>
 
       <button onClick={submit} disabled={busy || !online} className="tap flex items-center justify-center gap-2 rounded-xl bg-[#4d8bff] px-4 text-base font-bold text-white active:scale-[0.98] disabled:opacity-50">
         {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-        {online ? "Simpan Penugasan" : "Butuh online"}
+        {online ? "Simpan Penugasan" : "Perlu Koneksi"}
       </button>
 
       {toast && <Toast msg={toast.msg} tone={toast.tone} onDone={() => setToast(null)} />}

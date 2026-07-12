@@ -79,9 +79,9 @@ export default function VenueTask({
   }, [asset.client]);
 
   async function submit() {
-    if (!online) return setToast({ msg: "Butuh online untuk kirim ke venue.", tone: "error" });
-    if (!locationId) return setToast({ msg: "Pilih venue tujuan dulu.", tone: "error" });
-    if (trackingUrl.trim() && !/^https?:\/\//i.test(trackingUrl.trim())) return setToast({ msg: "Link tracking harus diawali http:// atau https://.", tone: "error" });
+    if (!online) return setToast({ msg: "Perlu koneksi internet untuk mengirim ke venue.", tone: "error" });
+    if (!locationId) return setToast({ msg: "Silakan pilih venue tujuan terlebih dahulu.", tone: "error" });
+    if (trackingUrl.trim() && !/^https?:\/\//i.test(trackingUrl.trim())) return setToast({ msg: "Link tracking harus diawali dengan http:// atau https://.", tone: "error" });
     setBusy(true);
     try {
       await fieldApi.deployVenue(asset.id, {
@@ -90,7 +90,7 @@ export default function VenueTask({
       });
       onDone();
     } catch (e: any) {
-      setToast({ msg: e?.message || "Gagal kirim ke venue.", tone: "error" });
+      setToast({ msg: e?.message || "Gagal mengirim ke venue.", tone: "error" });
       setBusy(false);
     }
   }
@@ -124,7 +124,7 @@ export default function VenueTask({
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-bold uppercase tracking-wide text-slate-500">PIC di venue ini</label>
-          <input value={pic} onChange={e => setPic(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-amber-400" placeholder="PIC per-leg" />
+          <input value={pic} onChange={e => setPic(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-amber-400" placeholder="PIC untuk venue ini" />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Rencana setup</label>
@@ -151,7 +151,7 @@ export default function VenueTask({
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-bold uppercase tracking-wide text-slate-500">ETA</label>
-              <input value={eta} onChange={e => setEta(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-blue-400" placeholder="cth. 2 hari" />
+              <input value={eta} onChange={e => setEta(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-blue-400" placeholder="contoh: 2 hari" />
             </div>
           </div>
         </div>
@@ -160,7 +160,7 @@ export default function VenueTask({
 
       <button onClick={submit} disabled={busy || !online} className="tap flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 text-base font-bold text-white active:scale-[0.98] disabled:opacity-50">
         {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-        {online ? "Kirim ke Venue Ini" : "Butuh online"}
+        {online ? "Kirim ke Venue Ini" : "Perlu Koneksi"}
       </button>
 
       {toast && <Toast msg={toast.msg} tone={toast.tone} onDone={() => setToast(null)} />}

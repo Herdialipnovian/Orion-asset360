@@ -164,7 +164,7 @@ export default function Dashboard({
     const indicators = [
       { name: "Tingkat Deployment", val: pct(deployedUnits), hint: "Unit terpasang / aktif" },
       { name: "Skor Audit Rata-rata", val: avgAudit, hint: `${audited.length} aset teraudit` },
-      { name: "Unit Beroperasi Sehat", val: pct(activeUnits - maintenanceUnits), hint: "Non-maintenance / aktif" },
+      { name: "Unit Beroperasi Sehat", val: pct(activeUnits - maintenanceUnits), hint: "Di luar maintenance / aktif" },
       { name: "Okupansi Gudang", val: pct(warehouseUnits), hint: "Idle di gudang / aktif" }
     ];
 
@@ -269,7 +269,7 @@ export default function Dashboard({
       title: "Total Nilai Aset",
       value: rupiahShort(m.totalValue),
       unit: "",
-      sub: `Est. sisa scrap ${rupiahShort(m.scrapValue)}`,
+      sub: `Estimasi sisa scrap ${rupiahShort(m.scrapValue)}`,
       color: "text-indigo-600 bg-indigo-100/50 border-indigo-200",
       icon: Wallet,
       nav: () => onNavigateToTab("manager")
@@ -347,8 +347,8 @@ export default function Dashboard({
         <div className="bg-white border border-slate-100 rounded-xl p-5 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex justify-between items-center pb-3 border-b border-slate-50">
-              <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest">Status Asset</h3>
-              <span className="text-[10px] font-bold text-slate-400">by unit</span>
+              <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest">Status Aset</h3>
+              <span className="text-[10px] font-bold text-slate-400">per unit</span>
             </div>
 
             <div className="py-6 flex flex-col sm:flex-row items-center justify-center gap-6">
@@ -408,7 +408,7 @@ export default function Dashboard({
             onClick={() => onNavigateToTab("manager")}
             className="text-left text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 pt-3 border-t border-slate-50"
           >
-            Lihat Detail →
+            Lihat Detail
           </button>
         </div>
 
@@ -455,7 +455,7 @@ export default function Dashboard({
             <div className="flex justify-between items-center pb-3 border-b border-slate-50">
               <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest">Indikator Operasional</h3>
               <button onClick={() => onNavigateToTab("dokumen")} className="text-[10px] font-bold text-blue-600 hover:underline">
-                Lihat Detail →
+                Lihat Detail
               </button>
             </div>
 
@@ -578,7 +578,7 @@ export default function Dashboard({
                 <div className="text-slate-400 text-center py-16 text-xs leading-relaxed">
                   Belum ada aktivitas.
                   <br />
-                  Tambah atau proses aset untuk memicu log.
+                  Tambahkan atau proses aset untuk mulai mencatat aktivitas.
                 </div>
               ) : (
                 m.logs.slice(0, 8).map(log => {

@@ -123,8 +123,8 @@ export default function FieldApp() {
     async (opts?: { force?: boolean }) => {
       const res = await syncAll(opts);
       if (res.synced > 0 || res.conflicts > 0) await load();
-      if (res.conflicts > 0) setToast({ msg: `${res.conflicts} perubahan konflik. Buka Sinkronisasi.`, tone: "error" });
-      else if (res.synced > 0) setToast({ msg: `${res.synced} perubahan tersinkron.`, tone: "success" });
+      if (res.conflicts > 0) setToast({ msg: `${res.conflicts} perubahan mengalami konflik. Silakan buka menu Sinkronisasi.`, tone: "error" });
+      else if (res.synced > 0) setToast({ msg: `${res.synced} perubahan berhasil disinkronkan.`, tone: "success" });
       return res;
     },
     [load]
@@ -333,9 +333,9 @@ export default function FieldApp() {
               onPlacement={() => push({ t: "placement", id: detailAsset.id })}
               onVenue={() => push({ t: "venue", id: detailAsset.id })}
               onArriveVenue={async () => {
-                if (!online) { setToast({ msg: "Butuh online untuk konfirmasi tiba.", tone: "error" }); return; }
-                try { await fieldApi.arriveVenue(detailAsset.id); setToast({ msg: "Tiba di venue dikonfirmasi.", tone: "success" }); await load(); }
-                catch (e: any) { setToast({ msg: e?.message || "Gagal konfirmasi tiba.", tone: "error" }); }
+                if (!online) { setToast({ msg: "Perlu koneksi internet untuk mengonfirmasi kedatangan.", tone: "error" }); return; }
+                try { await fieldApi.arriveVenue(detailAsset.id); setToast({ msg: "Kedatangan di venue berhasil dikonfirmasi.", tone: "success" }); await load(); }
+                catch (e: any) { setToast({ msg: e?.message || "Gagal mengonfirmasi kedatangan.", tone: "error" }); }
               }}
               onOpenSync={() => goTab("sync")}
             />
@@ -351,7 +351,7 @@ export default function FieldApp() {
               online={online}
               onBack={pop}
               onQueued={offline => {
-                setToast({ msg: offline ? "Disimpan offline — terkirim saat online." : "Perubahan diantre & dikirim…", tone: offline ? "info" : "success" });
+                setToast({ msg: offline ? "Tersimpan offline — akan terkirim saat kembali online." : "Perubahan diantre dan sedang dikirim…", tone: offline ? "info" : "success" });
                 pop();
                 doSync();
               }}
@@ -370,7 +370,7 @@ export default function FieldApp() {
                 online={online}
                 onBack={pop}
                 onQueued={offline => {
-                  setToast({ msg: offline ? "Disimpan offline — terkirim saat online." : "Laporan diantre & dikirim…", tone: offline ? "info" : "success" });
+                  setToast({ msg: offline ? "Tersimpan offline — akan terkirim saat kembali online." : "Laporan diantre dan sedang dikirim…", tone: offline ? "info" : "success" });
                   pop();
                   doSync();
                 }}
@@ -381,13 +381,13 @@ export default function FieldApp() {
           })()}
         {view.t === "assign" &&
           (detailAsset && canAssignInstall(detailAsset, user) ? (
-            <AssignTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Penugasan tersimpan.", tone: "success" }); pop(); await load(); }} />
+            <AssignTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Penugasan berhasil disimpan.", tone: "success" }); pop(); await load(); }} />
           ) : (
             <NotFound onBack={pop} />
           ))}
         {view.t === "venue" &&
           (detailAsset && canDeployVenue(detailAsset, user) ? (
-            <VenueTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Dikirim ke venue — konfirmasi \"Tiba di Venue\" saat sampai.", tone: "success" }); pop(); await load(); }} />
+            <VenueTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Aset dikirim ke venue — konfirmasi \"Kedatangan di Venue\" saat tiba di lokasi.", tone: "success" }); pop(); await load(); }} />
           ) : (
             <NotFound onBack={pop} />
           ))}
@@ -403,7 +403,7 @@ export default function FieldApp() {
                 online={online}
                 onBack={pop}
                 onQueued={offline => {
-                  setToast({ msg: offline ? "Disimpan offline — terkirim saat online." : "Laporan diantre & dikirim…", tone: offline ? "info" : "success" });
+                  setToast({ msg: offline ? "Tersimpan offline — akan terkirim saat kembali online." : "Laporan diantre dan sedang dikirim…", tone: offline ? "info" : "success" });
                   pop();
                   doSync();
                 }}
@@ -413,7 +413,7 @@ export default function FieldApp() {
             );
           })()}
         {view.t === "notif" && <Notifications items={notifs} onBack={pop} onRead={markNotif} onReadAll={markAllNotifs} onOpen={id => { pop(); push({ t: "detail", id }); }} />}
-        {view.t === "addloc" && <AddLocation user={user} online={online} onBack={pop} onAdded={name => { setToast({ msg: `${name} ditambahkan ke master.`, tone: "success" }); pop(); }} />}
+        {view.t === "addloc" && <AddLocation user={user} online={online} onBack={pop} onAdded={name => { setToast({ msg: `${name} berhasil ditambahkan ke data master.`, tone: "success" }); pop(); }} />}
       </main>
 
       <nav className="sticky bottom-0 z-30 grid grid-cols-4 border-t border-[#141d31] bg-[#080c17]/95 backdrop-blur">
@@ -464,7 +464,7 @@ function Profile({ user, online, onLogout }: { user: AuthUser; online: boolean; 
       <label className="flex items-center justify-between rounded-2xl border border-[#1e2b45] bg-[#0f1728] px-4 py-3.5">
         <span className="pr-3">
           <span className="block text-sm font-semibold text-slate-100">Mode Sarung Tangan / Outdoor</span>
-          <span className="block text-xs text-slate-500">Teks & tombol lebih besar, kontras tinggi.</span>
+          <span className="block text-xs text-slate-500">Teks dan tombol lebih besar dengan kontras tinggi.</span>
         </span>
         <button
           type="button"

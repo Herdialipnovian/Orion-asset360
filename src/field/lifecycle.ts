@@ -107,7 +107,7 @@ export const STAGE_FULL: { [k: number]: string } = {
   3: "Fase 3 — Inventory & Gudang",
   4: "Fase 4 — Pengiriman / Surat Jalan",
   5: "Fase 5 — Transit",
-  6: "Fase 6 — Terpasang / Deployed",
+  6: "Fase 6 — Terpasang",
   7: "Fase 7 — Audit & Kepatuhan",
   8: "Fase 8 — Maintenance",
   9: "Fase 9 — Penarikan / Relokasi",
@@ -124,7 +124,7 @@ export const TRANSITION_VERB: { [k: number]: string } = {
   7: "Lakukan Audit",
   8: "Buka Tiket Maintenance",
   9: "Tarik / Relokasi Aset",
-  10: "Disposal / Retire Aset"
+  10: "Disposal / Pemusnahan Aset"
 };
 
 // Legal transitions, keyed by CURRENT stage (mirror of server TRANSITIONS).
@@ -172,9 +172,9 @@ export const EVIDENCE_SLOTS: { [k: number]: EvidenceSlot[] } = {
     { slot: "condition_out", label: "Foto kondisi aset saat serah-terima", optional: true }
   ],
   6: [
-    { slot: "before", label: "Foto BEFORE pemasangan" },
-    { slot: "after", label: "Foto AFTER (terpasang)" },
-    { slot: "signature", label: "TTD BAST penerima" },
+    { slot: "before", label: "Foto sebelum pemasangan" },
+    { slot: "after", label: "Foto setelah terpasang" },
+    { slot: "signature", label: "Tanda tangan BAST penerima" },
     { slot: "label", label: "Foto label / QR aset terpasang", optional: true }
   ],
   7: [
@@ -183,9 +183,9 @@ export const EVIDENCE_SLOTS: { [k: number]: EvidenceSlot[] } = {
     { slot: "nameplate", label: "Foto nameplate / QR", optional: true }
   ],
   8: [
-    { slot: "damage_before", label: "Foto kerusakan (before)" },
-    { slot: "repair_after", label: "Foto hasil perbaikan (after)", optional: true },
-    { slot: "part", label: "Foto sparepart diganti", optional: true }
+    { slot: "damage_before", label: "Foto kerusakan (sebelum)" },
+    { slot: "repair_after", label: "Foto hasil perbaikan (setelah)", optional: true },
+    { slot: "part", label: "Foto suku cadang yang diganti", optional: true }
   ],
   9: [
     { slot: "condition_retrieval", label: "Foto kondisi aset saat ditarik" },

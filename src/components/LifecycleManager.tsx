@@ -751,7 +751,9 @@ export default function LifecycleManager({
     batchSel.forEach(id => { const a = assets.find(x => x.id === id); q[id] = String(a?.quantity ?? 1); });
     setBatchQty(q);
     setBatchForm({ suratJalanNo: genSuratJalan(), driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
-    void loadDirectory(detailAsset?.client);
+    // PIC dropdown = the selected assets' client (a consolidated dispatch is normally one client).
+    const cls = [...new Set(batchSel.map(id => assets.find(x => x.id === id)?.client).filter(Boolean))];
+    void loadDirectory(cls.length === 1 ? cls[0] : null);
     setBatchError(null); setBatchOpen(true);
   };
   const submitBatch = async (e: React.FormEvent) => {
@@ -2553,7 +2555,13 @@ export default function LifecycleManager({
                   </select>
                   {areaOptions.length === 0 && <p className="text-[10px] text-amber-600">Belum ada area. Tambahkan di menu Organisasi.</p>}
                 </div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">PIC Penerima</label><input value={batchForm.picPenerima} onChange={e => setBatchForm(f => ({ ...f, picPenerima: e.target.value }))} className={BATCH_INP} placeholder="nama penerima" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">PIC Penerima</label>
+                  <select value={batchForm.picPenerima} onChange={e => setBatchForm(f => ({ ...f, picPenerima: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
+                    <option value="">— pilih PIC —</option>
+                    {(batchForm.picPenerima && !picOptions.includes(batchForm.picPenerima) ? [batchForm.picPenerima, ...picOptions] : picOptions).map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  {picOptions.length === 0 && <p className="text-[10px] text-amber-600">Belum ada PIC untuk client ini — tambahkan di menu User Management.</p>}
+                </div>
               </div>
               <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-2.5">
                 <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Tracking (opsional)</p>

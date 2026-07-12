@@ -927,10 +927,24 @@ export default function LifecycleManager({
     }
     if (transitionTarget === 8) {
       section.reportedAt = new Date().toISOString();
-      section.logHistory = Array.isArray(section.logHistory) ? section.logHistory : [];
+      // Append this ticket to the maintenance history (was only initialised, never recorded).
+      const prior = Array.isArray(section.logHistory) ? section.logHistory : [];
+      section.logHistory = [...prior, {
+        date: section.reportedAt.slice(0, 10),
+        act: `Tiket ${section.activeTicketId || "-"}: ${section.issueType || "kerusakan"} — teknisi ${section.technician || "-"}`,
+        cost: Number(section.repairCost) || 0
+      }];
     }
 
-    const updatedDetails = { ...detailAsset.stageDetails, [cfg.stageKey]: section };
+    const updatedDetails: any = { ...detailAsset.stageDetails, [cfg.stageKey]: section };
+    // Maintenance resolved on redeploy (8→6): record a "selesai" entry (the redeploy gate writes
+    // the deployment section, so the maintenance history is appended separately here).
+    if (transitionTarget === 6 && detailAsset.currentStage === 8) {
+      const maint = { ...((detailAsset.stageDetails as any).maintenance || {}) };
+      const prior = Array.isArray(maint.logHistory) ? maint.logHistory : [];
+      maint.logHistory = [...prior, { date: new Date().toISOString().slice(0, 10), act: "Selesai diperbaiki — dipasang kembali (redeploy)", cost: 0 }];
+      updatedDetails.maintenance = maint;
+    }
 
     const fromStage = detailAsset.currentStage;
     const meta: {

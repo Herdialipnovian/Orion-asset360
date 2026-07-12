@@ -120,6 +120,13 @@ const genSuratJalan = () => `SJ/ORG/${new Date().getFullYear()}/${String(Math.fl
 
 // 3rd-party couriers/vendors that handle the actual delivery (logistik just pastes their tracking link).
 const BATCH_INP = "w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500";
+// Logistics/ekspedisi vendors for the Surat Jalan "Vendor Logistik" field (goods dispatch by
+// truck/vehicle — distinct from the parcel couriers below). "Armada Sendiri" = own fleet.
+const VENDOR_LOGISTIK = [
+  "Armada Sendiri", "Deliveree", "Lalamove", "GoBox (Gojek)", "Ritase", "Kargo (Kargo Tech)",
+  "TheLorry", "Indah Cargo", "Dakota Cargo", "Pandu Logistics", "JNE Cargo", "J&T Cargo",
+  "SiCepat (Cargo)", "Lion Parcel (Cargo)", "Pos Indonesia Logistik", "Lainnya"
+];
 const COURIERS = [
   "JNE", "J&T Express", "SiCepat", "AnterAja", "Ninja Xpress", "Wahana", "Pos Indonesia",
   "ID Express", "Lion Parcel", "Shopee (SPX Express)", "Lalamove", "GoSend (Gojek)",
@@ -157,7 +164,7 @@ const GATE_FORMS: { [target: number]: { stageKey: string; title: string; fields:
       { key: "suratJalanNo", label: "Nomor Surat Jalan (otomatis)", type: "generated", required: true, full: true },
       { key: "driverName", label: "Nama Driver", type: "text", required: true },
       { key: "vehiclePlate", label: "Plat Kendaraan", type: "text", required: true },
-      { key: "vendorShipping", label: "Vendor Logistik", type: "text" },
+      { key: "vendorShipping", label: "Vendor Logistik", type: "select", options: VENDOR_LOGISTIK },
       { key: "departureTime", label: "Waktu Berangkat", type: "time", required: true },
       { key: "destinations", label: "Tujuan Pengiriman (bisa 2 tempat atau lebih)", type: "destinations", full: true, required: true }
     ]
@@ -1130,7 +1137,7 @@ export default function LifecycleManager({
       control = (
         <div className="space-y-1">
           <select name={f.key} className={`${base} cursor-pointer font-medium`} value={val || ""} onChange={e => set(e.target.value)}>
-            {f.source && <option value="">— pilih {roleLabel} —</option>}
+            {(f.source || !f.required) && <option value="">{f.source ? `— pilih ${roleLabel} —` : "— pilih —"}</option>}
             {withVal.map(o => (
               <option key={o} value={o}>
                 {o}
@@ -2544,7 +2551,12 @@ export default function LifecycleManager({
                 <div className="space-y-1.5"><label className="font-bold text-slate-700">Plat Kendaraan</label><input value={batchForm.vehiclePlate} onChange={e => setBatchForm(f => ({ ...f, vehiclePlate: e.target.value }))} className={BATCH_INP} placeholder="B 1234 XYZ" /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Vendor Logistik</label><input value={batchForm.vendorShipping} onChange={e => setBatchForm(f => ({ ...f, vendorShipping: e.target.value }))} className={BATCH_INP} placeholder="contoh: JNE Trucking" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Vendor Logistik</label>
+                  <select value={batchForm.vendorShipping} onChange={e => setBatchForm(f => ({ ...f, vendorShipping: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
+                    <option value="">— pilih vendor —</option>
+                    {(batchForm.vendorShipping && !VENDOR_LOGISTIK.includes(batchForm.vendorShipping) ? [batchForm.vendorShipping, ...VENDOR_LOGISTIK] : VENDOR_LOGISTIK).map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
                 <div className="space-y-1.5"><label className="font-bold text-slate-700">Waktu Berangkat</label><input type="time" value={batchForm.departureTime} onChange={e => setBatchForm(f => ({ ...f, departureTime: e.target.value }))} className={BATCH_INP} /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">

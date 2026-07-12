@@ -8,8 +8,9 @@
  */
 import type { Asset } from "../types";
 import type { AuthUser } from "./fieldApi";
+import { computeAudit, defaultAuditMap } from "../auditChecklist";
 
-export type FieldType = "text" | "number" | "date" | "select" | "toggle" | "chips" | "textarea";
+export type FieldType = "text" | "number" | "date" | "select" | "toggle" | "chips" | "textarea" | "auditstatus";
 export interface GateField {
   k: string;
   label: string;
@@ -71,8 +72,7 @@ export const GATE: { [k: number]: GateSpec } = {
     fields: [
       { k: "auditorName", label: "Nama Auditor", type: "text", req: true, prefillUser: true },
       { k: "lastAuditDate", label: "Tanggal Audit", type: "date", req: true },
-      { k: "scoring", label: "Skor Audit (0-100)", type: "number", req: true, min: 0, max: 100 },
-      { k: "findings", label: "Temuan (pisahkan dengan koma)", type: "chips", placeholder: "Layar buram, Kabel longgar" },
+      { k: "checklist", label: "Checklist Audit per Aset", type: "auditstatus" },
       { k: "recommendation", label: "Rekomendasi", type: "textarea" }
     ]
   },
@@ -117,6 +117,7 @@ export function initForm(target: number, asset: Asset, user: AuthUser): Record<s
     let v = existing[f.k];
     if (f.type === "chips") v = Array.isArray(v) ? v.join(", ") : v || "";
     else if (f.type === "toggle") v = !!v;
+    else if (f.type === "auditstatus") { form[f.k] = defaultAuditMap(asset.quantity, v && typeof v === "object" ? v : null); continue; }
     else if (v == null) v = "";
     if (v === "" && f.type === "date") v = today();
     if ((v === "" || v == null) && f.prefillUser) v = user.name;
@@ -148,6 +149,16 @@ export function buildDetails(target: number, asset: Asset, form: Record<string, 
     if (f.type === "number") v = v === "" || v == null ? 0 : Number(v);
     else if (f.type === "toggle") v = !!v;
     else if (f.type === "chips") v = String(v || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+    else if (f.type === "auditstatus") {
+      // Auto-derive score/status/findings from the per-item map (same logic as the CMS).
+      const res = computeAudit(v && typeof v === "object" ? v : {});
+      slice[f.k] = res.checklist;
+      slice.scoring = res.scoring;
+      slice.findings = res.findings;
+      slice.complianceStatus = res.complianceStatus;
+      slice.kelengkapanQty = res.kelengkapanQty;
+      continue;
+    }
     slice[f.k] = v;
   }
   // stage-specific derived fields mirroring the CMS

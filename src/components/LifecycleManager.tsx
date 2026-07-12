@@ -35,6 +35,7 @@ import {
 import { Asset, AssetStage } from "../types";
 import { api, type AuthUser } from "../api";
 import { installedOf } from "../installProgress";
+import { AUDIT_ITEMS, QTY_ITEM_KEY, computeAudit, defaultAuditMap } from "../auditChecklist";
 
 // Code-split: Leaflet (+ its CSS) only loads when the operator opens the distribusi map.
 const TokoMap = React.lazy(() => import("./TokoMap"));
@@ -130,21 +131,7 @@ const COURIERS = [
   "GrabExpress", "Paxel", "Deliveree", "Lainnya"
 ];
 
-// Per-item audit checklist (Fase 7 · Audit & Kepatuhan). Each item has its OWN pair of statuses
-// (good = the first/"ok" state, bad = the second/"needs attention" state) instead of a generic
-// Lulus/Tidak. The "kelengkapan" item also captures the actual quantity found on the ground.
-// The audit is recorded PER ASSET — each asset's gate writes to its own stageDetails.audit.
-const AUDIT_ITEMS: { key: string; label: string; good: string; bad: string; qty?: boolean }[] = [
-  { key: "kondisi", label: "Kondisi Fisik baik", good: "Baik", bad: "Perlu perbaikan" },
-  { key: "kelengkapan", label: "Kelengkapan Qty", good: "Qty Sesuai", bad: "Qty Kurang", qty: true },
-  { key: "bersih", label: "Bersih & rapi", good: "Bersih", bad: "Kotor" },
-  { key: "fungsi", label: "Berfungsi normal", good: "Normal", bad: "Tidak berfungsi" },
-  { key: "penempatan", label: "Penempatan sesuai", good: "Sesuai", bad: "Tidak Sesuai" },
-  { key: "aman", label: "Aman digunakan", good: "Aman", bad: "Tidak aman" },
-  { key: "aksesoris", label: "Aksesoris lengkap", good: "Lengkap", bad: "Tidak lengkap" },
-  { key: "foto", label: "Foto dokumentasi lengkap", good: "Lengkap", bad: "Tidak lengkap" },
-];
-const QTY_ITEM_KEY = "kelengkapanQty"; // where the actual counted qty lives inside the checklist map
+// Per-item audit checklist (Fase 7) — shared with the mobile field app so both score identically.
 
 // The data captured when transitioning INTO each stage (drives the gate form)
 const GATE_FORMS: { [target: number]: { stageKey: string; title: string; fields: FieldDef[] } } = {
@@ -1037,13 +1024,7 @@ export default function LifecycleManager({
       else if (f.type === "generated") v = v || genSuratJalan();
       else if (f.type === "time") v = v || new Date().toTimeString().slice(0, 5);
       else if (f.type === "checklist") v = v && typeof v === "object" ? v : {};
-      else if (f.type === "auditstatus") {
-        // Default every item to its "good" state; seed the counted qty from the asset's own quantity.
-        const prev = v && typeof v === "object" ? v : {};
-        const seeded: Record<string, any> = { [QTY_ITEM_KEY]: prev[QTY_ITEM_KEY] ?? (detailAsset.quantity || 1) };
-        AUDIT_ITEMS.forEach(it => { seeded[it.key] = prev[it.key] !== false; });
-        v = seeded;
-      }
+      else if (f.type === "auditstatus") v = defaultAuditMap(detailAsset.quantity, v && typeof v === "object" ? v : null);
       else if (v === undefined || v === null || v === "") v = f.def ?? (f.type === "date" ? new Date().toISOString().split("T")[0] : "");
       init[f.key] = v;
     });
@@ -1150,17 +1131,12 @@ export default function LifecycleManager({
         section.complianceStatus = section.scoring >= 90 ? "PATUH" : section.scoring >= 70 ? "PERLU PERBAIKAN" : "TIDAK PATUH";
       }
       else if (f.type === "auditstatus") {
-        const map: any = v && typeof v === "object" ? v : {};
-        const qty = Math.max(0, Number(map[QTY_ITEM_KEY]) || 0);
-        const result: Record<string, any> = { [QTY_ITEM_KEY]: qty };
-        let passed = 0;
-        // Record the chosen status LABEL per item so the report/detail reads naturally.
-        for (const it of AUDIT_ITEMS) { const good = map[it.key] !== false; result[it.key] = good; if (good) passed++; }
-        v = result;
-        section.scoring = AUDIT_ITEMS.length ? Math.round((passed / AUDIT_ITEMS.length) * 100) : 0;
-        section.findings = AUDIT_ITEMS.filter(it => map[it.key] === false).map(it => `${it.label}: ${it.bad}${it.qty ? ` (Qty ${qty})` : ""}`);
-        section.kelengkapanQty = qty;
-        section.complianceStatus = section.scoring >= 90 ? "PATUH" : section.scoring >= 70 ? "PERLU PERBAIKAN" : "TIDAK PATUH";
+        const res = computeAudit(v && typeof v === "object" ? v : {});
+        v = res.checklist;
+        section.scoring = res.scoring;
+        section.findings = res.findings;
+        section.kelengkapanQty = res.kelengkapanQty;
+        section.complianceStatus = res.complianceStatus;
       }
       section[f.key] = v;
     });

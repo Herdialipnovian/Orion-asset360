@@ -13,6 +13,7 @@ import type { Asset } from "../../types";
 import type { AuthUser } from "../fieldApi";
 import { TRANSITION_VERB, EVIDENCE_SLOTS, STAGE_FULL, STAGE_LABELS } from "../lifecycle";
 import { GATE, initForm, missingFields, buildDetails, type GateField } from "../gateForms";
+import { AUDIT_ITEMS, QTY_ITEM_KEY, computeAudit } from "../../auditChecklist";
 import { enqueueCommit, type EvidenceItem } from "../outbox";
 import type { Captured } from "../camera";
 import { Toast } from "../ui";
@@ -173,6 +174,50 @@ export default function ActionScreen({
 
 function FieldInput({ f, value, onChange }: { f: GateField; value: any; onChange: (v: any) => void }) {
   const base = "tap w-full rounded-xl border border-[#1e2b45] bg-[#0f1728] px-3 text-base text-white outline-none placeholder:text-slate-600 focus:border-[#4d8bff]";
+  if (f.type === "auditstatus") {
+    const map: any = value && typeof value === "object" ? value : {};
+    const qty = map[QTY_ITEM_KEY] === "" ? "" : Number(map[QTY_ITEM_KEY]) || 0;
+    const res = computeAudit(map);
+    const tone = res.scoring >= 90 ? "text-emerald-300" : res.scoring >= 70 ? "text-amber-300" : "text-rose-300";
+    const pick = (k: string, good: boolean) => onChange({ ...map, [k]: good });
+    return (
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-semibold text-slate-400">{f.label}</span>
+        <div className="flex flex-col gap-2">
+          {AUDIT_ITEMS.map(it => {
+            const good = map[it.key] !== false;
+            return (
+              <div key={it.key} className="rounded-xl border border-[#1e2b45] bg-[#0f1728] px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 flex-1 text-sm text-slate-200">{it.label}</span>
+                  {it.qty && (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="text-[11px] text-slate-500">Qty</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={qty}
+                        onChange={e => onChange({ ...map, [QTY_ITEM_KEY]: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) })}
+                        className="tap w-16 rounded-lg border border-[#1e2b45] bg-[#0b1220] px-2 py-1 text-center text-sm text-white outline-none focus:border-[#4d8bff]"
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  <button type="button" onClick={() => pick(it.key, true)} className={`tap rounded-lg py-2 text-xs font-bold transition ${good ? "bg-emerald-500 text-white" : "border border-[#1e2b45] bg-[#0b1220] text-slate-400"}`}>{it.good}</button>
+                  <button type="button" onClick={() => pick(it.key, false)} className={`tap rounded-lg py-2 text-xs font-bold transition ${!good ? "bg-rose-500 text-white" : "border border-[#1e2b45] bg-[#0b1220] text-slate-400"}`}>{it.bad}</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[11px] text-slate-500">Skor otomatis</span>
+          <span className={`text-xs font-bold ${tone}`}>{res.scoring} · {res.complianceStatus}</span>
+        </div>
+      </div>
+    );
+  }
   if (f.type === "toggle") {
     return (
       <label className="flex items-center justify-between rounded-xl border border-[#1e2b45] bg-[#0f1728] px-4 py-3">

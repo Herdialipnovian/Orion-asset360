@@ -26,6 +26,7 @@ const SECTIONS: Section[] = [
     desc: "Nilai default yang dipakai perhitungan & indikator di seluruh sistem.",
     fields: [
       { key: "depreciation_pct", label: "Depresiasi / Nilai Sisa Scrap", type: "number", suffix: "%", min: 0, max: 100, hint: "Estimasi nilai sisa aset baru = % ini × harga beli." },
+      { key: "useful_life_months", label: "Umur Ekonomis Aset", type: "number", suffix: "bulan", min: 1, max: 600, hint: "Dipakai untuk depresiasi garis-lurus di Utilisasi Aset (default 60 = 5 tahun)." },
       { key: "sla_target_pct", label: "Target SLA / Kepatuhan", type: "number", suffix: "%", min: 0, max: 100, hint: "Ambang 'sehat' (hijau) indikator operasional di Dashboard." },
       { key: "default_timeline_weeks", label: "Default Timeline Pengadaan", type: "number", suffix: "minggu", min: 1, max: 104, hint: "Estimasi durasi default saat membuat pengajuan aset baru." }
     ]

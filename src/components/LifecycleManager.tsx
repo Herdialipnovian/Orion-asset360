@@ -326,7 +326,7 @@ interface LifecycleManagerProps {
   onDeployVenue?: (assetId: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null }) => Promise<{ ok: boolean; error?: string }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
-  onAuditSample?: (assetId: string, samples: { locationId: number; compliant: boolean }[]) => Promise<{ ok: boolean; error?: string }>;
+  onAuditSample?: (assetId: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }) => Promise<{ ok: boolean; error?: string }>;
   initialStageFilter?: number | string;
 }
 
@@ -528,6 +528,9 @@ export default function LifecycleManager({
   const [sampleSel, setSampleSel] = React.useState<Record<number, "compliant" | "issue" | undefined>>({});
   const [sampleBusy, setSampleBusy] = React.useState(false);
   const [sampleError, setSampleError] = React.useState<string | null>(null);
+  const [sampleMethod, setSampleMethod] = React.useState<"manual" | "auto">("manual");
+  const [samplePctInput, setSamplePctInput] = React.useState("15");
+  const [autoPct, setAutoPct] = React.useState<number | null>(null);
 
   const openDistribute = () => {
     if (!detailAsset) return;
@@ -557,7 +560,30 @@ export default function LifecycleManager({
   const openSample = () => {
     setSampleSel({});
     setSampleError(null);
+    setSampleMethod("manual");
+    setAutoPct(null);
     setSampleOpen(true);
+  };
+  // Auto-random: system picks ceil(pct% × toko) at random as the audit sample (default all "Patuh",
+  // PIC flips any to "Temuan" after checking). Marks the run as method=auto for the client report.
+  const autoRandomSample = () => {
+    if (!detailAsset) return;
+    const pls: any[] = (detailAsset.stageDetails as any)?.deployment?.placements || [];
+    if (!pls.length) return;
+    const pct = Math.min(100, Math.max(1, Math.round(Number(samplePctInput) || 0)));
+    const n = Math.min(pls.length, Math.max(1, Math.ceil((pct / 100) * pls.length)));
+    // Unbiased Fisher-Yates (Durstenfeld) — a sort() with a random comparator is NOT uniform.
+    const pool = [...pls];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    const sel: Record<number, "compliant" | "issue"> = {};
+    for (const p of pool.slice(0, n)) sel[Number(p.locationId)] = "compliant";
+    setSampleSel(sel);
+    setSampleMethod("auto");
+    setAutoPct(pct); // record the % actually used for THIS selection (input may change later)
+    setSampleError(null);
   };
   const submitSample = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -565,7 +591,8 @@ export default function LifecycleManager({
     const samples = Object.entries(sampleSel).filter(([, v]) => v).map(([lid, v]) => ({ locationId: Number(lid), compliant: v === "compliant" }));
     if (!samples.length) return setSampleError("Pilih minimal 1 toko sampel + status.");
     setSampleBusy(true); setSampleError(null);
-    const res = await onAuditSample(detailAsset.id, samples);
+    const meta = sampleMethod === "auto" ? { method: "auto" as const, samplePct: autoPct ?? undefined } : { method: "manual" as const };
+    const res = await onAuditSample(detailAsset.id, samples, meta);
     setSampleBusy(false);
     if (!res.ok) return setSampleError(res.error || "Gagal audit sampling.");
     setSampleOpen(false);
@@ -652,7 +679,9 @@ export default function LifecycleManager({
       const matchClient = selectedClient === "ALL" || asset.client === selectedClient;
       const matchCategory = filterCategory === "ALL" || asset.category === filterCategory;
       const matchStage = filterStage === "ALL" || asset.currentStage === Number(filterStage);
-      return matchSearch && matchClient && matchCategory && matchStage;
+      // Deployment lifecycle only — Internal (custodian) assets live in the "Aset Internal" menu.
+      const isDeployment = asset.peruntukan !== "Internal";
+      return isDeployment && matchSearch && matchClient && matchCategory && matchStage;
     });
   }, [assets, searchQuery, selectedClient, filterCategory, filterStage]);
 
@@ -1717,19 +1746,7 @@ export default function LifecycleManager({
                     </div>
                   </div>
 
-                  {/* Fase 1 Internal — serah-terima aset Origin ke Karyawan (custodian). Gudang→dipegang karyawan. */}
-                  {onHandoverInternal && detailAsset.owner === "Origin" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 5 && !detailAsset.stageDetails?.deployment?.custodianName && (
-                    <button
-                      onClick={openHandover}
-                      className="w-full flex items-center gap-2 text-left bg-slate-800 hover:bg-slate-900 text-white border border-slate-800 rounded-lg px-3 py-2.5 transition shadow-sm"
-                    >
-                      <Building className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0">
-                        <span className="block text-[11px] font-bold leading-tight">Serah-Terima ke Karyawan (Internal)</span>
-                        <span className="block text-[9px] text-slate-300 leading-tight">Aset Origin dipegang karyawan (custodian) + BAST — langsung ke Fase 6</span>
-                      </span>
-                    </button>
-                  )}
+                  {/* Internal custodian handover moved to the dedicated "Aset Internal" menu. */}
 
                   {/* Fase 2 Event — setup / relocate asset at a venue (roadshow). */}
                   {onDeployVenue && projectModeOf(detailAsset) === "Event" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 6 && (() => {
@@ -2172,19 +2189,30 @@ export default function LifecycleManager({
               <div>
                 <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest block">Audit Sampling</span>
                 <h3 className="text-base font-bold text-slate-950">Cek sebagian toko</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">Pilih ~10–20% toko · {picked} dipilih</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Pilih ~10–20% toko · {picked} dipilih{sampleMethod === "auto" ? " · auto-random" : ""}</p>
               </div>
               <button onClick={() => setSampleOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
             </div>
             <form onSubmit={submitSample} className="p-5 space-y-3 text-xs">
-              <div className="space-y-1.5 max-h-72 overflow-y-auto">
+              {/* Auto-random selector: sistem pilih X% toko acak (vs pilih manual di bawah). */}
+              <div className="flex items-center gap-2 bg-teal-50 border border-teal-100 rounded-lg p-2.5">
+                <span className="text-[11px] font-bold text-teal-700 whitespace-nowrap">🎲 Auto-random</span>
+                <input type="number" min={1} max={100} value={samplePctInput} onChange={e => setSamplePctInput(e.target.value)} className="w-14 rounded-md border border-teal-200 bg-white px-2 py-1 text-center text-[11px] font-bold text-slate-700 outline-none focus:border-teal-400" />
+                <span className="text-[11px] font-semibold text-teal-600">%</span>
+                <button type="button" onClick={autoRandomSample} className="ml-auto text-[10px] font-bold px-2.5 py-1.5 rounded-md bg-teal-600 hover:bg-teal-700 text-white transition">Pilih Acak</button>
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span>atau pilih toko manual di bawah</span>
+                {picked > 0 && <button type="button" onClick={() => { setSampleSel({}); setSampleMethod("manual"); }} className="font-bold text-slate-500 hover:text-slate-700 underline">Reset</button>}
+              </div>
+              <div className="space-y-1.5 max-h-64 overflow-y-auto">
                 {pls.map((p: any) => {
                   const sel = sampleSel[p.locationId];
                   return (
                     <div key={p.locationId} className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
                       <span className="min-w-0 flex-1 text-[11px] font-bold text-slate-700 truncate">{p.toko}{p.audited ? <span className="font-normal text-teal-500"> · sudah</span> : null}</span>
-                      <button type="button" onClick={() => setSampleSel(s => ({ ...s, [p.locationId]: sel === "compliant" ? undefined : "compliant" }))} className={`text-[10px] font-bold px-2 py-1 rounded-md border ${sel === "compliant" ? "bg-emerald-500 text-white border-emerald-500" : "bg-white text-emerald-600 border-emerald-200"}`}>Patuh</button>
-                      <button type="button" onClick={() => setSampleSel(s => ({ ...s, [p.locationId]: sel === "issue" ? undefined : "issue" }))} className={`text-[10px] font-bold px-2 py-1 rounded-md border ${sel === "issue" ? "bg-rose-500 text-white border-rose-500" : "bg-white text-rose-600 border-rose-200"}`}>Temuan</button>
+                      <button type="button" onClick={() => { const next = sel === "compliant" ? undefined : "compliant"; if ((sel === undefined) !== (next === undefined)) setSampleMethod("manual"); setSampleSel(s => ({ ...s, [p.locationId]: next })); }} className={`text-[10px] font-bold px-2 py-1 rounded-md border ${sel === "compliant" ? "bg-emerald-500 text-white border-emerald-500" : "bg-white text-emerald-600 border-emerald-200"}`}>Patuh</button>
+                      <button type="button" onClick={() => { const next = sel === "issue" ? undefined : "issue"; if ((sel === undefined) !== (next === undefined)) setSampleMethod("manual"); setSampleSel(s => ({ ...s, [p.locationId]: next })); }} className={`text-[10px] font-bold px-2 py-1 rounded-md border ${sel === "issue" ? "bg-rose-500 text-white border-rose-500" : "bg-white text-rose-600 border-rose-200"}`}>Temuan</button>
                     </div>
                   );
                 })}

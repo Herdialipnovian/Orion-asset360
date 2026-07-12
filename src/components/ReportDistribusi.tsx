@@ -112,6 +112,35 @@ export default function ReportDistribusi({
             ))}
           </div>
 
+          {/* Per-area coverage — compliance per-area, bukan satu skor global */}
+          {cov?.byArea && cov.byArea.length > 0 && (
+            <div className="mt-5">
+              <div className="text-[11px] font-extrabold text-slate-700 mb-1.5">Kepatuhan per Area</div>
+              <table className="w-full text-[11px] border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-600">
+                    <th className="text-left font-extrabold px-2 py-1.5 border border-slate-200">Area</th>
+                    <th className="text-left font-extrabold px-2 py-1.5 border border-slate-200">Toko</th>
+                    <th className="text-left font-extrabold px-2 py-1.5 border border-slate-200">Diaudit</th>
+                    <th className="text-left font-extrabold px-2 py-1.5 border border-slate-200">Coverage</th>
+                    <th className="text-left font-extrabold px-2 py-1.5 border border-slate-200">Kepatuhan</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cov.byArea.map(a => (
+                    <tr key={a.area}>
+                      <td className="px-2 py-1.5 border border-slate-200 font-bold">{a.area}</td>
+                      <td className="px-2 py-1.5 border border-slate-200 tabular-nums">{a.totalToko}</td>
+                      <td className="px-2 py-1.5 border border-slate-200 tabular-nums">{a.auditedToko}/{a.totalToko}</td>
+                      <td className="px-2 py-1.5 border border-slate-200 tabular-nums">{a.coveragePct}%</td>
+                      <td className="px-2 py-1.5 border border-slate-200 tabular-nums font-bold">{a.auditedToko ? `${a.compliancePct}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           {/* Per-toko table */}
           <table className="w-full text-[11px] mt-6 border-collapse">
             <thead>
@@ -153,7 +182,7 @@ export default function ReportDistribusi({
 
           <div className="flex items-center gap-4 mt-4 text-[10px] text-slate-400">
             <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /> Koordinat dari GPS pemasangan / lokasi toko</span>
-            <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Audit = hasil sampling PIC</span>
+            {cov?.method && <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Audit = {cov.method === "auto" ? `sampling auto-random${cov.samplePct ? ` ${cov.samplePct}%` : ""}` : "hasil sampling PIC"}</span>}
           </div>
           <div className="mt-8 grid grid-cols-2 gap-8 text-[11px]">
             <div className="text-center"><div className="h-14" /><div className="border-t border-slate-400 pt-1">Origin Connect</div></div>

@@ -14,6 +14,8 @@ import {
   Settings,
   ShieldCheck,
   CheckSquare,
+  Boxes,
+  Recycle,
   ClipboardList,
   Home,
   Truck,
@@ -54,6 +56,8 @@ import UserManagement from "./components/UserManagement";
 import NotificationBell from "./components/NotificationBell";
 import AssetMaster from "./components/AssetMaster";
 import Organisasi from "./components/Organisasi";
+import AsetInternal from "./components/AsetInternal";
+import AssetUtilization from "./components/AssetUtilization";
 import ProjectsLocations from "./components/ProjectsLocations";
 import SystemSettings from "./components/SystemSettings";
 import { api, getToken, type AuthUser } from "./api";
@@ -287,9 +291,10 @@ export default function App() {
   };
   const handleAuditSample = async (
     assetId: string,
-    samples: { locationId: number; compliant: boolean }[]
+    samples: { locationId: number; compliant: boolean }[],
+    meta?: { method?: "manual" | "auto"; samplePct?: number }
   ): Promise<{ ok: boolean; error?: string }> => {
-    try { await api.auditSample(assetId, samples); await refresh(); return { ok: true }; }
+    try { await api.auditSample(assetId, samples, meta); await refresh(); return { ok: true }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal audit sampling." }; }
   };
 
@@ -436,7 +441,7 @@ export default function App() {
                       <span>{label}</span>
                     </div>
                     <span className="text-[9px] font-extrabold bg-[#131b2f] text-slate-400 px-1.5 py-0.2 rounded-full">
-                      {assets.filter(a => a.currentStage === stage).length}
+                      {assets.filter(a => a.currentStage === stage && a.peruntukan !== "Internal").length}
                     </span>
                   </button>
                 ))}
@@ -456,6 +461,20 @@ export default function App() {
                 </button>
 
                 <button
+                  onClick={() => { setCurrentTab("internal"); setIsMobileSidebarOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2 rounded-md font-bold transition ${
+                    currentTab === "internal"
+                      ? "text-white bg-slate-800/70"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/25"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Boxes className="h-4 w-4" />
+                    <span>Aset Internal</span>
+                  </div>
+                </button>
+
+                <button
                   onClick={() => { setCurrentTab("dokumen"); setIsMobileSidebarOpen(false); }}
                   className={`w-full flex items-center justify-between px-3.5 py-2 rounded-md font-bold transition ${
                     currentTab === "dokumen"
@@ -466,6 +485,20 @@ export default function App() {
                   <div className="flex items-center gap-2.5">
                     <FileText className="h-4 w-4" />
                     <span>Laporan &amp; BAST</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => { setCurrentTab("utilisasi"); setIsMobileSidebarOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3.5 py-2 rounded-md font-bold transition ${
+                    currentTab === "utilisasi"
+                      ? "text-white bg-slate-800/70"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/25"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Recycle className="h-4 w-4" />
+                    <span>Utilisasi Aset</span>
                   </div>
                 </button>
 
@@ -640,7 +673,7 @@ export default function App() {
                             <span>{label}</span>
                           </span>
                           <span className="text-[9px] font-extrabold bg-[#131b2f] text-slate-400 px-1.5 py-0.2 rounded-full">
-                            {assets.filter(a => a.currentStage === stage).length}
+                            {assets.filter(a => a.currentStage === stage && a.peruntukan !== "Internal").length}
                           </span>
                         </button>
                       ))}
@@ -796,6 +829,18 @@ export default function App() {
               </motion.div>
             )}
 
+            {currentTab === "internal" && (
+              <motion.div
+                key="internal-tab"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
+                <AsetInternal assets={assets} user={user} onChanged={refresh} />
+              </motion.div>
+            )}
+
             {currentTab === "dokumen" && (
               <motion.div
                 key="documents-tab"
@@ -805,6 +850,18 @@ export default function App() {
                 transition={{ duration: 0.2 }}
               >
                 <OperationsDocs assets={assets} settings={settings} />
+              </motion.div>
+            )}
+
+            {currentTab === "utilisasi" && (
+              <motion.div
+                key="utilisasi-tab"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
+                <AssetUtilization assets={assets} settings={settings} selectedClient={selectedClient} />
               </motion.div>
             )}
 

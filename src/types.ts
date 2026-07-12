@@ -66,6 +66,10 @@ export interface Asset {
   // Ownership & nature (Phase 0 foundation for multi-pattern deployment)
   owner?: "Origin" | "Client"; // who owns it — drives depreciation (Origin) vs client billing
   usageType?: "Reusable" | "Consumable"; // reusable cycles back (Fase 9); consumable ends at disposal (Fase 10)
+  // Peruntukan (permanent partition): "Internal" = Origin operational asset held by a karyawan
+  // (custodian menu, no shipping); "Deployment" = campaign asset (event/distribusi lifecycle).
+  // Client-owned assets are always Deployment.
+  peruntukan?: "Internal" | "Deployment";
   // Deployment context: the Proyek/Episode this asset is currently deployed under (drives the
   // context-aware Fase 6/7/9 behaviour — Internal custodian vs Event venue vs Distribusi toko).
   projectId?: number | null;
@@ -156,6 +160,9 @@ export interface Asset {
       handoverDate?: string;
       handoverSignature?: string; // BAST TTD (dataURL)
       handoverNote?: string;
+      // Internal stock-opname trail (periodic custodian checks; does NOT change stage).
+      lastOpnameAt?: string;
+      opnameHistory?: { date: string; by: string; condition: string; note?: string }[];
 
       // Event / Roadshow — asset(-package) deployed at a Venue as a Leg; roadshow = ordered legs.
       legs?: {
@@ -196,6 +203,10 @@ export interface Asset {
         compliantToko: number;
         coveragePct: number;
         compliancePct: number;
+        byArea?: { area: string; totalToko: number; auditedToko: number; compliantToko: number; coveragePct: number; compliancePct: number }[];
+        method?: "manual" | "auto";
+        samplePct?: number;
+        sampledAt?: string;
       };
     };
     audit: {

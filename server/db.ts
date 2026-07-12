@@ -60,6 +60,7 @@ export function rowToAsset(r: any): Asset {
     tglBeli: r.tgl_beli ?? undefined,
     owner: r.owner ?? "Origin",
     usageType: r.usage_type ?? "Reusable",
+    peruntukan: r.peruntukan ?? "Deployment",
     projectId: r.project_id ?? null,
     stageDetails: r.stage_details
   };
@@ -122,14 +123,14 @@ export async function insertAsset(a: Asset, exec: Exec = q): Promise<void> {
     `insert into assets
        (id, name, category, client, project_code, quantity, current_stage, current_location,
         qrcode, audit_score, maintenance_status, warna, asset_type, serial_number, fisik, tgl_beli,
-        owner, usage_type, project_id, specs, financials, stage_details, created_at, updated_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21::jsonb,$22::jsonb,$23,$24)
+        owner, usage_type, peruntukan, project_id, specs, financials, stage_details, created_at, updated_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22::jsonb,$23::jsonb,$24,$25)
      on conflict (id) do nothing`,
     [
       a.id, a.name, a.category, a.client, a.projectCode, a.quantity, a.currentStage, a.currentLocation,
       a.qrcode, a.auditScore ?? null, a.maintenanceStatus ?? null,
       a.warna ?? null, a.type ?? null, a.serialNumber ?? null, a.fisik ?? null, a.tglBeli ?? null,
-      a.owner ?? "Origin", a.usageType ?? "Reusable", a.projectId ?? null,
+      a.owner ?? "Origin", a.usageType ?? "Reusable", a.peruntukan ?? "Deployment", a.projectId ?? null,
       JSON.stringify(a.specs || {}), JSON.stringify(a.financials || {}), JSON.stringify(a.stageDetails || {}),
       a.createdAt, a.updatedAt
     ]
@@ -142,12 +143,12 @@ export async function updateAssetCore(id: string, a: Asset): Promise<void> {
     `update assets set
        name=$2, category=$3, client=$4, quantity=$5,
        warna=$6, asset_type=$7, serial_number=$8, fisik=$9, tgl_beli=$10,
-       owner=$11, usage_type=$12, specs=$13::jsonb, financials=$14::jsonb, updated_at=now()
+       owner=$11, usage_type=$12, peruntukan=$13, specs=$14::jsonb, financials=$15::jsonb, updated_at=now()
      where id=$1`,
     [
       id, a.name, a.category, a.client, a.quantity,
       a.warna ?? null, a.type ?? null, a.serialNumber ?? null, a.fisik ?? null, a.tglBeli ?? null,
-      a.owner ?? "Origin", a.usageType ?? "Reusable",
+      a.owner ?? "Origin", a.usageType ?? "Reusable", a.peruntukan ?? "Deployment",
       JSON.stringify(a.specs || {}), JSON.stringify(a.financials || {})
     ]
   );
@@ -167,12 +168,14 @@ export async function updateAssetStageRow(
   p: { currentStage: number; currentLocation: string; stageDetails: any; auditScore?: number; maintenanceStatus?: string }
 ): Promise<void> {
   await q(
+    // audit_score / maintenance_status are PRESERVED when the caller omits them (coalesce), so
+    // stage-neutral writes (handover/opname/return/distribute/audit-sample) don't wipe them.
     `update assets set
        current_stage = $2,
        current_location = $3,
        stage_details = $4::jsonb,
-       audit_score = $5,
-       maintenance_status = $6,
+       audit_score = coalesce($5, audit_score),
+       maintenance_status = coalesce($6, maintenance_status),
        updated_at = now()
      where id = $1`,
     [id, p.currentStage, p.currentLocation, JSON.stringify(p.stageDetails || {}), p.auditScore ?? null, p.maintenanceStatus ?? null]

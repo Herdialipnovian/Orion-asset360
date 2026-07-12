@@ -102,7 +102,9 @@ export default function Dashboard({
   // All metrics are derived live from the (client-filtered) data
   // ============================================================
   const m = React.useMemo(() => {
-    const list = selectedClient === "ALL" ? assets : assets.filter(a => a.client === selectedClient);
+    // Deployment dashboard — Internal (custodian) assets are tracked in the Aset Internal menu.
+    const pool = assets.filter(a => a.peruntukan !== "Internal");
+    const list = selectedClient === "ALL" ? pool : pool.filter(a => a.client === selectedClient);
 
     const units = (arr: Asset[]) => arr.reduce((s, a) => s + (Number(a.quantity) || 0), 0);
     const byStage: { [k: number]: Asset[] } = {};

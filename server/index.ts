@@ -241,6 +241,11 @@ function buildImportedAsset(id: string, row: any): Asset {
       /stiker|sticker|banner|poster|spanduk|flyer/i.test(String(row.name || ""))
         ? "Consumable"
         : "Reusable",
+    peruntukan: (() => {
+      const own = /klien|client/i.test(String(row.owner || "")) ? "Client" : "Origin";
+      const p = row.peruntukan === "Internal" ? "Internal" : row.peruntukan === "Deployment" ? "Deployment" : derivePeruntukan(String(row.category || ""), own);
+      return p === "Internal" && own !== "Origin" ? "Deployment" : p; // internal = Origin-only
+    })(),
     stageDetails: {
       request: { reqId: `REQ-${id}`, timelineWeeks: 0, specsRequired: "Registrasi aset fisik (master data)", vendorName: "-", picName: "-", approvalDate: tgl || now.slice(0, 10) },
       production: { prodLead: "-", qcInspector: "-", qcScore: 100, productionReportCode: "-", evidencePhoto: "", readyDate: tgl || "" },
@@ -273,6 +278,13 @@ function emptyStageDetails() {
   };
 }
 
+// Peruntukan: Client assets are always campaign (Deployment); Origin ops categories default Internal.
+const INTERNAL_CAT_RE = /laptop|komputer|infrastruktur|kantor|keamanan|hvac|pendingin|kamera|cctv|printer|server|jaringan/i;
+function derivePeruntukan(category?: string, owner?: string): "Internal" | "Deployment" {
+  if ((owner || "") === "Client") return "Deployment";
+  return INTERNAL_CAT_RE.test(category || "") ? "Internal" : "Deployment";
+}
+
 // --- Create asset (server generates the client-based Asset ID) ---
 app.post(
   "/api/assets",
@@ -286,6 +298,9 @@ app.post(
       if (a.owner === "Origin") a.client = "Origin";
       else return res.status(400).json({ error: "Client aset wajib diisi." });
     }
+    // Peruntukan: honor an explicit override, else auto-derive from category + owner.
+    if (a.peruntukan !== "Internal" && a.peruntukan !== "Deployment") a.peruntukan = derivePeruntukan(a.category, a.owner);
+    if (a.peruntukan === "Internal" && a.owner !== "Origin") a.peruntukan = "Deployment"; // internal = Origin-only
     if (a.category) await q(`insert into categories (name) values ($1) on conflict (name) do nothing`, [a.category]);
     await q(`insert into clients (name) values ($1) on conflict (name) do nothing`, [a.client]);
     // Fase 1 (Request) & 2 (Produksi) removed — assets are born in Gudang (Fase 3) at the earliest.
@@ -338,9 +353,18 @@ app.patch(
       tglBeli: p.tglBeli ?? asset.tglBeli,
       owner: p.owner ?? asset.owner,
       usageType: p.usageType ?? asset.usageType,
+      peruntukan: (p.peruntukan === "Internal" || p.peruntukan === "Deployment") ? p.peruntukan : asset.peruntukan,
       specs: { ...asset.specs, brand: p.merk ?? asset.specs?.brand },
       financials: { ...asset.financials, purchaseCost: p.harga != null ? Number(p.harga) : asset.financials.purchaseCost }
     };
+    // Enforce the partition invariant: internal = Origin-only (client assets are always Deployment).
+    if (merged.peruntukan === "Internal" && merged.owner !== "Origin") merged.peruntukan = "Deployment";
+    // Don't reclassify Internal while an asset is mid-deployment (would orphan it between menus).
+    const wasDep: any = (asset.stageDetails as any)?.deployment || {};
+    const flippingToInternal = merged.peruntukan === "Internal" && asset.peruntukan !== "Internal";
+    if (flippingToInternal && (wasDep.mode === "Event" || wasDep.mode === "Distribusi" || (wasDep.legs || []).length || (wasDep.placements || []).length)) {
+      return res.status(422).json({ error: "Aset sedang di alur deployment — tarik/selesaikan dulu sebelum jadikan Internal." });
+    }
     await updateAssetCore(id, merged);
     assetChanged(id);
     res.json({ asset: await getAsset(id) });
@@ -1122,10 +1146,15 @@ app.post("/api/locations", requireAuthFlexible, requireRole("Admin", "Logistik",
   if (!name) return res.status(400).json({ error: "Nama lokasi wajib diisi." });
   const type = VALID_LOC_TYPES.includes(b.type) ? b.type : "Toko";
   const fieldAdded = req.user!.role === "PIC" || req.user!.role === "Merchandiser";
+  // BAC: client-scoped field roles may only create locations for THEIR OWN client — never trust
+  // body.client from them. Admin/Logistik (global) may set any client from the body.
+  const owningClient = fieldAdded
+    ? (req.user!.client || null)
+    : (b.client ? String(b.client).trim() : null);
   const { rows } = await q(
     `insert into locations (name, type, client, area, address, gps_lat, gps_lng, pic, code, source)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
-    [name, type, b.client ? String(b.client).trim() : null, b.area ? String(b.area).trim() : null,
+    [name, type, owningClient, b.area ? String(b.area).trim() : null,
      b.address ? String(b.address).trim() : null,
      b.gpsLat != null ? Number(b.gpsLat) : null, b.gpsLng != null ? Number(b.gpsLng) : null,
      b.pic ? String(b.pic).trim() : null, b.code ? String(b.code).trim() : null,
@@ -1180,6 +1209,7 @@ app.post("/api/assets/:id/project", requireAuth, requireRole("Admin", "Logistik"
 app.post("/api/assets/:id/handover", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req: AuthedReq, res) => {
   const asset = await getAsset(req.params.id);
   if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  if (asset.peruntukan !== "Internal") return res.status(422).json({ error: "Serah-terima custodian hanya untuk aset ber-peruntukan Internal." });
   if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Serah-terima internal hanya dari Fase 3–6 (gudang → dipegang karyawan)." });
   const b = req.body || {};
   const empId = Number(b.custodianId);
@@ -1222,6 +1252,42 @@ app.post("/api/assets/:id/handover", requireAuth, requireRole("Admin", "Logistik
   res.json({ asset: await getAsset(asset.id) });
 }));
 
+// ── Internal stock-opname: record a periodic custodian check (does NOT change the stage). ──
+app.post("/api/assets/:id/opname", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req: AuthedReq, res) => {
+  const asset = await getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  const dep: any = { ...((asset.stageDetails as any).deployment || {}) };
+  if (dep.mode !== "Internal" || !dep.custodianName) return res.status(422).json({ error: "Opname hanya untuk aset internal yang sedang dipegang karyawan." });
+  const b = req.body || {};
+  const rec = { date: b.date || new Date().toISOString().slice(0, 10), by: req.user!.name, condition: String(b.condition || "Baik"), note: b.note ? String(b.note).trim() : undefined };
+  dep.opnameHistory = [...(Array.isArray(dep.opnameHistory) ? dep.opnameHistory : []), rec];
+  dep.lastOpnameAt = rec.date;
+  const stageDetails = { ...asset.stageDetails, deployment: dep };
+  await updateAssetStageRow(asset.id, { currentStage: asset.currentStage, currentLocation: asset.currentLocation, stageDetails });
+  await insertLog({ id: `LOG-OPNAME-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: asset.currentStage, action: `Stock-opname (${rec.condition}) oleh ${req.user!.name} — custodian ${dep.custodianName}`, operator: req.user!.name, type: rec.condition && /rusak/i.test(rec.condition) ? "warning" : "info" });
+  assetChanged(asset.id);
+  res.json({ asset: await getAsset(asset.id) });
+}));
+
+// ── Internal return: a held asset comes back to Gudang (Fase 6 → 3, custodian cleared). ──
+app.post("/api/assets/:id/return-internal", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req: AuthedReq, res) => {
+  const asset = await getAsset(req.params.id);
+  if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  const dep: any = { ...((asset.stageDetails as any).deployment || {}) };
+  if (asset.peruntukan !== "Internal") return res.status(422).json({ error: "Hanya aset ber-peruntukan Internal yang bisa ditarik lewat menu ini." });
+  if (!dep.custodianName) return res.status(422).json({ error: "Aset ini tidak sedang dipegang karyawan." });
+  const who = dep.custodianName;
+  // Clear the active custodian + mode (opname history kept). mode cleared so a later legitimate
+  // reclassification to Deployment isn't blocked by a stale mode='Internal'.
+  dep.mode = undefined;
+  dep.custodianId = undefined; dep.custodianName = undefined; dep.custodianDept = undefined; dep.handoverDate = undefined; dep.handoverSignature = undefined; dep.handoverNote = undefined;
+  const stageDetails = { ...asset.stageDetails, deployment: dep };
+  await updateAssetStageRow(asset.id, { currentStage: 3, currentLocation: "Gudang Utama Origin", stageDetails });
+  await insertLog({ id: `LOG-RETURN-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: 3, action: `Aset internal ditarik dari ${who} → kembali ke Gudang`, operator: req.user!.name, type: "success" });
+  assetChanged(asset.id);
+  res.json({ asset: await getAsset(asset.id) });
+}));
+
 // ── Fase 2 Event/Roadshow: deploy asset(-package) at a Venue as a Leg. Called again to RELOCATE
 // to the next venue (closes the active leg, opens a new one) — builds the roadshow timeline on
 // one asset. Admin + Logistik + PIC. First call jumps 3–5→6; later calls stay Fase 6. ──
@@ -1230,6 +1296,7 @@ app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logi
   const pre = await getAsset(id);
   if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
   if (pre.currentStage < 3 || pre.currentStage > 6) return res.status(422).json({ error: "Setup/relokasi venue hanya dari Fase 3–6." });
+  if (pre.peruntukan === "Internal") return res.status(422).json({ error: "Aset Internal tidak masuk alur deployment (event/distribusi)." });
   // Client-scoped roles can only touch their own client's asset (mirrors /place).
   if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
   // Mode invariant: don't corrupt a Distribusi asset into a hybrid.
@@ -1299,6 +1366,7 @@ app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logist
   const asset = await getAsset(req.params.id);
   if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
   if (asset.currentStage < 3 || asset.currentStage > 6) return res.status(422).json({ error: "Distribusi hanya dari Fase 3–6." });
+  if (asset.peruntukan === "Internal") return res.status(422).json({ error: "Aset Internal tidak masuk alur distribusi." });
   // Client-scope (mirrors /place) + mode invariant (don't corrupt an Event asset into a hybrid).
   if (req.user!.role === "PIC" && (req.user!.client || null) !== (asset.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
   const curDep: any = (asset.stageDetails as any)?.deployment || {};
@@ -1367,6 +1435,7 @@ app.post("/api/assets/:id/place", requireAuthFlexible, requireRole("Admin", "Log
   const pre = await getAsset(id);
   if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
   if (pre.currentStage !== 6) return res.status(422).json({ error: `Pemasangan hanya untuk aset di Fase 6. Aset ini di Fase ${pre.currentStage}.` });
+  if (pre.peruntukan === "Internal") return res.status(422).json({ error: "Aset Internal tidak masuk alur distribusi." });
   // Client-scoped roles can only touch their own client's asset.
   if ((req.user!.role === "PIC" || req.user!.role === "Merchandiser") && (req.user!.client || null) !== (pre.client || null)) {
     return res.status(403).json({ error: "Aset ini di luar client Anda." });
@@ -1434,13 +1503,50 @@ app.post("/api/assets/:id/audit-sample", requireAuth, requireRole("Admin", "Logi
   dep.placements = pls;
   const auditedList = pls.filter(p => p.audited);
   const compliant = auditedList.filter(p => p.auditCompliant).length;
-  const coverage = { totalToko: pls.length, auditedToko: auditedList.length, compliantToko: compliant, coveragePct: Math.round((auditedList.length / pls.length) * 100), compliancePct: auditedList.length ? Math.round((compliant / auditedList.length) * 100) : 0 };
+  // Per-area breakdown (compliance per-area, not just one global score).
+  const areaMap = new Map<string, { area: string; totalToko: number; auditedToko: number; compliantToko: number }>();
+  for (const p of pls) {
+    const area = (p.area && String(p.area).trim()) || "— tanpa area —";
+    let row = areaMap.get(area);
+    if (!row) { row = { area, totalToko: 0, auditedToko: 0, compliantToko: 0 }; areaMap.set(area, row); }
+    row.totalToko++;
+    if (p.audited) { row.auditedToko++; if (p.auditCompliant) row.compliantToko++; }
+  }
+  const byArea = [...areaMap.values()]
+    .map(r => ({ ...r, coveragePct: Math.round((r.auditedToko / r.totalToko) * 100), compliancePct: r.auditedToko ? Math.round((r.compliantToko / r.auditedToko) * 100) : 0 }))
+    .sort((a, b) => a.area.localeCompare(b.area));
+  const method = req.body?.method === "auto" ? "auto" : "manual";
+  const samplePct = method === "auto" && Number(req.body?.samplePct) > 0 ? Math.round(Number(req.body.samplePct)) : undefined;
+  const coverage = {
+    totalToko: pls.length, auditedToko: auditedList.length, compliantToko: compliant,
+    coveragePct: Math.round((auditedList.length / pls.length) * 100),
+    compliancePct: auditedList.length ? Math.round((compliant / auditedList.length) * 100) : 0,
+    byArea, method, samplePct, sampledAt: new Date().toISOString()
+  };
   dep.coverage = coverage;
   const stageDetails = { ...asset.stageDetails, deployment: dep };
   await updateAssetStageRow(asset.id, { currentStage: asset.currentStage, currentLocation: asset.currentLocation, stageDetails });
-  await insertLog({ id: `LOG-SAMPLE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: 7, action: `Audit sampling ${auditedList.length}/${pls.length} toko · ${coverage.compliancePct}% patuh`, operator: req.user!.name, type: "success" });
+  await insertLog({ id: `LOG-SAMPLE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: 7, action: `Audit sampling ${method === "auto" ? `auto-random${samplePct ? ` ${samplePct}%` : ""} ` : ""}${auditedList.length}/${pls.length} toko · ${coverage.compliancePct}% patuh`, operator: req.user!.name, type: "success" });
   assetChanged(asset.id);
   res.json({ asset: await getAsset(asset.id), coverage });
+}));
+
+// Utilisasi & Riwayat aset: deployment history aggregated from the FULL activity-log table
+// (survives redeploys that overwrite legs/placements). Book value / age computed client-side.
+app.get("/api/analytics/utilization", requireAuth, wrap(async (_req, res) => {
+  const { rows } = await q(
+    `select asset_id,
+       count(*) filter (where action ~* '(Distribusi ke|Setup di venue|Serah-terima internal|Pemasangan ditugaskan)')::int as deployments,
+       count(*) filter (where action ~* '(Relokasi ke venue|melapor|Pemasangan di )')::int as movements,
+       max(timestamp) filter (where action ~* '(Distribusi ke|Setup di venue|Serah-terima internal|Pemasangan ditugaskan|Relokasi ke venue|melapor|Pemasangan di )') as last_active
+     from activity_logs where asset_id is not null group by asset_id`
+  );
+  res.json(rows.map((r: any) => ({
+    assetId: r.asset_id,
+    deployments: Number(r.deployments) || 0,
+    movements: Number(r.movements) || 0,
+    lastActiveAt: r.last_active ? new Date(r.last_active).toISOString() : null
+  })));
 }));
 
 // Bulk import one master list. mode 'append' = add new only; 'replace' = delete old

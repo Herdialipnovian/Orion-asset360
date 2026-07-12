@@ -256,6 +256,13 @@ export const api = {
   handoverInternal(id: string, p: { custodianId: number; handoverDate?: string; signatureBase64?: string; note?: string; projectId?: number | null }): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(id)}/handover`, { method: "POST", body: JSON.stringify(p) });
   },
+  // Internal stock-opname (record only, no stage change) + return-to-Gudang.
+  opnameInternal(id: string, p: { condition: string; note?: string; date?: string }): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(id)}/opname`, { method: "POST", body: JSON.stringify(p) });
+  },
+  returnInternal(id: string): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(id)}/return-internal`, { method: "POST", body: JSON.stringify({}) });
+  },
   // Fase 2 Event: setup asset at a venue leg (call again to relocate to the next venue).
   deployVenue(id: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null }): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(id)}/deploy-venue`, { method: "POST", body: JSON.stringify(p) });
@@ -267,8 +274,12 @@ export const api = {
   placeAtToko(id: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }): Promise<{ asset: Asset; installedQty: number; fullyInstalled: boolean }> {
     return req(`/assets/${encodeURIComponent(id)}/place`, { method: "POST", body: JSON.stringify(p) });
   },
-  auditSample(id: string, samples: { locationId: number; compliant: boolean }[]): Promise<{ asset: Asset; coverage: any }> {
-    return req(`/assets/${encodeURIComponent(id)}/audit-sample`, { method: "POST", body: JSON.stringify({ samples }) });
+  auditSample(id: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }): Promise<{ asset: Asset; coverage: any }> {
+    return req(`/assets/${encodeURIComponent(id)}/audit-sample`, { method: "POST", body: JSON.stringify({ samples, ...(meta || {}) }) });
+  },
+  // Utilisasi & riwayat deploy per aset (dari activity-log penuh).
+  getUtilization(): Promise<{ assetId: string; deployments: number; movements: number; lastActiveAt: string | null }[]> {
+    return req("/analytics/utilization");
   },
   // Evidence for one asset (client report photos).
   async getEvidence(assetId: string): Promise<EvidenceView[]> {

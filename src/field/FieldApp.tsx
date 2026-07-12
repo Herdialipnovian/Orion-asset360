@@ -8,7 +8,7 @@
 import React from "react";
 import { Home as HomeIcon, QrCode, User, LogOut, RefreshCw, Wifi, WifiOff, RefreshCcw } from "lucide-react";
 import type { Asset, ActivityLog } from "../types";
-import { Bell } from "lucide-react";
+import { Bell, MapPinPlus } from "lucide-react";
 import { fieldApi, getToken, apiBase, type AuthUser, type NotifItem, ApiError } from "./fieldApi";
 import { subscribe as outboxSubscribe, listCommits, syncAll, isSyncing, discardCommit, type CommitRecord } from "./outbox";
 import { ROLE_SHORT, Spinner, Toast, Brand } from "./ui";
@@ -21,6 +21,7 @@ import InstallTask from "./components/InstallTask";
 import AssignTask from "./components/AssignTask";
 import PlacementTask from "./components/PlacementTask";
 import VenueTask from "./components/VenueTask";
+import AddLocation from "./components/AddLocation";
 import Notifications from "./components/Notifications";
 import SyncCenter from "./components/SyncCenter";
 import { myInstallTask, myPlacementTasks, canAssignInstall, canDeployVenue } from "./lifecycle";
@@ -36,6 +37,7 @@ type View =
   | { t: "assign"; id: string }
   | { t: "placement"; id: string }
   | { t: "venue"; id: string }
+  | { t: "addloc" }
   | { t: "notif" };
 
 export default function FieldApp() {
@@ -286,6 +288,9 @@ export default function FieldApp() {
             {online ? (sseLive ? "Live" : "Online") : "Offline"}
             {online && sseLive && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />}
           </div>
+          <button onClick={() => push({ t: "addloc" })} aria-label="Tambah Toko/Venue" className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#1e2b45] bg-[#0f1728] text-slate-300 active:scale-95">
+            <MapPinPlus className="h-4.5 w-4.5" />
+          </button>
           <button onClick={() => push({ t: "notif" })} aria-label="Notifikasi" className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-[#1e2b45] bg-[#0f1728] text-slate-300 active:scale-95">
             <Bell className="h-4.5 w-4.5" />
             {notifUnread > 0 && (
@@ -403,6 +408,7 @@ export default function FieldApp() {
             );
           })()}
         {view.t === "notif" && <Notifications items={notifs} onBack={pop} onRead={markNotif} onReadAll={markAllNotifs} onOpen={id => { pop(); push({ t: "detail", id }); }} />}
+        {view.t === "addloc" && <AddLocation user={user} online={online} onBack={pop} onAdded={name => { setToast({ msg: `${name} ditambahkan ke master.`, tone: "success" }); pop(); }} />}
       </main>
 
       <nav className="sticky bottom-0 z-30 grid grid-cols-4 border-t border-[#141d31] bg-[#080c17]/95 backdrop-blur">

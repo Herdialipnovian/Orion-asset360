@@ -60,14 +60,17 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
   const [isSignedClient, setIsSignedClient] = React.useState<boolean>(false);
   const [signatureName, setSignatureName] = React.useState<string>("");
 
+  // Deployment-lifecycle documents only (Surat Jalan/POD/BAST) — Internal custodian assets excluded.
+  const docAssets = React.useMemo(() => assets.filter(a => a.peruntukan !== "Internal"), [assets]);
+
   // Default to the first asset once
   React.useEffect(() => {
-    if (!selectedAssetId && assets[0]) setSelectedAssetId(assets[0].id);
-  }, [assets, selectedAssetId]);
+    if (!selectedAssetId && docAssets[0]) setSelectedAssetId(docAssets[0].id);
+  }, [docAssets, selectedAssetId]);
 
   const activeAssetObj = React.useMemo(
-    () => assets.find(a => a.id === selectedAssetId) || assets[0],
-    [assets, selectedAssetId]
+    () => docAssets.find(a => a.id === selectedAssetId) || docAssets[0],
+    [docAssets, selectedAssetId]
   );
 
   // A document for step N is only "issued" once the asset has reached that stage.
@@ -132,7 +135,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                 }}
                 className="w-full bg-slate-50 border border-slate-200 p-2 text-xs rounded-lg outline-none font-medium cursor-pointer"
               >
-                {assets.map(a => (
+                {docAssets.map(a => (
                   <option key={a.id} value={a.id}>
                     [{a.id}] {a.name.slice(0, 22)} · Fase {a.currentStage}
                   </option>

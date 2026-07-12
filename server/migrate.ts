@@ -154,6 +154,7 @@ export const SEED_SETTINGS: { [k: string]: string } = {
   company_address: "Kawasan Industri Cikarang, Jawa Barat",
   company_email: "support@origin.co.id",
   depreciation_pct: "15",
+  useful_life_months: "60",
   sla_target_pct: "90",
   default_timeline_weeks: "4"
 };
@@ -257,6 +258,7 @@ export async function migrate({ seedAssets = true }: { seedAssets?: boolean } = 
       created_at timestamptz not null default now()
     );
     alter table assets add column if not exists project_id integer;
+    alter table assets add column if not exists peruntukan text not null default 'Deployment';
   `);
 
   // Role model → 4 roles (Admin / Logistik / PIC / Merchandiser); PIC & Merchandiser are client-scoped.
@@ -327,6 +329,24 @@ export async function migrate({ seedAssets = true }: { seedAssets?: boolean } = 
   if (!nrp.length) {
     await q(`update assets set current_stage=3, current_location='Gudang Utama Origin' where current_stage in (1,2)`);
     await q(`insert into settings (key, value) values ('flow_no_request_prod','done') on conflict (key) do nothing`);
+  }
+
+  // One-time: classify existing assets by peruntukan (Internal custodian vs Deployment campaign).
+  // Client assets = Deployment (default); Origin ops assets (or already-Internal deployments) = Internal.
+  const { rows: pbf } = await q(`select 1 from settings where key='asset_peruntukan_backfill'`);
+  if (!pbf.length) {
+    await q(`update assets set peruntukan='Internal'
+             where owner='Origin' and (
+               (stage_details->'deployment'->>'mode') = 'Internal'
+               or (
+                 category ~* 'laptop|komputer|infrastruktur|kantor|keamanan|hvac|pendingin|kamera|cctv|printer|server|jaringan'
+                 -- don't flip an asset that's already mid-deployment (event/distribusi)
+                 and coalesce(stage_details->'deployment'->>'mode','') not in ('Event','Distribusi')
+                 and (stage_details->'deployment'->'legs') is null
+                 and (stage_details->'deployment'->'placements') is null
+               )
+             )`);
+    await q(`insert into settings (key, value) values ('asset_peruntukan_backfill','done') on conflict (key) do nothing`);
   }
 
   // One-time: seed example client deployment-type tags (a client may run several patterns).

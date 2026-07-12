@@ -24,7 +24,11 @@ const stageBadge = (s: number) =>
     : "bg-amber-50 text-amber-700 border-amber-200";
 
 const rupiah = (v: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(v || 0);
-const emptyForm = () => ({ client: "", category: "", name: "", warna: "", merk: "Custom", type: "", serialNumber: "", fisik: "Baru", tglBeli: "", harga: "0", qty: "1", owner: "Origin", usageType: "Reusable" });
+const emptyForm = () => ({ client: "", category: "", name: "", warna: "", merk: "Custom", type: "", serialNumber: "", fisik: "Baru", tglBeli: "", harga: "0", qty: "1", owner: "Origin", usageType: "Reusable", peruntukan: "Deployment", peruntukanTouched: false });
+// Mirror of the server heuristic — Client assets are always Deployment; Origin ops categories → Internal.
+const INTERNAL_CAT_RE = /laptop|komputer|infrastruktur|kantor|keamanan|hvac|pendingin|kamera|cctv|printer|server|jaringan/i;
+const derivePeruntukan = (category: string, owner: string): "Internal" | "Deployment" =>
+  owner === "Client" ? "Deployment" : INTERNAL_CAT_RE.test(category || "") ? "Internal" : "Deployment";
 
 interface Props {
   assets: Asset[];
@@ -71,7 +75,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
       warna: a.warna || "", merk: a.specs?.brand || "", type: a.type || "",
       serialNumber: a.serialNumber || "", fisik: a.fisik || "Baru", tglBeli: a.tglBeli || "",
       harga: String(a.financials?.purchaseCost ?? 0), qty: String(a.quantity ?? 1),
-      owner: a.owner || "Origin", usageType: a.usageType || "Reusable"
+      owner: a.owner || "Origin", usageType: a.usageType || "Reusable", peruntukan: a.peruntukan || "Deployment", peruntukanTouched: true
     });
     setFormErr(null);
     setEditing(a);
@@ -90,7 +94,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
           warna: form.warna.trim(), merk: form.merk.trim(), type: form.type.trim(),
           serialNumber: form.serialNumber.trim(), fisik: form.fisik, tglBeli: form.tglBeli,
           harga: Number(form.harga) || 0, qty: Number(form.qty) || 1,
-          owner: form.owner, usageType: form.usageType
+          owner: form.owner, usageType: form.usageType, peruntukan: form.peruntukan
         }]);
         setNotice(`Aset "${form.name.trim()}" ditambahkan (Fase 3 · Gudang).`);
       } else if (editing) {
@@ -99,7 +103,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
           warna: form.warna.trim(), merk: form.merk.trim(), type: form.type.trim(),
           serialNumber: form.serialNumber.trim(), fisik: form.fisik, tglBeli: form.tglBeli,
           harga: Number(form.harga) || 0, quantity: Number(form.qty) || 1,
-          owner: form.owner, usageType: form.usageType
+          owner: form.owner, usageType: form.usageType, peruntukan: form.peruntukan
         });
         setNotice(`Aset ${editing.id} diperbarui.`);
       }
@@ -173,7 +177,8 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
           harga: Number(String(pick(r, "harga", "price") ?? "").toString().replace(/[^\d.-]/g, "")) || 0,
           qty: Number(pick(r, "qty", "jumlah", "kuantitas")) || 1,
           owner: String(pick(r, "owner", "pemilik") ?? "").trim(),
-          usageType: String(pick(r, "sifat", "usage", "reusable", "consumable") ?? "").trim()
+          usageType: String(pick(r, "sifat", "usage", "reusable", "consumable") ?? "").trim(),
+          peruntukan: String(pick(r, "peruntukan", "purpose") ?? "").trim()
         }))
         .filter(r => r.name && r.client);
       if (!rows.length) {
@@ -256,7 +261,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
           <table className="w-full text-xs whitespace-nowrap">
             <thead>
               <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-wider">
-                {["Asset ID", "Client", "Kategori", "Nama Asset", "Warna", "Merk", "Type", "Serial No.", "Fisik", "Owner", "Sifat", "Tgl Beli", "Harga", "Qty", "Fase"].map(h => (
+                {["Asset ID", "Client", "Kategori", "Nama Asset", "Warna", "Merk", "Type", "Serial No.", "Fisik", "Owner", "Sifat", "Peruntukan", "Tgl Beli", "Harga", "Qty", "Fase"].map(h => (
                   <th key={h} className="text-left font-extrabold px-3 py-3">{h}</th>
                 ))}
                 <th className="text-right font-extrabold px-3 py-3">Aksi</th>
@@ -264,7 +269,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.length === 0 ? (
-                <tr><td colSpan={16} className="px-4 py-10 text-center text-slate-400">Belum ada aset. Klik "Tambah Aset" atau "Import".</td></tr>
+                <tr><td colSpan={17} className="px-4 py-10 text-center text-slate-400">Belum ada aset. Klik "Tambah Aset" atau "Import".</td></tr>
               ) : (
                 rows.map(a => (
                   <tr key={a.id} className="hover:bg-slate-50/60 transition">
@@ -279,6 +284,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${a.fisik === "Second" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>{a.fisik || "—"}</span></td>
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${(a.owner || "Origin") === "Client" ? "bg-violet-50 text-violet-700" : "bg-slate-100 text-slate-600"}`}>{a.owner || "Origin"}</span></td>
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${(a.usageType || "Reusable") === "Consumable" ? "bg-orange-50 text-orange-700" : "bg-teal-50 text-teal-700"}`}>{a.usageType === "Consumable" ? "Consumable" : "Reusable"}</span></td>
+                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${(a.peruntukan || "Deployment") === "Internal" ? "bg-slate-800 text-white" : "bg-blue-50 text-blue-700"}`}>{a.peruntukan === "Internal" ? "Internal" : "Deployment"}</span></td>
                     <td className="px-3 py-2.5 text-slate-500">{a.tglBeli || "—"}</td>
                     <td className="px-3 py-2.5 text-slate-700 font-semibold">{rupiah(a.financials?.purchaseCost || 0)}</td>
                     <td className="px-3 py-2.5 text-slate-800 font-bold">{a.quantity}</td>
@@ -325,7 +331,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Kategori</label>
-                <input list="am-cats" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className={input} placeholder="pilih / ketik baru" />
+                <input list="am-cats" value={form.category} onChange={e => setForm({ ...form, category: e.target.value, peruntukan: form.peruntukanTouched ? form.peruntukan : derivePeruntukan(e.target.value, form.owner) })} className={input} placeholder="pilih / ketik baru" />
                 <datalist id="am-cats">{categoryOptions.map(o => <option key={o} value={o} />)}</datalist>
               </div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Warna</label><input value={form.warna} onChange={e => setForm({ ...form, warna: e.target.value })} className={input} /></div>
@@ -340,7 +346,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Owner</label>
-                <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })} className={`${input} cursor-pointer`}>
+                <select value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value, peruntukan: e.target.value === "Client" ? "Deployment" : (form.peruntukanTouched ? form.peruntukan : derivePeruntukan(form.category, e.target.value)) })} className={`${input} cursor-pointer`}>
                   <option value="Origin">Origin (aset perusahaan)</option>
                   <option value="Client">Client (milik klien)</option>
                 </select>
@@ -352,6 +358,14 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
                   <option value="Consumable">Consumable (habis pakai → disposal)</option>
                 </select>
                 <p className="text-[10px] text-slate-400">Reusable ditarik balik (Fase 9); Consumable berakhir di Disposal (Fase 10).</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Peruntukan</label>
+                <select value={form.peruntukan} disabled={form.owner === "Client"} onChange={e => setForm({ ...form, peruntukan: e.target.value, peruntukanTouched: true })} className={`${input} cursor-pointer disabled:opacity-60`}>
+                  <option value="Deployment">Deployment (event / distribusi)</option>
+                  <option value="Internal">Internal (dipegang karyawan)</option>
+                </select>
+                <p className="text-[10px] text-slate-400">Auto dari kategori, bisa diubah. Aset klien selalu Deployment. Internal → menu "Aset Internal".</p>
               </div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Tgl Beli</label><input type="date" value={form.tglBeli} onChange={e => setForm({ ...form, tglBeli: e.target.value })} className={input} /></div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Harga (IDR)</label><input type="number" min="0" value={form.harga} onChange={e => setForm({ ...form, harga: e.target.value })} className={input} /></div>

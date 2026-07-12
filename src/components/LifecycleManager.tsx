@@ -29,7 +29,8 @@ import {
   RefreshCw,
   Building,
   UserCheck,
-  Briefcase
+  Briefcase,
+  Loader2
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
 import { api, type AuthUser } from "../api";
@@ -118,6 +119,7 @@ type FieldDef = {
 const genSuratJalan = () => `SJ/ORG/${new Date().getFullYear()}/${String(Math.floor(Math.random() * 90000) + 10000)}`;
 
 // 3rd-party couriers/vendors that handle the actual delivery (logistik just pastes their tracking link).
+const BATCH_INP = "w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500";
 const COURIERS = [
   "JNE", "J&T Express", "SiCepat", "AnterAja", "Ninja Xpress", "Wahana", "Pos Indonesia",
   "ID Express", "Lion Parcel", "Shopee (SPX Express)", "Lalamove", "GoSend (Gojek)",
@@ -329,6 +331,7 @@ interface LifecycleManagerProps {
   onArriveVenue?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onShipReturn?: (assetId: string, p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
   onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
+  onBatchShip?: (p: { items: { id: string; qty: number }[]; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
   onAuditSample?: (assetId: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }) => Promise<{ ok: boolean; error?: string }>;
@@ -424,6 +427,7 @@ export default function LifecycleManager({
   onArriveVenue,
   onShipReturn,
   onArriveWarehouse,
+  onBatchShip,
   onDistribute,
   onPlaceToko,
   onAuditSample,
@@ -441,6 +445,16 @@ export default function LifecycleManager({
   const [isNewAssetModalOpen, setIsNewAssetModalOpen] = React.useState(false);
   // Detail modal tracks the asset by ID so it always reflects the freshest state after a transition
   const [detailAssetId, setDetailAssetId] = React.useState<string | null>(null);
+
+  // Consolidated dispatch ("Kirim Bersama"): select many Gudang (Fase 3) assets → one Surat Jalan.
+  const [batchMode, setBatchMode] = React.useState(false);
+  const [batchSel, setBatchSel] = React.useState<string[]>([]);
+  const [batchOpen, setBatchOpen] = React.useState(false);
+  const [batchQty, setBatchQty] = React.useState<Record<string, string>>({});
+  const [batchForm, setBatchForm] = React.useState({ suratJalanNo: "", driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+  const [batchBusy, setBatchBusy] = React.useState(false);
+  const [batchError, setBatchError] = React.useState<string | null>(null);
+  const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
 
   // Transition gate state
   const [transitionTarget, setTransitionTarget] = React.useState<number | null>(null);
@@ -726,6 +740,43 @@ export default function LifecycleManager({
     const res = await onArriveWarehouse(detailAsset.id);
     setArriveBusy(false);
     if (!res.ok) setArriveError(res.error || "Gagal mengonfirmasi kedatangan di gudang.");
+  };
+
+  // ── Consolidated dispatch ("Kirim Bersama") — many Gudang assets → one Surat Jalan ──
+  const canBatchShip = !user || user.role === "Admin" || user.role === "Logistik";
+  const toggleBatchMode = () => { setBatchMode(m => !m); setBatchSel([]); };
+  const toggleBatchSel = (id: string) => setBatchSel(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]));
+  const openBatch = () => {
+    const q: Record<string, string> = {};
+    batchSel.forEach(id => { const a = assets.find(x => x.id === id); q[id] = String(a?.quantity ?? 1); });
+    setBatchQty(q);
+    setBatchForm({ suratJalanNo: genSuratJalan(), driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+    void loadDirectory(detailAsset?.client);
+    setBatchError(null); setBatchOpen(true);
+  };
+  const submitBatch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onBatchShip) return;
+    if (!batchForm.area.trim()) return setBatchError("Tujuan pengiriman (area) wajib diisi.");
+    if (!batchForm.driverName.trim()) return setBatchError("Nama driver wajib diisi.");
+    if (batchForm.trackingUrl && !/^https?:\/\//i.test(batchForm.trackingUrl.trim())) return setBatchError("Link tracking harus diawali http:// atau https://.");
+    const items = batchSel.map(id => ({ id, qty: Math.floor(Number(batchQty[id])) }));
+    for (const it of items) {
+      const a = assets.find(x => x.id === it.id);
+      if (!(Number.isInteger(it.qty) && it.qty > 0 && it.qty <= (a?.quantity || 0))) return setBatchError(`Qty tidak valid untuk ${a?.name || it.id} (maks ${a?.quantity || 0}).`);
+    }
+    setBatchBusy(true); setBatchError(null);
+    const res = await onBatchShip({
+      items, suratJalanNo: batchForm.suratJalanNo || undefined, driverName: batchForm.driverName.trim(),
+      vehiclePlate: batchForm.vehiclePlate.trim(), vendorShipping: batchForm.vendorShipping.trim(), departureTime: batchForm.departureTime.trim(),
+      area: batchForm.area.trim(), picPenerima: batchForm.picPenerima.trim(),
+      courier: batchForm.courier || undefined, trackingUrl: batchForm.trackingUrl.trim() || undefined, trackingNo: batchForm.trackingNo.trim() || undefined, eta: batchForm.eta.trim() || undefined,
+    });
+    setBatchBusy(false);
+    if (!res.ok) return setBatchError(res.error || "Gagal mengirim bersama.");
+    const rows = items.map(it => ({ id: it.id, name: assets.find(x => x.id === it.id)?.name || it.id, qty: it.qty }));
+    setBatchPrint({ suratJalanNo: res.suratJalanNo || batchForm.suratJalanNo, area: batchForm.area.trim(), picPenerima: batchForm.picPenerima.trim(), driverName: batchForm.driverName.trim(), vehiclePlate: batchForm.vehiclePlate.trim(), rows });
+    setBatchOpen(false); setBatchMode(false); setBatchSel([]); setBatchQty({});
   };
 
   const [newForm, setNewForm] = React.useState({
@@ -1378,8 +1429,22 @@ export default function LifecycleManager({
           </div>
 
           {/* Aset ditambah di menu Master Data (lahir di Gudang/Fase 3) — bukan lagi lewat wizard di sini. */}
+          {canBatchShip && (
+            <button
+              onClick={toggleBatchMode}
+              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg border transition ${batchMode ? "bg-slate-800 text-white border-slate-800 hover:bg-slate-900" : "bg-white text-blue-700 border-blue-300 hover:bg-blue-50"}`}
+              title="Pilih beberapa aset di Gudang untuk dikirim bersama dalam satu Surat Jalan"
+            >
+              <Truck className="h-3.5 w-3.5" /> {batchMode ? "Batal Kirim Bersama" : "Kirim Bersama"}
+            </button>
+          )}
         </div>
       </div>
+      {batchMode && (
+        <div className="flex items-center gap-2 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 font-semibold">
+          <Truck className="h-3.5 w-3.5 shrink-0" /> Mode Kirim Bersama — centang aset di <strong>Gudang (Fase 3)</strong> yang berangkat dengan satu kendaraan/driver ke satu tujuan.
+        </div>
+      )}
 
       {/* Asset grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1390,15 +1455,20 @@ export default function LifecycleManager({
         ) : (
           filteredAssetsList.map(asset => {
             const IconComp = STAGE_ICONS[asset.currentStage] || ClipboardList;
+            const batchable = batchMode && asset.currentStage === 3;
+            const picked = batchSel.includes(asset.id);
             return (
               <div
                 key={asset.id}
-                onClick={() => setDetailAssetId(asset.id)}
-                className="bg-white rounded-xl border border-slate-100 hover:border-slate-300 transition-all hover:shadow-md cursor-pointer flex flex-col justify-between overflow-hidden"
+                onClick={() => { if (batchMode) { if (batchable) toggleBatchSel(asset.id); } else setDetailAssetId(asset.id); }}
+                className={`bg-white rounded-xl border transition-all flex flex-col justify-between overflow-hidden ${batchMode && !batchable ? "border-slate-100 opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md"} ${picked ? "border-blue-500 ring-2 ring-blue-500" : "border-slate-100 hover:border-slate-300"}`}
               >
                 <div className="p-5 border-b border-slate-50 space-y-2">
                   <div className="flex justify-between items-start gap-2">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">{asset.category}</span>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider flex items-center gap-1.5">
+                      {batchable && <span className={`inline-flex h-4 w-4 items-center justify-center rounded border ${picked ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-300"}`}>{picked && <Check className="h-3 w-3" />}</span>}
+                      {asset.category}
+                    </span>
                     <span className="font-mono text-[10px] text-blue-600 font-extrabold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/30">
                       {asset.id}
                     </span>
@@ -2421,6 +2491,121 @@ export default function LifecycleManager({
                 <button type="submit" disabled={returnBusy} className="bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />Kirim Kembali</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Kirim Bersama — floating action bar */}
+      {batchMode && batchSel.length > 0 && !batchOpen && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white rounded-full shadow-2xl pl-5 pr-2 py-2 flex items-center gap-4">
+          <span className="text-xs font-bold">{batchSel.length} aset dipilih</span>
+          <button onClick={openBatch} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-full transition"><Truck className="h-3.5 w-3.5" /> Kirim Bersama</button>
+        </div>
+      )}
+
+      {/* MODAL: PENGIRIMAN GABUNGAN — satu Surat Jalan untuk banyak aset */}
+      {batchOpen && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block">Pengiriman · Kirim Bersama</span>
+                <h3 className="text-base font-bold text-slate-950">Satu Surat Jalan untuk {batchSel.length} Aset</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">Satu kendaraan/driver menuju satu tujuan.</p>
+              </div>
+              <button onClick={() => setBatchOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <form onSubmit={submitBatch} className="p-5 space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Aset &amp; Qty Kirim</label>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {batchSel.map(id => { const a = assets.find(x => x.id === id); const max = a?.quantity || 1; return (
+                    <div key={id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[11px] font-bold text-slate-800 truncate">{a?.name || id}</span>
+                        <span className="block text-[9px] text-slate-400 font-mono">{id} · stok {max}</span>
+                      </span>
+                      <input type="number" min={1} max={max} value={batchQty[id] ?? ""} onChange={e => setBatchQty(q => ({ ...q, [id]: e.target.value }))} className="w-16 bg-white border border-slate-200 px-2 py-1 rounded-md text-xs text-right outline-none focus:ring-1 focus:ring-blue-500" />
+                      <button type="button" onClick={() => { toggleBatchSel(id); setBatchQty(q => { const n = { ...q }; delete n[id]; return n; }); }} className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ); })}
+                </div>
+              </div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Nomor Surat Jalan</label>
+                <div className="flex gap-2">
+                  <input value={batchForm.suratJalanNo} readOnly className="flex-1 bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg font-mono text-slate-700 text-xs" />
+                  <button type="button" onClick={() => setBatchForm(f => ({ ...f, suratJalanNo: genSuratJalan() }))} className="px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /></button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama Driver <span className="text-rose-500">*</span></label><input value={batchForm.driverName} onChange={e => setBatchForm(f => ({ ...f, driverName: e.target.value }))} className={BATCH_INP} placeholder="contoh: Budi" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Plat Kendaraan</label><input value={batchForm.vehiclePlate} onChange={e => setBatchForm(f => ({ ...f, vehiclePlate: e.target.value }))} className={BATCH_INP} placeholder="B 1234 XYZ" /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Vendor Logistik</label><input value={batchForm.vendorShipping} onChange={e => setBatchForm(f => ({ ...f, vendorShipping: e.target.value }))} className={BATCH_INP} placeholder="contoh: JNE Trucking" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Waktu Berangkat</label><input type="time" value={batchForm.departureTime} onChange={e => setBatchForm(f => ({ ...f, departureTime: e.target.value }))} className={BATCH_INP} /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Tujuan (Area) <span className="text-rose-500">*</span></label>
+                  <select value={batchForm.area} onChange={e => setBatchForm(f => ({ ...f, area: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
+                    <option value="">— pilih area —</option>
+                    {(batchForm.area && !areaOptions.includes(batchForm.area) ? [batchForm.area, ...areaOptions] : areaOptions).map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                  {areaOptions.length === 0 && <p className="text-[10px] text-amber-600">Belum ada area. Tambahkan di menu Organisasi.</p>}
+                </div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">PIC Penerima</label><input value={batchForm.picPenerima} onChange={e => setBatchForm(f => ({ ...f, picPenerima: e.target.value }))} className={BATCH_INP} placeholder="nama penerima" /></div>
+              </div>
+              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-2.5">
+                <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Tracking (opsional)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5"><label className="font-bold text-slate-700">Kurir / Vendor</label>
+                    <select value={batchForm.courier} onChange={e => setBatchForm(f => ({ ...f, courier: e.target.value }))} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                      <option value="">— pilih kurir —</option>{COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5"><label className="font-bold text-slate-700">ETA</label><input value={batchForm.eta} onChange={e => setBatchForm(f => ({ ...f, eta: e.target.value }))} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: 2 hari" /></div>
+                </div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Link Tracking</label><input value={batchForm.trackingUrl} onChange={e => setBatchForm(f => ({ ...f, trackingUrl: e.target.value }))} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://…" /></div>
+              </div>
+              {batchError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 shrink-0" /><span>{batchError}</span></div>}
+              <div className="pt-2 border-t border-slate-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setBatchOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg">Batal</button>
+                <button type="submit" disabled={batchBusy || batchSel.length === 0} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg flex items-center gap-1.5">{batchBusy && <Loader2 className="h-4 w-4 animate-spin" />}Terbitkan Surat Jalan</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SURAT JALAN GABUNGAN — printable (report-print-host neutralizes the fixed wrapper for pagination) */}
+      {batchPrint && (
+        <div className="report-print-host fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[70] overflow-y-auto">
+          <div className="report-print-card bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="no-print p-4 border-b border-slate-100 flex justify-between items-center">
+              <p className="text-sm font-bold text-emerald-700 flex items-center gap-1.5"><Check className="h-4 w-4" /> Surat Jalan {batchPrint.suratJalanNo} · {batchPrint.rows.length} aset</p>
+              <div className="flex gap-2">
+                <button onClick={() => window.print()} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-2 rounded-lg"><FileText className="h-3.5 w-3.5" /> Cetak</button>
+                <button onClick={() => setBatchPrint(null)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-lg">Tutup</button>
+              </div>
+            </div>
+            <div id="printable-doc" className="p-8 text-slate-800">
+              <div className="flex justify-between items-start border-b-2 border-slate-800 pb-3 mb-4">
+                <div><h1 className="text-lg font-extrabold">{settings?.company_name || "PT Origin Connect"}</h1><p className="text-[11px] text-slate-500">{settings?.company_address || ""}</p></div>
+                <div className="text-right"><h2 className="text-base font-extrabold tracking-widest">SURAT JALAN</h2><p className="text-[11px] font-mono">{batchPrint.suratJalanNo}</p></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-[11px] mb-4">
+                <div>Tujuan: <strong>{batchPrint.area}</strong>{batchPrint.picPenerima ? <> · PIC: <strong>{batchPrint.picPenerima}</strong></> : null}</div>
+                <div className="text-right">Driver: <strong>{batchPrint.driverName}</strong>{batchPrint.vehiclePlate ? <> · {batchPrint.vehiclePlate}</> : null}</div>
+              </div>
+              <table className="w-full text-[11px] border-collapse">
+                <thead><tr className="bg-slate-100"><th className="border border-slate-300 px-2 py-1 text-left">No</th><th className="border border-slate-300 px-2 py-1 text-left">ID Aset</th><th className="border border-slate-300 px-2 py-1 text-left">Nama Aset</th><th className="border border-slate-300 px-2 py-1 text-right">Qty</th></tr></thead>
+                <tbody>{batchPrint.rows.map((r, i) => (<tr key={r.id}><td className="border border-slate-300 px-2 py-1">{i + 1}</td><td className="border border-slate-300 px-2 py-1 font-mono">{r.id}</td><td className="border border-slate-300 px-2 py-1">{r.name}</td><td className="border border-slate-300 px-2 py-1 text-right">{r.qty}</td></tr>))}</tbody>
+              </table>
+              <div className="grid grid-cols-2 gap-8 mt-12 text-[11px] text-center">
+                <div>Pengirim / Gudang<div className="mt-12 border-t border-slate-400 pt-1">(_______________)</div></div>
+                <div>Penerima{batchPrint.picPenerima ? ` (${batchPrint.picPenerima})` : ""}<div className="mt-12 border-t border-slate-400 pt-1">(_______________)</div></div>
+              </div>
+            </div>
           </div>
         </div>
       )}

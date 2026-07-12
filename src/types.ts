@@ -107,6 +107,13 @@ export interface Asset {
       departureTime: string;
       // Multi-destination delivery: split the shipment across 2+ drop points.
       destinations?: { area: string; picPenerima: string; qty: number }[];
+      // Consolidated dispatch: many assets on ONE Surat Jalan / driver / destination share this id
+      // (= the shared suratJalanNo). Optional courier tracking for the whole load.
+      batchId?: string;
+      courier?: string;
+      trackingUrl?: string;
+      trackingNo?: string;
+      eta?: string;
     };
     transit: {
       currentLat: number;

@@ -169,6 +169,14 @@ export const api = {
       body: JSON.stringify({ updatedDetails, meta })
     });
   },
+  // Consolidated dispatch: many assets → one Surat Jalan / driver / destination (qty per asset).
+  batchShip(p: {
+    items: { id: string; qty: number }[];
+    suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string;
+    area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string;
+  }): Promise<{ ok: boolean; suratJalanNo: string; count: number; assets: Asset[] }> {
+    return req(`/assets/batch-ship`, { method: "POST", body: JSON.stringify(p) });
+  },
   reset(): Promise<{ ok: boolean; assets: Asset[]; logs: ActivityLog[] }> {
     return req("/reset", { method: "POST" });
   },

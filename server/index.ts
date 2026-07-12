@@ -648,6 +648,116 @@ app.post(
   })
 );
 
+// --- Consolidated dispatch (Fase 4): ONE Surat Jalan / driver / destination for MANY assets ---
+// items:[{id, qty}]. Each item ships full (whole record → Fase 4) or partial (split a child at
+// Fase 4, remainder stays in Gudang) — same logic as /ship — but all share one suratJalanNo +
+// batchId + driver/vehicle/destination. Atomic: the whole batch commits together or not at all.
+app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res) => {
+  const allowed = STAGE_ROLE[4] || [];
+  if (req.user!.role !== "Admin" && !allowed.includes(req.user!.role)) {
+    return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang menerbitkan Surat Jalan.` });
+  }
+  const b = req.body || {};
+  const items: { id: string; qty: number }[] = Array.isArray(b.items) ? b.items : [];
+  if (!items.length) return res.status(400).json({ error: "Pilih minimal 1 aset untuk dikirim." });
+  const area = String(b.area || "").trim();
+  const picPenerima = String(b.picPenerima || "").trim();
+  const driverName = String(b.driverName || "").trim();
+  const vehiclePlate = String(b.vehiclePlate || "").trim();
+  if (!area) return res.status(400).json({ error: "Tujuan pengiriman (area) wajib diisi." });
+  if (!driverName) return res.status(400).json({ error: "Nama driver wajib diisi." });
+  const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
+  if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
+  const suratJalanNo = String(b.suratJalanNo || "").trim() || `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
+
+  // Validate every item up front (all-or-nothing) — must be a real, non-Internal Gudang (Fase 3) asset.
+  const seen = new Set<string>();
+  const plan: { asset: Asset; qty: number }[] = [];
+  for (const it of items) {
+    if (!it || typeof it !== "object" || typeof it.id !== "string" || !it.id.trim()) return res.status(400).json({ error: "Setiap item pengiriman harus menyertakan id aset yang valid." });
+    const qty = Math.floor(Number(it.qty));
+    if (seen.has(it.id)) return res.status(400).json({ error: `Aset ${it.id} terpilih lebih dari sekali.` });
+    seen.add(it.id);
+    const asset = await getAsset(it.id);
+    if (!asset) return res.status(404).json({ error: `Aset ${it.id} tidak ditemukan.` });
+    if (asset.peruntukan === "Internal") return res.status(422).json({ error: `Aset ${it.id} berjenis Internal — tidak masuk alur pengiriman.` });
+    if (asset.currentStage !== 3) return res.status(422).json({ code: "illegal_transition", error: `Surat Jalan hanya dari Gudang (Fase 3). Aset ${it.id} di Fase ${asset.currentStage}.` });
+    if (!Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: `Qty kirim untuk ${it.id} harus bilangan bulat > 0.` });
+    if (qty > asset.quantity) return res.status(422).json({ code: "qty_exceeds", error: `Qty kirim untuk ${it.id} (${qty}) melebihi stok gudang (${asset.quantity}).` });
+    plan.push({ asset, qty });
+  }
+  // Deterministic lock order (by asset id) so two overlapping batches can't deadlock on their row locks.
+  plan.sort((x, y) => (x.asset.id < y.asset.id ? -1 : x.asset.id > y.asset.id ? 1 : 0));
+
+  const now = new Date().toISOString();
+  const ts = Date.now();
+  const operator = req.user!.name;
+  const mkShipping = (qty: number) => ({
+    suratJalanNo, batchId: suratJalanNo, driverName, vehiclePlate,
+    vendorShipping: String(b.vendorShipping || "").trim(),
+    departureTime: String(b.departureTime || "").trim(),
+    destinations: [{ area, picPenerima, qty }],
+    courier: b.courier ? String(b.courier).trim() : undefined,
+    trackingUrl: trackingUrl || undefined,
+    trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined,
+    eta: b.eta ? String(b.eta).trim() : undefined,
+  });
+
+  // One transaction for the whole batch (row-lock + re-validate each asset inside the lock).
+  // A re-validation failure THROWS → the whole tx rolls back (no partial batch), mapped to its HTTP code.
+  const logs: ActivityLog[] = [];
+  const affected: string[] = [];
+  try {
+   await tx(async c => {
+    const exec = (t: string, p?: any[]) => c.query(t, p);
+    for (const { asset, qty } of plan) {
+      const { rows } = await exec(`select current_stage, quantity from assets where id=$1 for update`, [asset.id]);
+      if (!rows.length || rows[0].current_stage !== 3) throw Object.assign(new Error(`Aset ${asset.id} tidak lagi di Gudang.`), { http: 422 });
+      const stock = Number(rows[0].quantity);
+      if (qty > stock) throw Object.assign(new Error(`Qty kirim untuk ${asset.id} (${qty}) melebihi stok (${stock}).`), { http: 422 });
+      const shipping = mkShipping(qty);
+      const location = computeLocation(4, undefined, asset.client, asset.currentLocation);
+      if (qty === stock) {
+        // whole record → Fase 4
+        await exec(`update assets set current_stage=4, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`,
+          [asset.id, location, JSON.stringify({ ...asset.stageDetails, shipping })]);
+        logs.push({ id: `LOG-SHIP-${ts}-${asset.id}`, timestamp: now, assetId: asset.id, assetName: asset.name, stage: 4, action: `Surat Jalan ${suratJalanNo}: ${qty} unit dikirim ke ${area} (kirim bersama).`, operator, type: "success" });
+        affected.push(asset.id);
+      } else {
+        // partial → split a child at Fase 4, reduce the remainder in Gudang
+        // Divide by the SAME (pre-tx) snapshot the financials came from — NOT the freshly-locked
+        // stock — so a concurrent ship can't inflate booked value (mirrors the single-ship endpoint).
+        const perUnit = (asset.financials?.purchaseCost || 0) / (asset.quantity || 1);
+        const perDisposal = (asset.financials?.disposalValue || 0) / (asset.quantity || 1);
+        const remaining = stock - qty;
+        const cid = await genSplitId(asset.id, exec);
+        const child: Asset = {
+          ...asset, id: cid, quantity: qty, currentStage: 4, currentLocation: location,
+          qrcode: `ASETIFY-${cid}`, createdAt: now, updatedAt: now,
+          specs: { ...(asset.specs || {}), splitFrom: asset.id },
+          financials: { ...(asset.financials || { purchaseCost: 0, maintenanceCost: 0, disposalValue: 0 }), purchaseCost: Math.round(perUnit * qty), disposalValue: Math.round(perDisposal * qty) },
+          stageDetails: { ...asset.stageDetails, shipping },
+        };
+        await insertAsset(child, exec);
+        await exec(`update assets set quantity=$2, financials=$3::jsonb, updated_at=now() where id=$1`,
+          [asset.id, remaining, JSON.stringify({ ...(asset.financials || {}), purchaseCost: Math.round(perUnit * remaining), disposalValue: Math.round(perDisposal * remaining) })]);
+        logs.push({ id: `LOG-SHIP-${ts}-${cid}`, timestamp: now, assetId: cid, assetName: asset.name, stage: 4, action: `Surat Jalan ${suratJalanNo}: ${qty} unit dikirim ke ${area} (dipisah dari ${asset.id}, kirim bersama).`, operator, type: "success" });
+        logs.push({ id: `LOG-SPLIT-${ts}-${asset.id}-${cid}`, timestamp: now, assetId: asset.id, assetName: asset.name, stage: 3, action: `${qty} unit dikirim via ${cid}; sisa ${remaining} unit tetap di Gudang.`, operator, type: "info" });
+        affected.push(cid);
+      }
+    }
+   });
+  } catch (e: any) {
+    if (e && e.http) return res.status(e.http).json({ error: e.message });
+    throw e;
+  }
+
+  for (const l of logs) await insertLog(l);
+  for (const id of affected) assetChanged(id);
+  const shipped = await Promise.all(affected.map(id => getAsset(id)));
+  res.json({ ok: true, suratJalanNo, count: affected.length, assets: shipped });
+}));
+
 // --- PIC assigns / re-assigns install portions (Fase 6, in-place) ---
 // Single source of truth for creating AND editing assignments. Merges by merchandiserId:
 // existing done/partial rows keep their progress; new/edited rows are validated. Under-

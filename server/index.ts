@@ -1339,11 +1339,12 @@ app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logi
   const id = req.params.id;
   const pre = await getAsset(id);
   if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  // Client-scope FIRST, so state-dependent guards below can't leak an out-of-client asset's stage/mode.
+  if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
   if (pre.currentStage < 3 || pre.currentStage > 6) return res.status(422).json({ error: "Setup/relokasi venue hanya dari Fase 3–6." });
   if (pre.peruntukan === "Internal") return res.status(422).json({ error: "Aset Internal tidak masuk alur deployment (event/distribusi)." });
-  // Client-scoped roles can only touch their own client's asset (mirrors /place).
-  if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
-  // Mode invariant: don't corrupt a Distribusi asset into a hybrid.
+  // Mode invariant: don't corrupt a Distribusi asset into a hybrid. (Transit invariants are
+  // re-validated authoritatively inside the row lock below — a pre-read check would be TOCTOU-racy.)
   const preDep: any = (pre.stageDetails as any)?.deployment || {};
   if (preDep.mode && preDep.mode !== "Event") return res.status(422).json({ error: "Aset bukan mode Event." });
   if (Array.isArray(preDep.placements) && preDep.placements.length) return res.status(422).json({ error: "Aset sudah mode Distribusi (ada placement)." });
@@ -1353,26 +1354,42 @@ app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logi
   const { rows: lr } = await q(`select id, name, area from locations where id=$1`, [locId]);
   if (!lr[0]) return res.status(400).json({ error: "Venue tidak ditemukan." });
   const loc = lr[0];
+  const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
+  if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
+  const shipping: any = (b.courier || trackingUrl || b.trackingNo || b.eta)
+    ? { courier: b.courier ? String(b.courier).trim() : undefined, trackingUrl: trackingUrl || undefined, trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined, eta: b.eta ? String(b.eta).trim() : undefined }
+    : undefined;
   const now = new Date().toISOString().slice(0, 10);
   let projectId: number | null = null, projectName: string | null = null;
   if (b.projectId != null) {
     const { rows: pr } = await q(`select id, name from projects where id=$1`, [Number(b.projectId)]);
     if (pr[0]) { projectId = pr[0].id; projectName = pr[0].name; }
   }
-  // Row-lock so concurrent relocations can't drop a leg / collide on seq.
+  // Row-lock so concurrent relocations can't drop a leg / collide on seq — AND so the transit
+  // invariant ("at most one shipment in transit") is validated against the locked row, not a stale pre-read.
   const result = await tx(async c => {
-    const { rows } = await c.query(`select stage_details from assets where id=$1 for update`, [id]);
+    const { rows } = await c.query(`select stage_details, current_stage from assets where id=$1 for update`, [id]);
     if (!rows.length) return { http: 404, body: { error: "Aset tidak ditemukan." } };
     const sd: any = rows[0].stage_details || {};
     const dep: any = { ...(sd.deployment || {}) };
-    const legs: any[] = Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : [];
+    // Fase 3–5 = starting a NEW roadshow → reset legs (never append to a prior cycle's stale legs,
+    // which would also deadlock a fresh deploy behind a stranded transit leg). Fase 6 = relocating.
+    const fresh = rows[0].current_stage !== 6;
+    let legs: any[] = fresh ? [] : (Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : []);
+    if (fresh) {
+      delete dep.returnShipment;
+    } else {
+      if (legs.some(l => l.status === "transit")) return { http: 422, body: { error: "Masih ada kiriman venue dalam perjalanan — konfirmasi tiba dulu." } };
+      if (dep.returnShipment?.status === "transit") return { http: 422, body: { error: "Aset sedang dikirim balik ke gudang." } };
+    }
     for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
     const seq = legs.reduce((m, l) => Math.max(m, l.seq || 0), 0) + 1;
-    legs.push({ locationId: loc.id, venue: loc.name, area: loc.area || undefined, pic: b.pic ? String(b.pic).trim() : undefined, seq, status: "active", setupDate: b.setupDate || now, signature: b.signatureBase64 || undefined, note: b.note ? String(b.note).trim() : undefined });
+    // Ship-to-venue: the new leg starts as `transit` (in delivery); arrive-venue flips it to active.
+    legs.push({ locationId: loc.id, venue: loc.name, area: loc.area || undefined, pic: b.pic ? String(b.pic).trim() : undefined, seq, status: "transit", setupDate: b.setupDate || undefined, signature: b.signatureBase64 || undefined, note: b.note ? String(b.note).trim() : undefined, shipping: shipping ? { ...shipping, shippedAt: now } : undefined });
     dep.legs = legs; dep.currentLegSeq = seq; dep.mode = "Event";
     if (projectId != null) { dep.projectId = projectId; dep.projectName = projectName ?? undefined; }
     const details = { ...sd, deployment: dep };
-    await c.query(`update assets set current_stage=6, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [id, `Venue: ${loc.name}${loc.area ? ` (${loc.area})` : ""}`, JSON.stringify(details)]);
+    await c.query(`update assets set current_stage=6, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [id, `Dalam pengiriman → Venue: ${loc.name}${loc.area ? ` (${loc.area})` : ""}`, JSON.stringify(details)]);
     return { ok: true, seq, venue: loc.name };
   });
   if ((result as any).http) return res.status((result as any).http).json((result as any).body);
@@ -1384,10 +1401,115 @@ app.post("/api/assets/:id/deploy-venue", requireAuth, requireRole("Admin", "Logi
     assetId: id,
     assetName: pre.name,
     stage: 6,
-    action: r.seq > 1 ? `Relokasi ke venue ${r.venue} (leg ${r.seq})` : `Setup di venue ${r.venue}`,
+    action: r.seq > 1 ? `Kirim relokasi ke venue ${r.venue} (leg ${r.seq})` : `Kirim ke venue ${r.venue} (leg 1)`,
     operator: req.user!.name,
-    type: "success"
+    type: "info"
   });
+  assetChanged(id);
+  res.json({ asset: await getAsset(id) });
+}));
+
+// Confirm the in-transit venue shipment ARRIVED — flip the transit leg → active (Kirim→Tiba step 2).
+// PIC (client-scoped, receiving venue) + Logistik + Admin.
+app.post("/api/assets/:id/arrive-venue", requireAuth, requireRole("Admin", "Logistik", "PIC"), wrap(async (req: AuthedReq, res) => {
+  const id = req.params.id;
+  const pre = await getAsset(id);
+  if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
+  // Stage guard: a venue shipment only exists while the asset is Fase 6 — blocks using a transit
+  // marker stranded on an asset that was moved out of Fase 6 to force an illegal transition back.
+  if (pre.currentStage !== 6) return res.status(422).json({ error: "Konfirmasi tiba hanya untuk aset yang sedang dikirim (Fase 6)." });
+  const now = new Date().toISOString().slice(0, 10);
+  const result = await tx(async c => {
+    const { rows } = await c.query(`select stage_details, current_stage from assets where id=$1 for update`, [id]);
+    if (!rows.length) return { http: 404, body: { error: "Aset tidak ditemukan." } };
+    if (rows[0].current_stage !== 6) return { http: 422, body: { error: "Aset tidak lagi di fase pengiriman." } };
+    const sd: any = rows[0].stage_details || {};
+    const dep: any = { ...(sd.deployment || {}) };
+    const legs: any[] = Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : [];
+    const leg = legs.find(l => l.status === "transit");
+    if (!leg) return { http: 422, body: { error: "Tidak ada kiriman venue yang sedang dalam perjalanan." } };
+    leg.status = "active"; leg.arrivedAt = now; if (!leg.setupDate) leg.setupDate = now;
+    dep.legs = legs; dep.currentLegSeq = leg.seq;
+    const details = { ...sd, deployment: dep };
+    await c.query(`update assets set current_stage=6, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [id, `Venue: ${leg.venue}${leg.area ? ` (${leg.area})` : ""}`, JSON.stringify(details)]);
+    return { ok: true, venue: leg.venue, seq: leg.seq };
+  });
+  if ((result as any).http) return res.status((result as any).http).json((result as any).body);
+  const r = result as any;
+  await insertLog({ id: `LOG-VENUE-ARRIVE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: id, assetName: pre.name, stage: 6, action: `Tiba & aktif di venue ${r.venue} (leg ${r.seq})`, operator: req.user!.name, type: "success" });
+  assetChanged(id);
+  res.json({ asset: await getAsset(id) });
+}));
+
+// End of roadshow: ship the asset back to the warehouse (venue → Gudang), tracked. Stays Fase 6, in transit.
+// Admin/Logistik/PIC (whoever tears down the last venue arranges the courier).
+app.post("/api/assets/:id/ship-return", requireAuth, requireRole("Admin", "Logistik", "PIC"), wrap(async (req: AuthedReq, res) => {
+  const id = req.params.id;
+  const pre = await getAsset(id);
+  if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  // Client-scope FIRST (avoid leaking an out-of-client asset's stage/mode via the guards below).
+  if (req.user!.role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
+  if (pre.currentStage !== 6) return res.status(422).json({ error: "Pengiriman balik ke gudang hanya dari Fase 6 (deployed)." });
+  const preDep: any = (pre.stageDetails as any)?.deployment || {};
+  if (preDep.mode !== "Event") return res.status(422).json({ error: "Hanya aset mode Event yang dikirim balik dari venue." });
+  // (transit invariants re-validated authoritatively inside the row lock below)
+  const b = req.body || {};
+  const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
+  if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
+  const now = new Date().toISOString().slice(0, 10);
+  const result = await tx(async c => {
+    const { rows } = await c.query(`select stage_details, current_stage from assets where id=$1 for update`, [id]);
+    if (!rows.length) return { http: 404, body: { error: "Aset tidak ditemukan." } };
+    if (rows[0].current_stage !== 6) return { http: 422, body: { error: "Aset tidak lagi di Fase 6." } };
+    const sd: any = rows[0].stage_details || {};
+    const dep: any = { ...(sd.deployment || {}) };
+    const legs: any[] = Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : [];
+    if (legs.some(l => l.status === "transit")) return { http: 422, body: { error: "Masih ada kiriman venue dalam perjalanan — konfirmasi tiba dulu." } };
+    if (dep.returnShipment?.status === "transit") return { http: 422, body: { error: "Aset sudah dalam pengiriman balik ke gudang." } };
+    for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
+    dep.legs = legs;
+    dep.returnShipment = { courier: b.courier ? String(b.courier).trim() : undefined, trackingUrl: trackingUrl || undefined, trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined, eta: b.eta ? String(b.eta).trim() : undefined, shippedAt: now, status: "transit" };
+    const details = { ...sd, deployment: dep };
+    await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [id, `Dalam pengiriman → Gudang`, JSON.stringify(details)]);
+    return { ok: true };
+  });
+  if ((result as any).http) return res.status((result as any).http).json((result as any).body);
+  await insertLog({ id: `LOG-RETURN-SHIP-${Date.now()}`, timestamp: new Date().toISOString(), assetId: id, assetName: pre.name, stage: 6, action: `Kirim balik ke gudang (roadshow selesai)`, operator: req.user!.name, type: "info" });
+  assetChanged(id);
+  res.json({ asset: await getAsset(id) });
+}));
+
+// Confirm the return shipment ARRIVED at the warehouse: asset drops back to Fase 3 (Gudang) and the
+// Event deployment (legs/mode) is cleared so it's a clean, redeployable warehouse asset. Admin/Logistik only.
+app.post("/api/assets/:id/arrive-warehouse", requireAuth, requireRole("Admin", "Logistik"), wrap(async (req: AuthedReq, res) => {
+  const id = req.params.id;
+  const pre = await getAsset(id);
+  if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
+  // A return shipment only exists while the asset is Fase 6 (in transit back) — stage guard blocks
+  // using a stranded returnShipment marker to force an illegal jump to Fase 3 from elsewhere.
+  if (pre.currentStage !== 6) return res.status(422).json({ error: "Konfirmasi tiba di gudang hanya untuk aset yang sedang dikirim balik (Fase 6)." });
+  const preDep: any = (pre.stageDetails as any)?.deployment || {};
+  if (preDep.returnShipment?.status !== "transit") return res.status(422).json({ error: "Tidak ada pengiriman balik ke gudang yang sedang berjalan." });
+  const b = req.body || {};
+  const loc = b.warehouse ? String(b.warehouse).trim() : "Gudang Utama Origin";
+  const now = new Date().toISOString().slice(0, 10);
+  const result = await tx(async c => {
+    const { rows } = await c.query(`select stage_details, current_stage from assets where id=$1 for update`, [id]);
+    if (!rows.length) return { http: 404, body: { error: "Aset tidak ditemukan." } };
+    if (rows[0].current_stage !== 6) return { http: 422, body: { error: "Aset tidak lagi di fase pengiriman." } };
+    const sd: any = rows[0].stage_details || {};
+    const dep: any = { ...(sd.deployment || {}) };
+    if (dep.returnShipment?.status !== "transit") return { http: 422, body: { error: "Tidak ada pengiriman balik yang berjalan." } };
+    const ret = { ...(dep.returnShipment || {}), status: "done", arrivedAt: now };
+    // Roadshow over → clear the event deployment; keep projectId so the asset stays linked to its campaign.
+    const cleared: any = { projectId: dep.projectId, projectName: dep.projectName, returnShipment: ret };
+    const details = { ...sd, deployment: cleared };
+    await c.query(`update assets set current_stage=3, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [id, loc, JSON.stringify(details)]);
+    return { ok: true };
+  });
+  if ((result as any).http) return res.status((result as any).http).json((result as any).body);
+  await insertLog({ id: `LOG-RETURN-ARRIVE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: id, assetName: pre.name, stage: 3, action: `Tiba di gudang — aset kembali ke Fase 3 (roadshow selesai)`, operator: req.user!.name, type: "success" });
   assetChanged(id);
   res.json({ asset: await getAsset(id) });
 }));

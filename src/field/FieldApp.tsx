@@ -332,6 +332,11 @@ export default function FieldApp() {
               onAssign={() => push({ t: "assign", id: detailAsset.id })}
               onPlacement={() => push({ t: "placement", id: detailAsset.id })}
               onVenue={() => push({ t: "venue", id: detailAsset.id })}
+              onArriveVenue={async () => {
+                if (!online) { setToast({ msg: "Butuh online untuk konfirmasi tiba.", tone: "error" }); return; }
+                try { await fieldApi.arriveVenue(detailAsset.id); setToast({ msg: "Tiba di venue dikonfirmasi.", tone: "success" }); await load(); }
+                catch (e: any) { setToast({ msg: e?.message || "Gagal konfirmasi tiba.", tone: "error" }); }
+              }}
               onOpenSync={() => goTab("sync")}
             />
           ) : (
@@ -382,7 +387,7 @@ export default function FieldApp() {
           ))}
         {view.t === "venue" &&
           (detailAsset && canDeployVenue(detailAsset, user) ? (
-            <VenueTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Venue dipindahkan.", tone: "success" }); pop(); await load(); }} />
+            <VenueTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Dikirim ke venue — konfirmasi \"Tiba di Venue\" saat sampai.", tone: "success" }); pop(); await load(); }} />
           ) : (
             <NotFound onBack={pop} />
           ))}

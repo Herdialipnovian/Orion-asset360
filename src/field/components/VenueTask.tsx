@@ -13,6 +13,8 @@ import { fieldApi, type AuthUser } from "../fieldApi";
 import { currentLeg } from "../lifecycle";
 import { Toast } from "../ui";
 
+const COURIERS = ["JNE", "J&T Express", "SiCepat", "AnterAja", "Ninja Xpress", "Wahana", "Pos Indonesia", "ID Express", "Lion Parcel", "Shopee (SPX Express)", "Lalamove", "GoSend (Gojek)", "GrabExpress", "Paxel", "Deliveree", "Lainnya"];
+
 function SignaturePad({ onChange }: { onChange: (v: string) => void }) {
   const ref = React.useRef<HTMLCanvasElement | null>(null);
   const drawing = React.useRef(false);
@@ -65,6 +67,10 @@ export default function VenueTask({
   const [pic, setPic] = React.useState(user.name);
   const [setupDate, setSetupDate] = React.useState(new Date().toISOString().slice(0, 10));
   const [sig, setSig] = React.useState("");
+  const [courier, setCourier] = React.useState("");
+  const [eta, setEta] = React.useState("");
+  const [trackingUrl, setTrackingUrl] = React.useState("");
+  const [trackingNo, setTrackingNo] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [toast, setToast] = React.useState<{ msg: string; tone: "info" | "error" | "success" } | null>(null);
 
@@ -73,14 +79,18 @@ export default function VenueTask({
   }, [asset.client]);
 
   async function submit() {
-    if (!online) return setToast({ msg: "Butuh online untuk pindah venue.", tone: "error" });
+    if (!online) return setToast({ msg: "Butuh online untuk kirim ke venue.", tone: "error" });
     if (!locationId) return setToast({ msg: "Pilih venue tujuan dulu.", tone: "error" });
+    if (trackingUrl.trim() && !/^https?:\/\//i.test(trackingUrl.trim())) return setToast({ msg: "Link tracking harus diawali http:// atau https://.", tone: "error" });
     setBusy(true);
     try {
-      await fieldApi.deployVenue(asset.id, { locationId: Number(locationId), pic: pic.trim() || undefined, setupDate: setupDate || undefined, signatureBase64: sig || undefined });
+      await fieldApi.deployVenue(asset.id, {
+        locationId: Number(locationId), pic: pic.trim() || undefined, setupDate: setupDate || undefined, signatureBase64: sig || undefined,
+        courier: courier || undefined, trackingUrl: trackingUrl.trim() || undefined, trackingNo: trackingNo.trim() || undefined, eta: eta.trim() || undefined
+      });
       onDone();
     } catch (e: any) {
-      setToast({ msg: e?.message || "Gagal pindah venue.", tone: "error" });
+      setToast({ msg: e?.message || "Gagal kirim ke venue.", tone: "error" });
       setBusy(false);
     }
   }
@@ -94,7 +104,7 @@ export default function VenueTask({
       </div>
 
       <header>
-        <h1 className="text-xl font-bold text-white">Pindah Venue (Roadshow)</h1>
+        <h1 className="text-xl font-bold text-white">Kirim ke Venue (Roadshow)</h1>
         <p className="mt-1 text-sm text-slate-400">{asset.name}</p>
         {leg && (
           <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[12px] font-bold text-amber-200">
@@ -117,15 +127,40 @@ export default function VenueTask({
           <input value={pic} onChange={e => setPic(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-amber-400" placeholder="PIC per-leg" />
         </div>
         <div className="flex flex-col gap-1.5">
-          <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Tanggal setup</label>
+          <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Rencana setup</label>
           <input type="date" value={setupDate} onChange={e => setSetupDate(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-amber-400" />
+        </div>
+        {/* Tracking pengiriman ke venue (seperti Fase 5) */}
+        <div className="flex flex-col gap-3 rounded-xl border border-blue-500/30 bg-blue-500/[0.06] p-3">
+          <span className="text-[11px] font-extrabold text-blue-300">Tracking Pengiriman ke Venue</span>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Kurir / Vendor</label>
+            <select value={courier} onChange={e => setCourier(e.target.value)} className="tap w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-blue-400">
+              <option value="">— pilih kurir —</option>
+              {COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Link tracking (opsional)</label>
+            <input value={trackingUrl} onChange={e => setTrackingUrl(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-blue-400" placeholder="https://… resi/tracking" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Resi</label>
+              <input value={trackingNo} onChange={e => setTrackingNo(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-blue-400" placeholder="opsional" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold uppercase tracking-wide text-slate-500">ETA</label>
+              <input value={eta} onChange={e => setEta(e.target.value)} className="w-full rounded-xl border border-[#1e2b45] bg-[#0b1220] px-3 py-3 text-sm text-white outline-none focus:border-blue-400" placeholder="cth. 2 hari" />
+            </div>
+          </div>
         </div>
         <SignaturePad onChange={setSig} />
       </section>
 
       <button onClick={submit} disabled={busy || !online} className="tap flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 text-base font-bold text-white active:scale-[0.98] disabled:opacity-50">
         {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-        {online ? "Pindah ke Venue Ini" : "Butuh online"}
+        {online ? "Kirim ke Venue Ini" : "Butuh online"}
       </button>
 
       {toast && <Toast msg={toast.msg} tone={toast.tone} onDone={() => setToast(null)} />}

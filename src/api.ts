@@ -263,9 +263,20 @@ export const api = {
   returnInternal(id: string): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(id)}/return-internal`, { method: "POST", body: JSON.stringify({}) });
   },
-  // Fase 2 Event: setup asset at a venue leg (call again to relocate to the next venue).
-  deployVenue(id: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null }): Promise<{ asset: Asset }> {
+  // Fase 2 Event: SHIP the asset to a venue leg (transit); call again to relocate to the next venue.
+  // Carries courier tracking (like Fase 5). arriveVenue() then confirms it landed (transit→active).
+  deployVenue(id: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(id)}/deploy-venue`, { method: "POST", body: JSON.stringify(p) });
+  },
+  arriveVenue(id: string): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(id)}/arrive-venue`, { method: "POST", body: JSON.stringify({}) });
+  },
+  // End of roadshow: ship back to warehouse (tracked) then confirm arrival (→ Fase 3 Gudang).
+  shipReturn(id: string, p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(id)}/ship-return`, { method: "POST", body: JSON.stringify(p) });
+  },
+  arriveWarehouse(id: string, p?: { warehouse?: string }): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(id)}/arrive-warehouse`, { method: "POST", body: JSON.stringify(p || {}) });
   },
   // Fase 3 Distribusi: fan-out placement per toko / report a placement / sampling audit.
   distribute(id: string, p: { placements: { locationId: number; merchandiserId?: number; qty: number }[]; projectId?: number | null }): Promise<{ asset: Asset }> {

@@ -171,13 +171,19 @@ export interface Asset {
         area?: string;
         pic?: string; // PIC per-leg (changes each venue)
         seq: number; // order in the roadshow (1,2,3…)
-        status: "planned" | "active" | "done"; // planned→active(setup)→done(relocated/returned)
+        // transit = shipped to this venue, not yet arrived · active = arrived & set up · done = relocated away
+        status: "planned" | "transit" | "active" | "done";
         setupDate?: string;
         teardownDate?: string;
         signature?: string;
         note?: string;
+        // Inbound shipment tracking (asset shipped TO this venue) — mirrors Fase-5 transit tracking.
+        shipping?: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; shippedAt?: string };
+        arrivedAt?: string; // set when transit→active is confirmed
       }[];
       currentLegSeq?: number; // which leg the asset is physically at now
+      // Return-to-warehouse shipment at the end of a roadshow (venue → Gudang), tracked like a leg.
+      returnShipment?: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; shippedAt?: string; arrivedAt?: string; status?: "transit" | "done" };
 
       // Distribusi — fan-out placement per toko (GPS + foto), driven by merchandisers.
       placements?: {

@@ -8,7 +8,7 @@ import type { Asset, ActivityLog } from "../../types";
 import type { AuthUser } from "../fieldApi";
 import type { CommitRecord } from "../outbox";
 import { Users } from "lucide-react";
-import { eligibleActions, handoffActions, myInstallTask, myPlacementTasks, canAssignInstall, canDeployVenue, currentLeg, STAGE_FULL, STAGE_LABELS } from "../lifecycle";
+import { eligibleActions, handoffActions, myInstallTask, myPlacementTasks, canAssignInstall, canDeployVenue, canArriveVenue, transitLeg, currentLeg, STAGE_FULL, STAGE_LABELS } from "../lifecycle";
 import { StageBadge, ROLE_SHORT } from "../ui";
 
 function Field({ label, value }: { label: string; value?: string | number }) {
@@ -35,6 +35,7 @@ export default function AssetDetail({
   onAssign,
   onPlacement,
   onVenue,
+  onArriveVenue,
   onOpenSync
 }: {
   asset: Asset;
@@ -48,6 +49,7 @@ export default function AssetDetail({
   onAssign: () => void;
   onPlacement: () => void;
   onVenue: () => void;
+  onArriveVenue: () => void;
   onOpenSync: () => void;
 }) {
   const actions = eligibleActions(asset.currentStage, user.role);
@@ -56,6 +58,8 @@ export default function AssetDetail({
   // Exclude toko whose placement is already queued offline (per-toko lock, not whole-asset).
   const placementTasks = myPlacementTasks(asset, user.id).filter(p => !(pendingLocs?.has(p.locationId)));
   const canVenue = canDeployVenue(asset, user);
+  const canArrive = canArriveVenue(asset, user);
+  const tLeg = transitLeg(asset);
   const leg = currentLeg(asset);
   const canAssign = canAssignInstall(asset, user) && !(asset.stageDetails as any)?.deployment?.fullyInstalled;
   const logs = React.useMemo(
@@ -146,6 +150,19 @@ export default function AssetDetail({
             <ChevronRight className="h-5 w-5 shrink-0 text-teal-300" />
           </button>
         )}
+        {canArrive && !pending && (
+          <button
+            onClick={onArriveVenue}
+            className="tap flex w-full items-center gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-left transition active:scale-[0.99]"
+          >
+            <Compass className="h-5 w-5 shrink-0 text-emerald-300" />
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold text-white">Konfirmasi Tiba di Venue</div>
+              <div className="text-xs text-slate-400">{tLeg ? `Kiriman → ${tLeg.venue}${tLeg.shipping?.courier ? ` · ${tLeg.shipping.courier}` : ""} · set aktif` : "Set aktif di venue"}</div>
+            </div>
+            <ChevronRight className="h-5 w-5 shrink-0 text-emerald-300" />
+          </button>
+        )}
         {canVenue && !pending && (
           <button
             onClick={onVenue}
@@ -153,8 +170,8 @@ export default function AssetDetail({
           >
             <Compass className="h-5 w-5 shrink-0 text-amber-300" />
             <div className="min-w-0 flex-1">
-              <div className="font-semibold text-white">Pindah Venue (Roadshow)</div>
-              <div className="text-xs text-slate-400">{leg ? `Sekarang: ${leg.venue} (leg ${leg.seq}) · pindah ke venue berikutnya` : "Setup di venue berikutnya"}</div>
+              <div className="font-semibold text-white">Kirim ke Venue (Roadshow)</div>
+              <div className="text-xs text-slate-400">{leg ? `Sekarang: ${leg.venue} (leg ${leg.seq}) · kirim ke venue berikutnya + tracking` : "Kirim ke venue berikutnya + tracking"}</div>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-amber-300" />
           </button>

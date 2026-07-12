@@ -32,7 +32,7 @@ import {
   Briefcase
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
-import { api } from "../api";
+import { api, type AuthUser } from "../api";
 import { installedOf } from "../installProgress";
 
 // Code-split: Leaflet (+ its CSS) only loads when the operator opens the distribusi map.
@@ -310,6 +310,7 @@ const CATEGORY_OPTIONS = [
 
 interface LifecycleManagerProps {
   assets: Asset[];
+  user?: AuthUser;
   selectedClient: string;
   categoryOptions?: string[];
   clientOptions?: string[];
@@ -324,7 +325,10 @@ interface LifecycleManagerProps {
   onShipAsset: (assetId: string, updatedDetails: any, meta?: { logAction?: string; operator?: string }) => Promise<{ ok: boolean; error?: string }>;
   onAssignInstall: (assetId: string, assignments: { merchandiserId: number; qty: number }[], baseUpdatedAt?: string) => Promise<{ ok: boolean; error?: string }>;
   onHandoverInternal?: (assetId: string, p: { custodianId: number; handoverDate?: string; signatureBase64?: string; note?: string; projectId?: number | null }) => Promise<{ ok: boolean; error?: string }>;
-  onDeployVenue?: (assetId: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null }) => Promise<{ ok: boolean; error?: string }>;
+  onDeployVenue?: (assetId: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
+  onArriveVenue?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
+  onShipReturn?: (assetId: string, p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
+  onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
   onAuditSample?: (assetId: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }) => Promise<{ ok: boolean; error?: string }>;
@@ -406,6 +410,7 @@ function SignaturePad({ onChange }: { value?: string; onChange: (v: string) => v
 
 export default function LifecycleManager({
   assets,
+  user,
   selectedClient,
   categoryOptions,
   clientOptions,
@@ -416,6 +421,9 @@ export default function LifecycleManager({
   onAssignInstall,
   onHandoverInternal,
   onDeployVenue,
+  onArriveVenue,
+  onShipReturn,
+  onArriveWarehouse,
   onDistribute,
   onPlaceToko,
   onAuditSample,
@@ -489,9 +497,16 @@ export default function LifecycleManager({
     } catch { setVenues([]); }
   }, []);
   const [venueOpen, setVenueOpen] = React.useState(false);
-  const [venueForm, setVenueForm] = React.useState<{ locationId: string; pic: string; setupDate: string; note: string; signature: string }>({ locationId: "", pic: "", setupDate: "", note: "", signature: "" });
+  const [venueForm, setVenueForm] = React.useState<{ locationId: string; pic: string; setupDate: string; note: string; signature: string; courier: string; trackingUrl: string; trackingNo: string; eta: string }>({ locationId: "", pic: "", setupDate: "", note: "", signature: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
   const [venueBusy, setVenueBusy] = React.useState(false);
   const [venueError, setVenueError] = React.useState<string | null>(null);
+  // Return-to-warehouse shipment modal (end of roadshow — venue → Gudang, tracked).
+  const [returnOpen, setReturnOpen] = React.useState(false);
+  const [returnForm, setReturnForm] = React.useState<{ courier: string; trackingUrl: string; trackingNo: string; eta: string }>({ courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+  const [returnBusy, setReturnBusy] = React.useState(false);
+  const [returnError, setReturnError] = React.useState<string | null>(null);
+  const [arriveBusy, setArriveBusy] = React.useState(false); // shared for arrive-venue / arrive-warehouse
+  const [arriveError, setArriveError] = React.useState<string | null>(null); // shown inline in the detail panel (arrive buttons live OUTSIDE the modals)
   // The deployment mode for an asset: explicit (post-deploy) or inferred from its project.
   const projectModeOf = React.useCallback((asset?: Asset | null): string | null => {
     if (!asset) return null;
@@ -649,7 +664,7 @@ export default function LifecycleManager({
     if (!detailAsset) return;
     void loadVenues(detailAsset.client);
     void loadDirectory(detailAsset.client);
-    setVenueForm({ locationId: "", pic: "", setupDate: new Date().toISOString().slice(0, 10), note: "", signature: "" });
+    setVenueForm({ locationId: "", pic: "", setupDate: new Date().toISOString().slice(0, 10), note: "", signature: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
     setVenueError(null);
     setVenueOpen(true);
   };
@@ -657,6 +672,7 @@ export default function LifecycleManager({
     e.preventDefault();
     if (!detailAsset || !onDeployVenue) return;
     if (!venueForm.locationId) return setVenueError("Pilih venue dulu.");
+    if (venueForm.trackingUrl && !/^https?:\/\//i.test(venueForm.trackingUrl.trim())) return setVenueError("Link tracking harus diawali http:// atau https://.");
     setVenueBusy(true);
     setVenueError(null);
     const res = await onDeployVenue(detailAsset.id, {
@@ -665,11 +681,51 @@ export default function LifecycleManager({
       setupDate: venueForm.setupDate || undefined,
       note: venueForm.note || undefined,
       signatureBase64: venueForm.signature || undefined,
-      projectId: detailAsset.projectId ?? undefined
+      projectId: detailAsset.projectId ?? undefined,
+      courier: venueForm.courier || undefined,
+      trackingUrl: venueForm.trackingUrl.trim() || undefined,
+      trackingNo: venueForm.trackingNo.trim() || undefined,
+      eta: venueForm.eta.trim() || undefined
     });
     setVenueBusy(false);
-    if (!res.ok) return setVenueError(res.error || "Gagal setup venue.");
+    if (!res.ok) return setVenueError(res.error || "Gagal kirim ke venue.");
     setVenueOpen(false);
+  };
+  const openReturn = () => {
+    if (!detailAsset) return;
+    setReturnForm({ courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+    setReturnError(null);
+    setReturnOpen(true);
+  };
+  const submitReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailAsset || !onShipReturn) return;
+    if (returnForm.trackingUrl && !/^https?:\/\//i.test(returnForm.trackingUrl.trim())) return setReturnError("Link tracking harus diawali http:// atau https://.");
+    setReturnBusy(true);
+    setReturnError(null);
+    const res = await onShipReturn(detailAsset.id, {
+      courier: returnForm.courier || undefined,
+      trackingUrl: returnForm.trackingUrl.trim() || undefined,
+      trackingNo: returnForm.trackingNo.trim() || undefined,
+      eta: returnForm.eta.trim() || undefined
+    });
+    setReturnBusy(false);
+    if (!res.ok) return setReturnError(res.error || "Gagal kirim balik ke gudang.");
+    setReturnOpen(false);
+  };
+  const doArriveVenue = async () => {
+    if (!detailAsset || !onArriveVenue || arriveBusy) return;
+    setArriveBusy(true); setArriveError(null);
+    const res = await onArriveVenue(detailAsset.id);
+    setArriveBusy(false);
+    if (!res.ok) setArriveError(res.error || "Gagal konfirmasi tiba di venue.");
+  };
+  const doArriveWarehouse = async () => {
+    if (!detailAsset || !onArriveWarehouse || arriveBusy) return;
+    setArriveBusy(true); setArriveError(null);
+    const res = await onArriveWarehouse(detailAsset.id);
+    setArriveBusy(false);
+    if (!res.ok) setArriveError(res.error || "Gagal konfirmasi tiba di gudang.");
   };
 
   const [newForm, setNewForm] = React.useState({
@@ -1677,11 +1733,12 @@ export default function LifecycleManager({
                       </div>
                       <div className="space-y-2 relative pl-4 border-l-2 border-amber-200">
                         {legs.map((lg: any) => {
-                          const tone = lg.status === "active" ? "bg-amber-500 text-white border-amber-500" : lg.status === "done" ? "bg-white text-slate-400 border-slate-200" : "bg-white text-amber-600 border-amber-300";
-                          const badge = lg.status === "active" ? "Aktif" : lg.status === "done" ? "Selesai" : "Rencana";
+                          const tone = lg.status === "active" ? "bg-amber-500 text-white border-amber-500" : lg.status === "transit" ? "bg-blue-500 text-white border-blue-500" : lg.status === "done" ? "bg-white text-slate-400 border-slate-200" : "bg-white text-amber-600 border-amber-300";
+                          const badge = lg.status === "active" ? "Aktif" : lg.status === "transit" ? "Dikirim" : lg.status === "done" ? "Selesai" : "Rencana";
+                          const dot = lg.status === "active" ? "bg-amber-500 border-amber-500" : lg.status === "transit" ? "bg-blue-500 border-blue-500" : lg.status === "done" ? "bg-slate-300 border-slate-300" : "bg-white border-amber-400";
                           return (
                             <div key={lg.seq} className="relative">
-                              <span className={`absolute -left-[1.15rem] top-1 h-3 w-3 rounded-full border-2 ${lg.status === "active" ? "bg-amber-500 border-amber-500" : lg.status === "done" ? "bg-slate-300 border-slate-300" : "bg-white border-amber-400"}`} />
+                              <span className={`absolute -left-[1.15rem] top-1 h-3 w-3 rounded-full border-2 ${dot}`} />
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-bold text-slate-400">#{lg.seq}</span>
                                 <span className="text-xs font-bold text-slate-800">{lg.venue}</span>
@@ -1689,11 +1746,57 @@ export default function LifecycleManager({
                                 <span className={`ml-auto text-[9px] font-bold px-2 py-0.5 rounded-full border ${tone}`}>{badge}</span>
                               </div>
                               <p className="text-[10px] text-slate-500">
-                                {lg.pic ? `PIC: ${lg.pic}` : "PIC: —"}{lg.setupDate ? ` · setup ${lg.setupDate}` : ""}{lg.teardownDate ? ` → bongkar ${lg.teardownDate}` : ""}
+                                {lg.pic ? `PIC: ${lg.pic}` : "PIC: —"}{lg.status === "transit" && lg.shipping?.shippedAt ? ` · dikirim ${lg.shipping.shippedAt}${lg.shipping.eta ? ` · ETA ${lg.shipping.eta}` : ""}` : ""}{lg.setupDate ? ` · setup ${lg.setupDate}` : ""}{lg.teardownDate ? ` → bongkar ${lg.teardownDate}` : ""}
                               </p>
                             </div>
                           );
                         })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Event shipment tracking (Fase-5 style) — in-transit leg (→venue) OR return-to-gudang (→Gudang) */}
+                {(() => {
+                  const d: any = detailAsset.stageDetails?.deployment || {};
+                  const legs: any[] = Array.isArray(d.legs) ? d.legs : [];
+                  const transitLeg = legs.find(l => l.status === "transit");
+                  const retTransit = d.returnShipment?.status === "transit" ? d.returnShipment : null;
+                  if (!transitLeg && !retTransit) return null;
+                  const toGudang = !!retTransit && !transitLeg;
+                  const ship: any = transitLeg?.shipping || retTransit;
+                  const destName = toGudang ? "Gudang" : `${transitLeg.venue}${transitLeg.area ? ` (${transitLeg.area})` : ""}`;
+                  const pic = toGudang ? "" : (transitLeg.pic || "");
+                  const tUrl = ship?.trackingUrl;
+                  const waText =
+                    `Halo${pic ? " " + pic : ""}, aset "${detailAsset.name}" sedang dalam pengiriman ke ${destName}` +
+                    ` via ${ship?.courier || "kurir"}${ship?.trackingNo ? " resi " + ship.trackingNo : ""}.` +
+                    (tUrl ? ` Lacak: ${tUrl}` : "") +
+                    (ship?.eta ? ` Estimasi tiba: ${ship.eta}.` : "");
+                  return (
+                    <div className="bg-white border border-blue-200 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span className="bg-blue-500 text-white p-1.5 rounded-lg"><Truck className="h-3.5 w-3.5" /></span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-extrabold text-slate-800">Pelacakan Kiriman {toGudang ? "→ Gudang" : "→ Venue"}</p>
+                          <p className="text-[10px] text-slate-500">
+                            Tujuan: <strong className="text-slate-700">{destName}</strong>
+                            {ship?.courier ? ` · ${ship.courier}` : ""}{ship?.trackingNo ? ` · Resi ${ship.trackingNo}` : ""}{ship?.eta ? ` · ETA ${ship.eta}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      {pic && <p className="text-[11px] text-slate-500">Diterima PIC: <strong className="text-slate-700">{pic}</strong></p>}
+                      <div className="flex gap-2">
+                        {tUrl ? (
+                          <a href={tUrl} target="_blank" rel="noreferrer" className="flex-1 flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition">
+                            <MapPin className="h-3.5 w-3.5" /> Buka Tracking
+                          </a>
+                        ) : (
+                          <span className="flex-1 flex items-center justify-center gap-1.5 bg-slate-100 text-slate-400 text-xs font-bold px-3 py-2 rounded-lg">Tanpa link tracking</span>
+                        )}
+                        <a href={`https://wa.me/?text=${encodeURIComponent(waText)}`} target="_blank" rel="noreferrer" className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition">
+                          <ArrowRight className="h-3.5 w-3.5" /> Bagikan{pic ? " ke PIC" : ""}
+                        </a>
                       </div>
                     </div>
                   );
@@ -1823,18 +1926,73 @@ export default function LifecycleManager({
 
                   {/* Fase 2 Event — setup / relocate asset at a venue (roadshow). */}
                   {onDeployVenue && projectModeOf(detailAsset) === "Event" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 6 && (() => {
-                    const hasLegs = (detailAsset.stageDetails?.deployment?.legs?.length || 0) > 0;
+                    const dep: any = detailAsset.stageDetails?.deployment || {};
+                    const legs: any[] = Array.isArray(dep.legs) ? dep.legs : [];
+                    const transitLeg = legs.find(l => l.status === "transit");
+                    const activeLeg = legs.find(l => l.status === "active");
+                    const retTransit = dep.returnShipment?.status === "transit";
+                    // Gudang (warehouse) operations are Logistik/Admin only — matches the backend role gate.
+                    const gudangRole = !user || user.role === "Admin" || user.role === "Logistik";
+                    // Arrive buttons live OUTSIDE the shipment modals → surface their errors inline here.
+                    const errBanner = arriveError ? (
+                      <div className="w-full flex items-start gap-2 text-[11px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-2"><AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" /><span>{arriveError}</span></div>
+                    ) : null;
+                    // In-transit BACK to warehouse → confirm arrival at gudang (Logistik/Admin only).
+                    if (retTransit) return (
+                      <>
+                        {errBanner}
+                        {gudangRole ? (
+                          <button onClick={doArriveWarehouse} disabled={arriveBusy}
+                            className="w-full flex items-center gap-2 text-left bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white border border-emerald-600 rounded-lg px-3 py-2.5 transition shadow-sm">
+                            <Check className="h-4 w-4 shrink-0" />
+                            <span className="min-w-0">
+                              <span className="block text-[11px] font-bold leading-tight">Konfirmasi Tiba di Gudang</span>
+                              <span className="block text-[9px] text-emerald-50 leading-tight">Aset kembali ke Fase 3 (Gudang) — roadshow selesai</span>
+                            </span>
+                          </button>
+                        ) : (
+                          <div className="w-full flex items-center gap-2 bg-cyan-50 border border-cyan-200 text-cyan-700 rounded-lg px-3 py-2.5 text-[11px] font-semibold"><Home className="h-4 w-4 shrink-0" /><span>Dalam pengiriman balik ke gudang — menunggu <strong>Logistik/Admin</strong> konfirmasi tiba.</span></div>
+                        )}
+                      </>
+                    );
+                    // In-transit TO a venue → confirm arrival at that venue (PIC of the venue's client / Logistik / Admin).
+                    if (transitLeg) return (
+                      <>
+                        {errBanner}
+                        <button onClick={doArriveVenue} disabled={arriveBusy}
+                          className="w-full flex items-center gap-2 text-left bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white border border-emerald-600 rounded-lg px-3 py-2.5 transition shadow-sm">
+                          <Check className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0">
+                            <span className="block text-[11px] font-bold leading-tight">Konfirmasi Tiba di Venue</span>
+                            <span className="block text-[9px] text-emerald-50 leading-tight">{transitLeg.venue}{transitLeg.area ? ` · ${transitLeg.area}` : ""} — set aktif di venue</span>
+                          </span>
+                        </button>
+                      </>
+                    );
+                    // Arrived (or fresh) → ship to (next) venue; and if at a venue, ship back to gudang (Logistik/Admin).
+                    const hasLegs = legs.length > 0;
                     return (
-                      <button
-                        onClick={openVenue}
-                        className="w-full flex items-center gap-2 text-left bg-amber-500 hover:bg-amber-600 text-white border border-amber-500 rounded-lg px-3 py-2.5 transition shadow-sm"
-                      >
-                        <Compass className="h-4 w-4 shrink-0" />
-                        <span className="min-w-0">
-                          <span className="block text-[11px] font-bold leading-tight">{hasLegs ? "Relokasi ke Venue Berikutnya" : "Setup di Venue (Event)"}</span>
-                          <span className="block text-[9px] text-amber-50 leading-tight">{hasLegs ? "Tutup venue aktif & buka leg venue berikutnya (roadshow)" : "Pasang paket aset di venue + PIC per-leg (tetap Fase 6)"}</span>
-                        </span>
-                      </button>
+                      <>
+                        {errBanner}
+                        <button onClick={openVenue}
+                          className="w-full flex items-center gap-2 text-left bg-amber-500 hover:bg-amber-600 text-white border border-amber-500 rounded-lg px-3 py-2.5 transition shadow-sm">
+                          <Truck className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0">
+                            <span className="block text-[11px] font-bold leading-tight">{hasLegs ? "Kirim ke Venue Berikutnya" : "Kirim ke Venue (Setup Event)"}</span>
+                            <span className="block text-[9px] text-amber-50 leading-tight">{hasLegs ? "Kirim aset + tracking ke venue berikutnya (roadshow)" : "Kirim aset + tracking ke venue #1 (aset ke Fase 6)"}</span>
+                          </span>
+                        </button>
+                        {activeLeg && onShipReturn && gudangRole && (
+                          <button onClick={openReturn}
+                            className="w-full flex items-center gap-2 text-left bg-white hover:bg-cyan-50 text-cyan-700 border border-cyan-300 rounded-lg px-3 py-2.5 transition shadow-sm">
+                            <Home className="h-4 w-4 shrink-0" />
+                            <span className="min-w-0">
+                              <span className="block text-[11px] font-bold leading-tight">Kirim Balik ke Gudang</span>
+                              <span className="block text-[9px] text-cyan-600 leading-tight">Roadshow selesai — kirim aset + tracking balik ke gudang</span>
+                            </span>
+                          </button>
+                        )}
+                      </>
                     );
                   })()}
 
@@ -2171,8 +2329,8 @@ export default function LifecycleManager({
           <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center">
               <div>
-                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest block">Event / Roadshow</span>
-                <h3 className="text-base font-bold text-slate-950">{hasLegs ? "Relokasi ke Venue Berikutnya" : "Setup di Venue"}</h3>
+                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest block">Event / Roadshow · Kirim</span>
+                <h3 className="text-base font-bold text-slate-950">{hasLegs ? "Kirim ke Venue Berikutnya" : "Kirim ke Venue (Setup)"}</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>
               </div>
               <button onClick={() => setVenueOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
@@ -2193,23 +2351,79 @@ export default function LifecycleManager({
                     {(venueForm.pic && !picOptions.includes(venueForm.pic) ? [venueForm.pic, ...picOptions] : picOptions).map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Tanggal Setup</label><input type="date" value={venueForm.setupDate} onChange={e => setVenueForm({ ...venueForm, setupDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Rencana Setup</label><input type="date" value={venueForm.setupDate} onChange={e => setVenueForm({ ...venueForm, setupDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500" /></div>
+              </div>
+              {/* Tracking kiriman (seperti Fase 5 Pengiriman) — aset dikirim ke venue tujuan */}
+              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-2.5">
+                <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Tracking Pengiriman ke Venue</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5"><label className="font-bold text-slate-700">Kurir / Vendor</label>
+                    <select value={venueForm.courier} onChange={e => setVenueForm({ ...venueForm, courier: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                      <option value="">— pilih kurir —</option>
+                      {COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5"><label className="font-bold text-slate-700">ETA (estimasi tiba)</label><input value={venueForm.eta} onChange={e => setVenueForm({ ...venueForm, eta: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="cth. 2 hari / 25 Jul" /></div>
+                </div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Link Tracking (tempel dari kurir)</label><input value={venueForm.trackingUrl} onChange={e => setVenueForm({ ...venueForm, trackingUrl: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://… link resi/tracking" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Nomor Resi (opsional)</label><input value={venueForm.trackingNo} onChange={e => setVenueForm({ ...venueForm, trackingNo: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="cth. JX1234567890" /></div>
               </div>
               <div className="space-y-1.5"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={venueForm.note} onChange={e => setVenueForm({ ...venueForm, note: e.target.value })} rows={2} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 resize-none" placeholder="cth. Tenda + sound + booth" /></div>
               {venueError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{venueError}</span></div>}
               <div className="p-2.5 bg-amber-50 border border-amber-200/70 rounded-lg text-[10.5px] text-amber-700 flex items-start gap-2">
-                <Compass className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-                <span>{hasLegs ? "Venue aktif ditutup & venue baru dibuka sebagai leg berikutnya. Aset tetap Fase 6." : "Aset dipasang di venue sebagai leg #1 (aset pindah ke Fase 6)."}</span>
+                <Truck className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                <span>{hasLegs ? "Venue aktif ditutup, aset DIKIRIM ke venue berikutnya (status: dalam pengiriman). Konfirmasi “Tiba di Venue” saat sampai." : "Aset dikirim ke venue #1 (aset ke Fase 6, status dalam pengiriman). Konfirmasi “Tiba di Venue” saat sampai."}</span>
               </div>
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setVenueOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
-                <button type="submit" disabled={venueBusy} className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Compass className="h-4 w-4" />{hasLegs ? "Relokasi" : "Setup Venue"}</button>
+                <button type="submit" disabled={venueBusy} className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />{hasLegs ? "Kirim ke Venue" : "Kirim & Setup"}</button>
               </div>
             </form>
           </div>
         </div>
         );
       })()}
+
+      {/* MODAL 5b: KIRIM BALIK KE GUDANG (return shipment, roadshow selesai) */}
+      {detailAsset && returnOpen && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] font-bold text-cyan-600 uppercase tracking-widest block">Event / Roadshow · Selesai</span>
+                <h3 className="text-base font-bold text-slate-950">Kirim Balik ke Gudang</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>
+              </div>
+              <button onClick={() => setReturnOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <form onSubmit={submitReturn} className="p-5 space-y-4 text-xs">
+              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-2.5">
+                <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Tracking Pengiriman ke Gudang</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5"><label className="font-bold text-slate-700">Kurir / Vendor</label>
+                    <select value={returnForm.courier} onChange={e => setReturnForm({ ...returnForm, courier: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                      <option value="">— pilih kurir —</option>
+                      {COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5"><label className="font-bold text-slate-700">ETA (estimasi tiba)</label><input value={returnForm.eta} onChange={e => setReturnForm({ ...returnForm, eta: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="cth. 2 hari / 25 Jul" /></div>
+                </div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Link Tracking (tempel dari kurir)</label><input value={returnForm.trackingUrl} onChange={e => setReturnForm({ ...returnForm, trackingUrl: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://… link resi/tracking" /></div>
+                <div className="space-y-1.5"><label className="font-bold text-slate-700">Nomor Resi (opsional)</label><input value={returnForm.trackingNo} onChange={e => setReturnForm({ ...returnForm, trackingNo: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="cth. JX1234567890" /></div>
+              </div>
+              {returnError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{returnError}</span></div>}
+              <div className="p-2.5 bg-cyan-50 border border-cyan-200/70 rounded-lg text-[10.5px] text-cyan-700 flex items-start gap-2">
+                <Home className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                <span>Venue aktif ditutup & aset dikirim balik ke gudang (status: dalam pengiriman). Konfirmasi “Tiba di Gudang” saat sampai — aset kembali ke Fase 3.</span>
+              </div>
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
+                <button type="button" onClick={() => setReturnOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
+                <button type="submit" disabled={returnBusy} className="bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />Kirim Balik</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 6: DISTRIBUSI — fan-out placement per toko */}
       {detailAsset && distOpen && (() => {

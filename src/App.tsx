@@ -262,15 +262,31 @@ export default function App() {
   // Fase 2 Event: setup / relocate an asset at a venue leg (roadshow).
   const handleDeployVenue = async (
     assetId: string,
-    p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null }
+    p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
   ): Promise<{ ok: boolean; error?: string }> => {
     try {
       await api.deployVenue(assetId, p);
       await refresh();
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, error: e?.message || "Gagal setup venue." };
+      return { ok: false, error: e?.message || "Gagal kirim ke venue." };
     }
+  };
+  // Fase 2 Event — 2-step ship→arrive between venues + return-to-warehouse (all tracked like Fase 5).
+  const handleArriveVenue = async (assetId: string): Promise<{ ok: boolean; error?: string }> => {
+    try { await api.arriveVenue(assetId); await refresh(); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal konfirmasi tiba di venue." }; }
+  };
+  const handleShipReturn = async (
+    assetId: string,
+    p: { courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try { await api.shipReturn(assetId, p); await refresh(); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal kirim balik ke gudang." }; }
+  };
+  const handleArriveWarehouse = async (assetId: string): Promise<{ ok: boolean; error?: string }> => {
+    try { await api.arriveWarehouse(assetId); await refresh(); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal konfirmasi tiba di gudang." }; }
   };
 
   // Fase 3 Distribusi: fan-out placements / report a toko placement / sampling audit.
@@ -813,8 +829,9 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
               >
-                <LifecycleManager 
+                <LifecycleManager
                   assets={assets}
+                  user={user}
                   selectedClient={selectedClient}
                   categoryOptions={categoryNames}
                   clientOptions={clientNames}
@@ -825,6 +842,9 @@ export default function App() {
                   onAssignInstall={handleAssignInstall}
                   onHandoverInternal={handleHandoverInternal}
                   onDeployVenue={handleDeployVenue}
+                  onArriveVenue={handleArriveVenue}
+                  onShipReturn={handleShipReturn}
+                  onArriveWarehouse={handleArriveWarehouse}
                   onDistribute={handleDistribute}
                   onPlaceToko={handlePlaceToko}
                   onAuditSample={handleAuditSample}

@@ -61,14 +61,30 @@ export function currentLeg(asset: Asset): { venue: string; area?: string; seq: n
   return active ? { venue: active.venue, area: active.area, seq: active.seq, count: legs.length } : null;
 }
 
-// Can this user set up / relocate a venue leg from the field? Event roadshow in progress
-// (deployment.mode === "Event"), Fase 6, PIC (own client) or Admin. First leg starts in the CMS.
+// The in-transit venue leg (shipped, not yet arrived) or null.
+export function transitLeg(asset: Asset): { venue: string; area?: string; seq: number; shipping?: any } | null {
+  const legs = (asset?.stageDetails as any)?.deployment?.legs;
+  if (!Array.isArray(legs)) return null;
+  const t = legs.find((l: any) => l.status === "transit");
+  return t ? { venue: t.venue, area: t.area, seq: t.seq, shipping: t.shipping } : null;
+}
+const eventPicOrAdmin = (asset: Asset, user: { role: Role; client?: string | null }) =>
+  user.role === "Admin" || (user.role === "PIC" && (user.client || null) === (asset.client || null));
+
+// Can this user SHIP the asset to the (next) venue? Event, Fase 6, no shipment already in transit.
 export function canDeployVenue(asset: Asset, user: { role: Role; client?: string | null }): boolean {
   if (asset?.currentStage !== 6) return false;
+  const dep: any = (asset?.stageDetails as any)?.deployment || {};
+  if (dep.mode !== "Event") return false;
+  if (transitLeg(asset) || dep.returnShipment?.status === "transit") return false; // must confirm arrival first
+  return eventPicOrAdmin(asset, user);
+}
+// Can this user CONFIRM the in-transit venue shipment arrived (transit→active)?
+export function canArriveVenue(asset: Asset, user: { role: Role; client?: string | null }): boolean {
+  if (asset?.currentStage !== 6) return false;
   if ((asset?.stageDetails as any)?.deployment?.mode !== "Event") return false;
-  if (user.role === "Admin") return true;
-  if (user.role === "PIC") return (user.client || null) === (asset.client || null);
-  return false;
+  if (!transitLeg(asset)) return false;
+  return eventPicOrAdmin(asset, user);
 }
 
 export const STAGE_LABELS: { [k: number]: string } = {

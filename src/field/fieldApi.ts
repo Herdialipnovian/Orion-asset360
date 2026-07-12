@@ -227,9 +227,14 @@ export const fieldApi = {
   async areas(): Promise<{ id: number; name: string }[]> {
     return req(`/areas`);
   },
-  // PIC sets up / relocates a venue leg (Fase 2 Event roadshow) from the field (online-only).
-  async deployVenue(assetId: string, body: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string }): Promise<{ asset: Asset }> {
+  // PIC SHIPS the asset to a venue leg (Fase 2 Event roadshow) from the field (online-only) — the
+  // leg starts "in transit" with courier tracking (like Fase 5); arriveVenue() confirms it landed.
+  async deployVenue(assetId: string, body: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }): Promise<{ asset: Asset }> {
     return req(`/assets/${encodeURIComponent(assetId)}/deploy-venue`, { method: "POST", body: JSON.stringify(body) });
+  },
+  // Confirm the in-transit venue shipment arrived (transit→active).
+  async arriveVenue(assetId: string): Promise<{ asset: Asset }> {
+    return req(`/assets/${encodeURIComponent(assetId)}/arrive-venue`, { method: "POST", body: JSON.stringify({}) });
   },
   // In-app notifications.
   async notifications(): Promise<{ items: NotifItem[]; unread: number }> {

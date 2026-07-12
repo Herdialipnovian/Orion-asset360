@@ -827,6 +827,88 @@ export default function LifecycleManager({
     });
   }, [assets, searchQuery, selectedClient, filterCategory, filterStage]);
 
+  // Group the register by shipment group: assets dispatched together (same batchId) and still in the
+  // journey (Fase 4–9) render under ONE "Surat Jalan" header, in every phase view — not scattered.
+  const shipmentBlocks = React.useMemo(() => {
+    const byBatch = new Map<string, Asset[]>();
+    const singles: Asset[] = [];
+    for (const a of filteredAssetsList) {
+      const bid = batchIdOf(a);
+      if (bid && a.currentStage >= 4 && a.currentStage <= 9) {
+        if (!byBatch.has(bid)) byBatch.set(bid, []);
+        byBatch.get(bid)!.push(a);
+      } else singles.push(a);
+    }
+    const groups: { batchId: string; members: Asset[] }[] = [];
+    for (const [batchId, members] of byBatch) {
+      if (members.length >= 2) groups.push({ batchId, members });
+      else singles.push(...members); // a lone group member renders as a normal card
+    }
+    return { groups, singles };
+  }, [filteredAssetsList]);
+
+  // One asset card (reused for grouped members + standalone assets).
+  const renderCard = (asset: Asset) => {
+    const IconComp = STAGE_ICONS[asset.currentStage] || ClipboardList;
+    const batchable = batchMode && asset.currentStage === 3;
+    const picked = batchSel.includes(asset.id);
+    return (
+      <div
+        key={asset.id}
+        onClick={() => { if (batchMode) { if (batchable) toggleBatchSel(asset.id); } else setDetailAssetId(asset.id); }}
+        className={`bg-white rounded-xl border transition-all flex flex-col justify-between overflow-hidden ${batchMode && !batchable ? "border-slate-100 opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md"} ${picked ? "border-blue-500 ring-2 ring-blue-500" : "border-slate-100 hover:border-slate-300"}`}
+      >
+        <div className="p-5 border-b border-slate-50 space-y-2">
+          <div className="flex justify-between items-start gap-2">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider flex items-center gap-1.5">
+              {batchable && <span className={`inline-flex h-4 w-4 items-center justify-center rounded border ${picked ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-300"}`}>{picked && <Check className="h-3 w-3" />}</span>}
+              {asset.category}
+            </span>
+            <span className="font-mono text-[10px] text-blue-600 font-extrabold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/30">{asset.id}</span>
+          </div>
+          <h4 className="font-bold text-slate-800 text-sm tracking-tight hover:text-blue-600 transition truncate" title={asset.name}>{asset.name}</h4>
+          <p className="text-[11px] text-slate-500 grid grid-cols-2 gap-x-2">
+            <span>Client: <strong className="font-semibold text-slate-700 truncate block">{asset.client.split(" ")[1] || asset.client}</strong></span>
+            <span>WO-Code: <strong className="font-mono text-slate-700 block">{asset.projectCode}</strong></span>
+          </p>
+        </div>
+        <div className="px-5 py-4 bg-slate-50/50 flex justify-between items-center text-xs">
+          <div>
+            <p className="text-[10px] text-slate-400 uppercase font-medium">Jumlah / Biaya</p>
+            <p className="font-bold text-slate-800">{asset.quantity} unit <span className="font-normal text-slate-400 text-[10px]">· {formatRupiah(asset.financials.purchaseCost)}</span></p>
+          </div>
+          {asset.currentStage === 6 && asset.stageDetails?.deployment?.assignments?.length ? (() => {
+            const d: any = asset.stageDetails.deployment;
+            const asg: any[] = d.assignments || [];
+            const installed = d.installedQty != null ? Number(d.installedQty) : installedOf(asg);
+            const full = installed >= asset.quantity;
+            return (
+              <div className="text-right">
+                <p className="text-[10px] text-slate-400 uppercase font-medium">Terpasang</p>
+                <p className={`font-extrabold ${full ? "text-emerald-600" : "text-indigo-600"}`}>{installed}/{asset.quantity}</p>
+              </div>
+            );
+          })() : asset.auditScore !== undefined && asset.currentStage >= 6 ? (
+            <div className="text-right">
+              <p className="text-[10px] text-slate-400 uppercase font-medium">Skor Audit</p>
+              <p className={`font-extrabold ${asset.auditScore >= 90 ? "text-emerald-600" : asset.auditScore >= 70 ? "text-blue-600" : "text-rose-600"}`}>{asset.auditScore}/100</p>
+            </div>
+          ) : null}
+        </div>
+        <div className="p-3 border-t border-slate-50 bg-white flex items-center justify-between">
+          <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-bold ${statusColors[asset.currentStage]}`}>
+            <IconComp className="h-3.5 w-3.5" />
+            <span>Fase {asset.currentStage}: {cleanLabel(asset.currentStage)}</span>
+          </div>
+          <div className="flex items-center text-slate-400 group hover:text-blue-600 text-xs font-semibold gap-0.5">
+            <span>Detail</span>
+            <ChevronRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const handleResetForm = () => {
     setNewForm({
       name: "",
@@ -1484,86 +1566,26 @@ export default function LifecycleManager({
             Tidak ada aset yang terdaftar untuk kriteria pencarian ini.
           </div>
         ) : (
-          filteredAssetsList.map(asset => {
-            const IconComp = STAGE_ICONS[asset.currentStage] || ClipboardList;
-            const batchable = batchMode && asset.currentStage === 3;
-            const picked = batchSel.includes(asset.id);
-            return (
-              <div
-                key={asset.id}
-                onClick={() => { if (batchMode) { if (batchable) toggleBatchSel(asset.id); } else setDetailAssetId(asset.id); }}
-                className={`bg-white rounded-xl border transition-all flex flex-col justify-between overflow-hidden ${batchMode && !batchable ? "border-slate-100 opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md"} ${picked ? "border-blue-500 ring-2 ring-blue-500" : "border-slate-100 hover:border-slate-300"}`}
-              >
-                <div className="p-5 border-b border-slate-50 space-y-2">
-                  <div className="flex justify-between items-start gap-2">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider flex items-center gap-1.5">
-                      {batchable && <span className={`inline-flex h-4 w-4 items-center justify-center rounded border ${picked ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-300"}`}>{picked && <Check className="h-3 w-3" />}</span>}
-                      {asset.category}
-                    </span>
-                    <span className="font-mono text-[10px] text-blue-600 font-extrabold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/30">
-                      {asset.id}
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-slate-800 text-sm tracking-tight hover:text-blue-600 transition truncate" title={asset.name}>
-                    {asset.name}
-                  </h4>
-                  <p className="text-[11px] text-slate-500 grid grid-cols-2 gap-x-2">
-                    <span>
-                      Client: <strong className="font-semibold text-slate-700 truncate block">{asset.client.split(" ")[1] || asset.client}</strong>
-                    </span>
-                    <span>
-                      WO-Code: <strong className="font-mono text-slate-700 block">{asset.projectCode}</strong>
-                    </span>
-                  </p>
-                </div>
-
-                <div className="px-5 py-4 bg-slate-50/50 flex justify-between items-center text-xs">
-                  <div>
-                    <p className="text-[10px] text-slate-400 uppercase font-medium">Jumlah / Biaya</p>
-                    <p className="font-bold text-slate-800">
-                      {asset.quantity} unit <span className="font-normal text-slate-400 text-[10px]">· {formatRupiah(asset.financials.purchaseCost)}</span>
-                    </p>
-                  </div>
-                  {asset.currentStage === 6 && asset.stageDetails?.deployment?.assignments?.length ? (() => {
-                    const d: any = asset.stageDetails.deployment;
-                    const asg: any[] = d.assignments || [];
-                    const installed = d.installedQty != null ? Number(d.installedQty) : installedOf(asg);
-                    const full = installed >= asset.quantity;
-                    return (
-                      <div className="text-right">
-                        <p className="text-[10px] text-slate-400 uppercase font-medium">Terpasang</p>
-                        <p className={`font-extrabold ${full ? "text-emerald-600" : "text-indigo-600"}`}>
-                          {installed}/{asset.quantity}
-                        </p>
-                      </div>
-                    );
-                  })() : asset.auditScore !== undefined && asset.currentStage >= 6 ? (
-                    <div className="text-right">
-                      <p className="text-[10px] text-slate-400 uppercase font-medium">Skor Audit</p>
-                      <p
-                        className={`font-extrabold ${
-                          asset.auditScore >= 90 ? "text-emerald-600" : asset.auditScore >= 70 ? "text-blue-600" : "text-rose-600"
-                        }`}
-                      >
-                        {asset.auditScore}/100
-                      </p>
+          <>
+            {shipmentBlocks.groups.map(g => {
+              const sh: any = g.members[0].stageDetails?.shipping || {};
+              const dest = Array.isArray(sh.destinations) ? sh.destinations[0] : null;
+              return (
+                <React.Fragment key={"grp-" + g.batchId}>
+                  <div className="col-span-full flex items-center gap-2.5 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-2.5 mt-1">
+                    <span className="bg-blue-600 text-white p-1.5 rounded-lg shrink-0"><Truck className="h-3.5 w-3.5" /></span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-extrabold text-slate-800">Pengiriman Bersama · Surat Jalan {g.batchId}</p>
+                      <p className="text-[10px] text-slate-500">{g.members.length} aset{sh.driverName ? ` · Driver ${sh.driverName}` : ""}{sh.vehiclePlate ? ` · ${sh.vehiclePlate}` : ""}{dest?.area ? ` · Tujuan ${dest.area}` : ""} — berangkat bersama</p>
                     </div>
-                  ) : null}
-                </div>
-
-                <div className="p-3 border-t border-slate-50 bg-white flex items-center justify-between">
-                  <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-bold ${statusColors[asset.currentStage]}`}>
-                    <IconComp className="h-3.5 w-3.5" />
-                    <span>Fase {asset.currentStage}: {cleanLabel(asset.currentStage)}</span>
+                    <span className="ml-auto shrink-0 text-[10px] font-bold text-blue-700 bg-white border border-blue-200 rounded-full px-2.5 py-1">{g.members.length} aset</span>
                   </div>
-                  <div className="flex items-center text-slate-400 group hover:text-blue-600 text-xs font-semibold gap-0.5">
-                    <span>Detail</span>
-                    <ChevronRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
-                  </div>
-                </div>
-              </div>
-            );
-          })
+                  {g.members.map(renderCard)}
+                </React.Fragment>
+              );
+            })}
+            {shipmentBlocks.singles.map(renderCard)}
+          </>
         )}
       </div>
 

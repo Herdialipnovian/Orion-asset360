@@ -442,7 +442,7 @@ export default function LifecycleManager({
   // PIC / Merchandiser directory for the CURRENT asset's client (drives gate dropdowns:
   // Fase-4 Surat Jalan PIC Penerima, Fase-6 Pemasangan Tim Merchandiser).
   const [picOptions, setPicOptions] = React.useState<string[]>([]);
-  const [merchDir, setMerchDir] = React.useState<{ id: number; name: string }[]>([]);
+  const [merchDir, setMerchDir] = React.useState<{ id: number; name: string; area: string | null }[]>([]);
   const loadDirectory = React.useCallback(async (client?: string | null) => {
     if (!client) {
       setPicOptions([]);
@@ -455,7 +455,7 @@ export default function LifecycleManager({
         api.usersDirectory("Merchandiser", client)
       ]);
       setPicOptions(pics.map(p => p.name));
-      setMerchDir(merch.map(m => ({ id: m.id, name: m.name })));
+      setMerchDir(merch.map(m => ({ id: m.id, name: m.name, area: (m as any).area ?? null })));
     } catch {
       setPicOptions([]);
       setMerchDir([]);
@@ -2228,20 +2228,36 @@ export default function LifecycleManager({
             <form onSubmit={submitDistribute} className="p-5 space-y-3 text-xs">
               {tokos.length === 0 && <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Belum ada toko untuk client ini. Tambahkan di Proyek &amp; Lokasi (tipe Toko), atau merchandiser bisa tambah di lapangan.</p>}
               <div className="space-y-2">
-                {distRows.map((r, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center">
-                    <select value={r.locationId} onChange={e => setDistRows(rows => rows.map((x, j) => j === i ? { ...x, locationId: e.target.value } : x))} className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer min-w-0">
+                {distRows.map((r, i) => {
+                  // Area-lock UX: scope the MD dropdown to the picked toko's area + warn if none.
+                  const toko = tokos.find(t => String(t.id) === String(r.locationId));
+                  const tokoArea = toko?.area || null;
+                  const tokoNoArea = !!(r.locationId && !tokoArea);              // toko belum ber-area
+                  const mdsForRow = tokoArea ? merchDir.filter(m => m.area === tokoArea) : []; // only in-area MDs are valid
+                  const noMd = !!(r.locationId && tokoArea && mdsForRow.length === 0);
+                  // Keep a stale/out-of-area selected MD VISIBLE (flagged) so it isn't silently blank on edit.
+                  const staleMd = !!r.merchandiserId && !mdsForRow.some(m => String(m.id) === String(r.merchandiserId));
+                  const staleMdName = staleMd ? (merchDir.find(m => String(m.id) === String(r.merchandiserId))?.name || "MD") : null;
+                  return (
+                  <div key={i} className="space-y-1">
+                    <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 items-center">
+                    <select value={r.locationId} onChange={e => setDistRows(rows => rows.map((x, j) => j === i ? { ...x, locationId: e.target.value, merchandiserId: "" } : x))} className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer min-w-0">
                       <option value="">— toko —</option>
                       {tokos.map(t => <option key={t.id} value={t.id}>{t.name}{t.area ? ` · ${t.area}` : ""}</option>)}
                     </select>
-                    <select value={r.merchandiserId} onChange={e => setDistRows(rows => rows.map((x, j) => j === i ? { ...x, merchandiserId: e.target.value } : x))} className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer min-w-0">
-                      <option value="">— merchandiser —</option>
-                      {merchDir.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    <select value={r.merchandiserId} disabled={!r.locationId || tokoNoArea} onChange={e => setDistRows(rows => rows.map((x, j) => j === i ? { ...x, merchandiserId: e.target.value } : x))} className="bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer min-w-0 disabled:opacity-50">
+                      <option value="">{tokoNoArea ? "— toko tanpa area —" : tokoArea ? `— MD area ${tokoArea} —` : "— pilih toko dulu —"}</option>
+                      {staleMd && <option value={r.merchandiserId}>⚠ {staleMdName} (luar area — ganti)</option>}
+                      {mdsForRow.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                     <input type="number" min={0} value={r.qty} onChange={e => setDistRows(rows => rows.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} className="w-16 bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg outline-none focus:ring-1 focus:ring-teal-500" placeholder="Qty" />
                     <button type="button" onClick={() => setDistRows(rows => rows.length > 1 ? rows.filter((_, j) => j !== i) : rows)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                    {noMd && <p className="text-[11px] text-amber-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3 shrink-0" /> Belum ada MD di area <strong>{tokoArea}</strong> — tambahkan user Merchandiser area itu di User Management.</p>}
+                    {tokoNoArea && <p className="text-[11px] text-amber-600 flex items-center gap-1"><AlertTriangle className="h-3 w-3 shrink-0" /> Toko ini belum punya Area — set area toko dulu di Proyek &amp; Lokasi.</p>}
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <button type="button" onClick={() => setDistRows(rows => [...rows, { locationId: "", merchandiserId: "", qty: "1" }])} className="flex items-center gap-1 text-[11px] text-teal-700 font-bold hover:text-teal-800"><Plus className="h-3.5 w-3.5" /> Tambah Toko</button>
               <div className={`text-[11px] font-bold ${tot > (detailAsset.quantity || 0) ? "text-rose-600" : "text-slate-500"}`}>Total dibagi: {tot} / {detailAsset.quantity} unit{tot < (detailAsset.quantity || 0) ? " (boleh kurang — bertahap)" : ""}</div>

@@ -106,10 +106,12 @@ app.get(
   wrap(async (req, res) => {
     const role = String(req.query.role || "");
     const client = String(req.query.client || "");
+    const area = String(req.query.area || "").trim();
     if (!["PIC", "Merchandiser"].includes(role)) return res.status(400).json({ error: "role harus PIC atau Merchandiser." });
-    const { rows } = client
-      ? await q(`select id, name, client from users where role=$1 and client=$2 order by name`, [role, client])
-      : await q(`select id, name, client from users where role=$1 order by name`, [role]);
+    const conds = ["role=$1"]; const params: any[] = [role];
+    if (client) { params.push(client); conds.push(`client=$${params.length}`); }
+    if (area) { params.push(area); conds.push(`area=$${params.length}`); } // per-area scoping for the MD lock
+    const { rows } = await q(`select id, name, client, area from users where ${conds.join(" and ")} order by name`, params);
     res.json(rows);
   })
 );
@@ -129,8 +131,10 @@ app.post(
     if (String(password).length < 6) return res.status(400).json({ error: "Password minimal 6 karakter." });
     const cli = CLIENT_SCOPED.includes(role) ? String(client || "").trim() : null;
     if (CLIENT_SCOPED.includes(role) && !cli) return res.status(400).json({ error: `Role ${role} wajib ditetapkan ke satu Client.` });
-    // Area scope is optional; only meaningful for client-scoped roles (PIC Area / Merchandiser per-area).
+    // Area scope: PIC optional, but Merchandiser REQUIRES an area (per-area lock — an MD may only
+    // be assigned/report installs in their own area).
     const ar = CLIENT_SCOPED.includes(role) ? String(area || "").trim() || null : null;
+    if (role === "Merchandiser" && !ar) return res.status(400).json({ error: "Merchandiser wajib punya Area (penguncian per-area)." });
     try {
       const hash = await hashPassword(password);
       const { rows } = await q(
@@ -175,6 +179,7 @@ app.patch(
     const newArea = CLIENT_SCOPED.includes(newRole)
       ? (area !== undefined ? String(area || "").trim() || null : target.area)
       : null;
+    if (newRole === "Merchandiser" && !newArea) return res.status(400).json({ error: "Merchandiser wajib punya Area (penguncian per-area)." });
 
     if (password) {
       if (String(password).length < 6) return res.status(400).json({ error: "Password minimal 6 karakter." });
@@ -670,12 +675,22 @@ app.post(
 
     const incoming: any[] = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
     if (!incoming.length) return res.status(400).json({ error: "Minimal 1 Merchandiser harus ditugaskan." });
+    // Hard area-lock (mirror distribute's toko_no_area): the venue must be tagged with an area
+    // before any MD can be assigned — else the per-area lock could be silently bypassed.
+    const deploymentPre: any = (asset.stageDetails as any)?.deployment || {};
+    const legsPre: any[] = Array.isArray(deploymentPre.legs) ? deploymentPre.legs : [];
+    const venueAreaPre: string | null = (legsPre.find((l: any) => l.status === "active") || legsPre[legsPre.length - 1])?.area || null;
+    if (!venueAreaPre) return res.status(422).json({ code: "venue_no_area", error: "Venue aktif belum punya Area — set area venue dulu di Proyek & Lokasi." });
 
     // Server-side directory: only real Merchandisers of THIS client are assignable.
-    const { rows: dir } = await q(`select id, name from users where role='Merchandiser' and client=$1`, [asset.client]);
+    const { rows: dir } = await q(`select id, name, area from users where role='Merchandiser' and client=$1`, [asset.client]);
     const nameById = new Map<number, string>(dir.map((r: any) => [Number(r.id), r.name]));
+    const mdById = new Map<number, any>(dir.map((r: any) => [Number(r.id), r]));
 
     const deployment: any = (asset.stageDetails as any)?.deployment || {};
+    // Area-lock (Event install is per-venue): the active leg's area is the area to match.
+    const legsForArea: any[] = Array.isArray(deployment.legs) ? deployment.legs : [];
+    const venueArea: string | null = (legsForArea.find((l: any) => l.status === "active") || legsForArea[legsForArea.length - 1])?.area || null;
     const existing: any[] = Array.isArray(deployment.assignments) ? deployment.assignments : [];
     const existingById = new Map<number, any>(existing.map(a => [Number(a.merchandiserId), a]));
 
@@ -687,6 +702,10 @@ app.post(
       if (!Number.isInteger(mid) || !nameById.has(mid)) return res.status(400).json({ error: "Merchandiser tidak valid untuk client ini." });
       if (seen.has(mid)) return res.status(400).json({ error: "Merchandiser tidak boleh dobel." });
       seen.add(mid);
+      // Hard area-lock: MD must have an area, and it MUST match the venue area (guaranteed set above).
+      const mdArea = mdById.get(mid)?.area || null;
+      if (!mdArea) return res.status(422).json({ code: "md_no_area", error: `${nameById.get(mid)} belum punya Area — isi dulu di User Management.` });
+      if (mdArea !== venueArea) return res.status(403).json({ code: "area_mismatch", error: `${nameById.get(mid)} (area ${mdArea}) tidak boleh ditugaskan di venue area ${venueArea}.` });
       if (!Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: "Qty tiap Merchandiser harus bilangan bulat > 0." });
       const prev = existingById.get(mid);
       const done = prev ? Number(prev.doneQty ?? (prev.status === "done" ? prev.qty : 0)) || 0 : 0;
@@ -761,6 +780,17 @@ app.post(
       if (!assignments.length) return { http: 422, body: { error: "Belum ada penugasan pemasangan pada aset ini." } };
       const a = assignments.find(x => Number(x.merchandiserId) === targetId);
       if (!a) return { http: 403, body: { error: "Kamu tidak ditugaskan untuk pemasangan aset ini." } };
+      // Defensive area-lock: a Merchandiser may only report installs in their own venue area —
+      // read the CURRENT area from the DB (not the possibly-stale JWT snapshot).
+      if (role === "Merchandiser") {
+        const legsC: any[] = Array.isArray(deployment.legs) ? deployment.legs : [];
+        const vArea: string | null = (legsC.find((l: any) => l.status === "active") || legsC[legsC.length - 1])?.area || null;
+        if (vArea) {
+          const { rows: mu } = await c.query(`select area from users where id=$1`, [targetId]);
+          const myArea = mu[0]?.area || null;
+          if (myArea !== vArea) return { http: 403, body: { error: `Venue ini di area ${vArea}, di luar area Anda (${myArea || "-"}).` } };
+        }
+      }
 
       const cap = Number(a.qty) || 0;
       const cur = Number(a.doneQty) || 0;
@@ -1393,8 +1423,10 @@ app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logist
   const { rows: locs } = locIds.length ? await q(`select id, name, area from locations where id = any($1)`, [locIds]) : { rows: [] };
   const locMap = new Map(locs.map((l: any) => [l.id, l]));
   const merchIds = [...new Set(rows.map(r => Number(r.merchandiserId)).filter(Boolean))];
-  const { rows: ms } = merchIds.length ? await q(`select id, name from users where id = any($1) and role='Merchandiser'`, [merchIds]) : { rows: [] };
+  // Client-scope the assignable MDs (mirror install/assign) — no cross-client assignment.
+  const { rows: ms } = merchIds.length ? await q(`select id, name, area from users where id = any($1) and role='Merchandiser' and client=$2`, [merchIds, asset.client]) : { rows: [] };
   const merchMap = new Map(ms.map((m: any) => [m.id, m.name]));
+  const merchAreaMap = new Map(ms.map((m: any) => [m.id, m.area]));
 
   const dep: any = { ...((asset.stageDetails as any).deployment || {}) };
   const existing: any[] = Array.isArray(dep.placements) ? dep.placements.map((p: any) => ({ ...p })) : [];
@@ -1413,6 +1445,14 @@ app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logist
     const dq = prev ? Number(prev.doneQty) || 0 : 0;
     if (qty < dq) return res.status(422).json({ error: `Qty toko ${loc.name} (${qty}) < yang sudah terpasang (${dq}).` });
     const mid = Number(r.merchandiserId) || undefined;
+    // Hard area-lock: an assigned MD must belong to THIS client, have an area, and match the toko's area.
+    if (mid) {
+      if (!merchMap.has(mid)) return res.status(400).json({ error: "Merchandiser tidak valid untuk client ini." });
+      const mdArea = merchAreaMap.get(mid) || null;
+      if (!mdArea) return res.status(422).json({ code: "md_no_area", error: `${merchMap.get(mid)} belum punya Area — isi dulu di User Management.` });
+      if (loc.area && mdArea !== loc.area) return res.status(403).json({ code: "area_mismatch", error: `${merchMap.get(mid)} (area ${mdArea}) tidak boleh ditugaskan ke toko ${loc.name} (area ${loc.area}).` });
+      if (!loc.area) return res.status(422).json({ code: "toko_no_area", error: `Toko ${loc.name} belum punya Area — set area toko dulu di Proyek & Lokasi.` });
+    }
     byLoc.set(lid, {
       ...(prev || {}),
       locationId: lid, toko: loc.name, area: loc.area || undefined,
@@ -1469,6 +1509,13 @@ app.post("/api/assets/:id/place", requireAuthFlexible, requireRole("Admin", "Log
     // A Merchandiser may only report a placement that is assigned to THEM (unassigned → deny).
     if (req.user!.role === "Merchandiser" && Number(p.merchandiserId) !== req.user!.id) {
       return { http: 403, body: { error: "Placement ini bukan tugas Anda." } };
+    }
+    // Defensive area-lock: a Merchandiser may only report in their own area — read the CURRENT
+    // area from the DB (not the 12h JWT snapshot, which can be stale after an area change).
+    if (req.user!.role === "Merchandiser" && p.area) {
+      const { rows: mu } = await c.query(`select area from users where id=$1`, [req.user!.id]);
+      const myArea = mu[0]?.area || null;
+      if (myArea !== p.area) return { http: 403, body: { error: `Toko ini di area ${p.area}, di luar area Anda (${myArea || "-"}).` } };
     }
     const cap = Number(p.qty) || 0;
     const cur = Number(p.doneQty) || 0;

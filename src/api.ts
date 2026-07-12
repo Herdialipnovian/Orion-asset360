@@ -285,9 +285,9 @@ export const api = {
   async getEvidence(assetId: string): Promise<EvidenceView[]> {
     return (await req(`/assets/${encodeURIComponent(assetId)}/evidence`)).evidence;
   },
-  // Directory of PIC / Merchandiser for a client (dropdown sources).
-  usersDirectory(role: "PIC" | "Merchandiser", client?: string): Promise<{ id: number; name: string; client: string | null }[]> {
-    return req(`/users/directory?role=${encodeURIComponent(role)}${client ? `&client=${encodeURIComponent(client)}` : ""}`);
+  // Directory of PIC / Merchandiser for a client (dropdown sources). Optional area filter (MD lock).
+  usersDirectory(role: "PIC" | "Merchandiser", client?: string, area?: string): Promise<{ id: number; name: string; client: string | null; area: string | null }[]> {
+    return req(`/users/directory?role=${encodeURIComponent(role)}${client ? `&client=${encodeURIComponent(client)}` : ""}${area ? `&area=${encodeURIComponent(area)}` : ""}`);
   },
   // Assign / re-assign Merchandiser install portions (Fase 6, in-place, server-merged).
   assignInstall(id: string, p: { assignments: { merchandiserId: number; qty: number }[]; baseUpdatedAt?: string; operator?: string }): Promise<any> {

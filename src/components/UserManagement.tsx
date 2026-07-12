@@ -89,6 +89,10 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
     if (isClientScoped(form.role) && !form.client) {
       return setFormErr(`Role ${form.role} harus ditugaskan ke satu client.`);
     }
+    // MD area-lock: a Merchandiser is locked to an area, so an area is mandatory.
+    if (form.role === "Merchandiser" && !form.area) {
+      return setFormErr("Merchandiser wajib punya Area (dikunci ke area itu — pasang hanya di area-nya).");
+    }
     setSaving(true);
     try {
       const client = isClientScoped(form.role) ? form.client : "";
@@ -345,7 +349,9 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
               {isClientScoped(form.role) && (
                 <div className="space-y-1.5">
                   <label className="font-bold text-slate-700">
-                    Area <span className="font-normal text-slate-400">(opsional — untuk distribusi/roadshow)</span>
+                    Area {form.role === "Merchandiser"
+                      ? <span className="text-rose-500">* (wajib — MD dikunci ke area ini)</span>
+                      : <span className="font-normal text-slate-400">(opsional — untuk distribusi/roadshow)</span>}
                   </label>
                   <select
                     name="area"
@@ -353,12 +359,15 @@ export default function UserManagement({ user, clientOptions = [] }: { user: Aut
                     onChange={e => setForm({ ...form, area: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 font-medium text-slate-800 cursor-pointer"
                   >
-                    <option value="">— tanpa area (mis. event) —</option>
+                    <option value="">{form.role === "Merchandiser" ? "— pilih area (wajib) —" : "— tanpa area (mis. event) —"}</option>
                     {areas.map(a => (
                       <option key={a} value={a}>{a}</option>
                     ))}
                     {form.area && !areas.includes(form.area) && <option value={form.area}>{form.area}</option>}
                   </select>
+                  {form.role === "Merchandiser" && areas.length === 0 && (
+                    <p className="text-[11px] text-amber-600 font-semibold">Belum ada master Area — tambahkan Area dulu di menu Organisasi → Area sebelum membuat Merchandiser.</p>
+                  )}
                   <p className="text-[10px] text-slate-400 leading-relaxed">
                     Isi kalau {form.role} bertanggung jawab di area tertentu (mis. PIC Area Aceh). Kosongkan untuk event.
                   </p>

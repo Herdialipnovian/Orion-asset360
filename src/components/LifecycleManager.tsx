@@ -130,15 +130,20 @@ const COURIERS = [
   "GrabExpress", "Paxel", "Deliveree", "Lainnya"
 ];
 
-// Visual identity per deployment flow, so the 4 flows are distinguishable at a glance (color bar + chip).
+// Visual identity per deployment flow, so the flows are distinguishable at a glance (color bar + chip).
+// "Belum" = not yet bound to a project & not yet shipped — an undecided Gudang asset (neutral grey),
+// distinct from a committed courier shipment (Kurir Standar / blue).
 const FLOW_UI: Record<string, { label: string; bar: string; chip: string; ring: string; Icon: React.ComponentType<{ className?: string }> }> = {
+  Belum:      { label: "Belum diikat proyek", bar: "bg-slate-300", chip: "bg-slate-100 text-slate-500 border-slate-200", ring: "hover:border-slate-300", Icon: ClipboardList },
   Standard:   { label: "Kurir Standar",      bar: "bg-blue-500",   chip: "bg-blue-50 text-blue-700 border-blue-200",     ring: "hover:border-blue-300",   Icon: Truck },
   Event:      { label: "Event Roadshow",     bar: "bg-amber-500",  chip: "bg-amber-50 text-amber-700 border-amber-200",  ring: "hover:border-amber-300",  Icon: Compass },
   Distribusi: { label: "Distribusi Toko",    bar: "bg-teal-500",   chip: "bg-teal-50 text-teal-700 border-teal-200",     ring: "hover:border-teal-300",   Icon: Building },
   Internal:   { label: "Internal Custodian", bar: "bg-violet-500", chip: "bg-violet-50 text-violet-700 border-violet-200", ring: "hover:border-violet-300", Icon: Briefcase },
 };
-const flowKeyOf = (m: string | null | undefined): "Standard" | "Event" | "Distribusi" | "Internal" =>
-  m === "Event" || m === "Distribusi" || m === "Internal" ? m : "Standard";
+// VISUAL key: a bound/stamped flow, or "Belum" when the asset has no project and no stamped mode yet.
+// (Gating logic elsewhere still treats an unbound asset as courier-eligible.)
+const flowKeyOf = (m: string | null | undefined): "Belum" | "Standard" | "Event" | "Distribusi" | "Internal" =>
+  m === "Event" || m === "Distribusi" || m === "Internal" || m === "Standard" ? m : "Belum";
 
 // Per-item audit checklist (Fase 7) — shared with the mobile field app so both score identically.
 
@@ -458,7 +463,7 @@ export default function LifecycleManager({
   const [searchQuery, setSearchQuery] = React.useState("");
   const [filterCategory, setFilterCategory] = React.useState("ALL");
   const [filterStage, setFilterStage] = React.useState<number | string>(initialStageFilter);
-  const [flowFilter, setFlowFilter] = React.useState<"ALL" | "Standard" | "Event" | "Distribusi">("ALL");
+  const [flowFilter, setFlowFilter] = React.useState<"ALL" | "Belum" | "Standard" | "Event" | "Distribusi">("ALL");
 
   const [isNewAssetModalOpen, setIsNewAssetModalOpen] = React.useState(false);
   // Detail modal tracks the asset by ID so it always reflects the freshest state after a transition
@@ -843,7 +848,7 @@ export default function LifecycleManager({
     });
   }, [assets, searchQuery, selectedClient, filterCategory, filterStage]);
   const flowCounts = React.useMemo(() => {
-    const c: Record<string, number> = { Standard: 0, Event: 0, Distribusi: 0 };
+    const c: Record<string, number> = { Belum: 0, Standard: 0, Event: 0, Distribusi: 0 };
     baseAssetsList.forEach(a => { c[flowKeyOf(projectModeOf(a))] = (c[flowKeyOf(projectModeOf(a))] || 0) + 1; });
     return c;
   }, [baseAssetsList, projectModeOf]);
@@ -881,7 +886,8 @@ export default function LifecycleManager({
     const flow = FLOW_UI[fmode];
     const FlowIcon = flow.Icon;
     const proj = asset.projectId != null ? projects.find(p => p.id === asset.projectId) : null;
-    const batchable = batchMode && asset.currentStage === 3 && fmode === "Standard";
+    // Courier-eligible = not committed to Event/Distribusi/Internal (Belum/unbound + Standard qualify).
+    const batchable = batchMode && asset.currentStage === 3 && fmode !== "Event" && fmode !== "Distribusi" && fmode !== "Internal";
     const picked = batchSel.includes(asset.id);
     return (
       <div
@@ -1654,7 +1660,7 @@ export default function LifecycleManager({
       {/* Flow legend — color guide + click a flow to filter the register */}
       <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-100 rounded-xl px-3 py-2.5 shadow-xs">
         <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mr-1">Alur Deployment:</span>
-        {(["Standard", "Event", "Distribusi"] as const).map(k => {
+        {(["Belum", "Standard", "Event", "Distribusi"] as const).map(k => {
           const f = FLOW_UI[k]; const FIcon = f.Icon; const active = flowFilter === k;
           return (
             <button

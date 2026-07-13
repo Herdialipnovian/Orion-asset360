@@ -1300,7 +1300,9 @@ export default function LifecycleManager({
       control = (
         <div className="space-y-1">
           <select name={f.key} className={`${base} cursor-pointer font-medium`} value={val || ""} onChange={e => set(e.target.value)}>
-            {(f.source || !f.required) && <option value="">{f.source ? `— pilih ${roleLabel} —` : "— pilih —"}</option>}
+            {/* Always render a blank first option so a select never SILENTLY shows option[0]
+                while its state is empty (a required select then correctly forces a real pick). */}
+            <option value="">{f.source ? `— pilih ${roleLabel} —` : "— pilih —"}</option>
             {withVal.map(o => (
               <option key={o} value={o}>
                 {o}

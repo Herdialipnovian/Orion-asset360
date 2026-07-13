@@ -889,12 +889,19 @@ export default function LifecycleManager({
     const proj = asset.projectId != null ? projects.find(p => p.id === asset.projectId) : null;
     // Courier-eligible = not committed to Event/Distribusi/Internal (Belum/unbound + Standard qualify).
     const batchable = batchMode && asset.currentStage === 3 && fmode !== "Event" && fmode !== "Distribusi" && fmode !== "Internal";
+    // In batch mode, tell the operator WHY a card can't be selected instead of just dimming it.
+    const batchBlockReason = !batchMode || batchable ? null
+      : asset.currentStage !== 3 ? "Hanya dari Gudang (Fase 1)"
+      : fmode === "Event" ? "Aset Event — pakai “Kirim ke Venue”"
+      : fmode === "Distribusi" ? "Aset Distribusi — pakai “Distribusi ke Toko”"
+      : fmode === "Internal" ? "Aset Internal — menu Aset Internal"
+      : null;
     const picked = batchSel.includes(asset.id);
     return (
       <div
         key={asset.id}
         onClick={() => { if (batchMode) { if (batchable) toggleBatchSel(asset.id); } else setDetailAssetId(asset.id); }}
-        className={`bg-white rounded-xl border transition-all flex flex-col justify-between overflow-hidden ${batchMode && !batchable ? "border-slate-100 opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md"} ${picked ? "border-blue-500 ring-2 ring-blue-500" : `border-slate-100 ${flow.ring}`}`}
+        className={`bg-white rounded-xl border transition-all flex flex-col justify-between overflow-hidden ${batchMode && !batchable ? "border-slate-100 opacity-60 cursor-not-allowed" : "cursor-pointer hover:shadow-md"} ${picked ? "border-blue-500 ring-2 ring-blue-500" : `border-slate-100 ${flow.ring}`}`}
       >
         {/* Flow identity bar — color signals the deployment flow at a glance */}
         <div className={`h-1.5 w-full ${flow.bar}`} />
@@ -907,9 +914,14 @@ export default function LifecycleManager({
             <span className="font-mono text-[10px] text-blue-600 font-extrabold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/30">{asset.id}</span>
           </div>
           <h4 className="font-bold text-slate-800 text-sm tracking-tight hover:text-blue-600 transition truncate" title={asset.name}>{asset.name}</h4>
-          <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border w-fit ${flow.chip}`}>
-            <FlowIcon className="h-2.5 w-2.5" /> {flow.label}
-          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border w-fit ${flow.chip}`}>
+              <FlowIcon className="h-2.5 w-2.5" /> {flow.label}
+            </span>
+            {batchBlockReason && (
+              <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200 w-fit"><AlertTriangle className="h-2.5 w-2.5" /> {batchBlockReason}</span>
+            )}
+          </div>
           <p className="text-[11px] text-slate-500 grid grid-cols-2 gap-x-2">
             <span>Client: <strong className="font-semibold text-slate-700 truncate block">{asset.client.split(" ")[1] || asset.client}</strong></span>
             <span>WO-Code: <strong className="font-mono text-slate-700 block">{asset.projectCode}</strong></span>
@@ -1654,7 +1666,7 @@ export default function LifecycleManager({
       </div>
       {batchMode && (
         <div className="flex items-center gap-2 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 font-semibold">
-          <Truck className="h-3.5 w-3.5 shrink-0" /> Mode Kirim Bersama — centang aset di <strong>Gudang (Fase 3)</strong> yang berangkat dengan satu kendaraan/driver ke satu tujuan.
+          <Truck className="h-3.5 w-3.5 shrink-0" /> Mode Kirim Bersama (alur Kurir Standar) — centang aset <strong>Kurir Standar / belum diikat proyek</strong> di <strong>Gudang (Fase 1)</strong> yang berangkat dengan satu kendaraan/driver ke satu tujuan. Aset <strong>Event</strong> pakai “Kirim ke Venue”, <strong>Distribusi</strong> pakai “Distribusi ke Toko”.
         </div>
       )}
 

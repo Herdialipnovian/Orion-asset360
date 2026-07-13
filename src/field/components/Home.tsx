@@ -58,7 +58,7 @@ export default function Home({
     () =>
       assets
         .map(a => {
-          const actions = eligibleActions(a.currentStage, user.role);
+          const actions = eligibleActions(a.currentStage, user.role, a);
           const it = myInstallTask(a, user.id);
           const labels = [] as string[];
           if (it) labels.push(`Pasang ${it.remaining} unit`);

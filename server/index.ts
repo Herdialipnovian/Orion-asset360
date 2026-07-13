@@ -488,6 +488,13 @@ app.patch(
         });
       }
     }
+    // Flow guard: Fase 4 (Surat Jalan) & 5 (Transit) are the Standard courier flow ONLY. Don't let the
+    // generic ladder walk an Event/Distribusi/Internal asset into them (mirrors /ship + /batch-ship).
+    // An Admin force (e.g. a Master Data manual override) may still do it deliberately.
+    if ((ns === 4 || ns === 5) && ns !== cur && !(req.user!.role === "Admin" && meta?.force === true)) {
+      const sFlow = await flowModeOf(asset);
+      if (sFlow !== "Standard") return res.status(422).json({ code: "wrong_flow", error: `Aset alur ${sFlow} tidak melewati Fase ${ns} (Surat Jalan/Transit). ${FLOW_START_HINT[sFlow] || ""}` });
+    }
 
     // Pemasangan is now advisory (soft gate): 6->7 (Audit) is allowed even if some
     // assigned portions are still pending — the CMS shows the honest installed/total.
@@ -975,8 +982,11 @@ app.post(
     // before any MD can be assigned — else the per-area lock could be silently bypassed.
     const deploymentPre: any = (asset.stageDetails as any)?.deployment || {};
     const legsPre: any[] = Array.isArray(deploymentPre.legs) ? deploymentPre.legs : [];
+    // Only Event installs at a venue leg — that venue must have an Area. Standard/POD installs at the
+    // shipping destination (no venue), so this venue-area gate does NOT apply to them.
+    const isEventInstall = legsPre.length > 0;
     const venueAreaPre: string | null = (legsPre.find((l: any) => l.status === "active") || legsPre[legsPre.length - 1])?.area || null;
-    if (!venueAreaPre) return res.status(422).json({ code: "venue_no_area", error: "Venue aktif belum memiliki Area. Tetapkan area venue terlebih dahulu di Proyek & Lokasi." });
+    if (isEventInstall && !venueAreaPre) return res.status(422).json({ code: "venue_no_area", error: "Venue aktif belum memiliki Area. Tetapkan area venue terlebih dahulu di Proyek & Lokasi." });
 
     // Server-side directory: only real Merchandisers of THIS client are assignable.
     const { rows: dir } = await q(`select id, name, area from users where role='Merchandiser' and client=$1`, [asset.client]);
@@ -984,9 +994,13 @@ app.post(
     const mdById = new Map<number, any>(dir.map((r: any) => [Number(r.id), r]));
 
     const deployment: any = (asset.stageDetails as any)?.deployment || {};
-    // Area-lock (Event install is per-venue): the active leg's area is the area to match.
+    // Area-lock: Event installs match the active venue leg's area; Standard/POD installs match the
+    // shipping destination area. null = no area lock (any Merchandiser of this client is assignable).
     const legsForArea: any[] = Array.isArray(deployment.legs) ? deployment.legs : [];
-    const venueArea: string | null = (legsForArea.find((l: any) => l.status === "active") || legsForArea[legsForArea.length - 1])?.area || null;
+    const destsForArea: any[] = Array.isArray((asset.stageDetails as any)?.shipping?.destinations) ? (asset.stageDetails as any).shipping.destinations : [];
+    const venueArea: string | null = legsForArea.length > 0
+      ? ((legsForArea.find((l: any) => l.status === "active") || legsForArea[legsForArea.length - 1])?.area || null)
+      : (destsForArea[0]?.area ? (String(destsForArea[0].area).trim() || null) : null);
     const existing: any[] = Array.isArray(deployment.assignments) ? deployment.assignments : [];
     const existingById = new Map<number, any>(existing.map(a => [Number(a.merchandiserId), a]));
 
@@ -1000,8 +1014,9 @@ app.post(
       seen.add(mid);
       // Hard area-lock: MD must have an area, and it MUST match the venue area (guaranteed set above).
       const mdArea = mdById.get(mid)?.area || null;
-      if (!mdArea) return res.status(422).json({ code: "md_no_area", error: `${nameById.get(mid)} belum memiliki Area. Isi terlebih dahulu di User Management.` });
-      if (mdArea !== venueArea) return res.status(403).json({ code: "area_mismatch", error: `${nameById.get(mid)} (area ${mdArea}) tidak boleh ditugaskan di venue area ${venueArea}.` });
+      // Area lock only applies when there IS a lock area (Event venue, or a Standard destination area).
+      if (venueArea && !mdArea) return res.status(422).json({ code: "md_no_area", error: `${nameById.get(mid)} belum memiliki Area. Isi terlebih dahulu di User Management.` });
+      if (venueArea && mdArea !== venueArea) return res.status(403).json({ code: "area_mismatch", error: `${nameById.get(mid)} (area ${mdArea}) tidak boleh ditugaskan di area ${venueArea}.` });
       if (!Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: "Qty tiap Merchandiser harus bilangan bulat > 0." });
       const prev = existingById.get(mid);
       const done = prev ? Number(prev.doneQty ?? (prev.status === "done" ? prev.qty : 0)) || 0 : 0;

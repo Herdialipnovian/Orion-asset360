@@ -458,6 +458,7 @@ export default function LifecycleManager({
   const [searchQuery, setSearchQuery] = React.useState("");
   const [filterCategory, setFilterCategory] = React.useState("ALL");
   const [filterStage, setFilterStage] = React.useState<number | string>(initialStageFilter);
+  const [flowFilter, setFlowFilter] = React.useState<"ALL" | "Standard" | "Event" | "Distribusi">("ALL");
 
   const [isNewAssetModalOpen, setIsNewAssetModalOpen] = React.useState(false);
   // Detail modal tracks the asset by ID so it always reflects the freshest state after a transition
@@ -824,7 +825,9 @@ export default function LifecycleManager({
 
   const categories = React.useMemo(() => Array.from(new Set(assets.map(a => a.category))), [assets]);
 
-  const filteredAssetsList = React.useMemo(() => {
+  // Register-eligible assets (all filters EXCEPT the flow filter) — used both for the flow legend
+  // counts and, after applying the flow filter, for the rendered grid.
+  const baseAssetsList = React.useMemo(() => {
     return assets.filter(asset => {
       const q = searchQuery.toLowerCase();
       const matchSearch =
@@ -839,6 +842,15 @@ export default function LifecycleManager({
       return isDeployment && matchSearch && matchClient && matchCategory && matchStage;
     });
   }, [assets, searchQuery, selectedClient, filterCategory, filterStage]);
+  const flowCounts = React.useMemo(() => {
+    const c: Record<string, number> = { Standard: 0, Event: 0, Distribusi: 0 };
+    baseAssetsList.forEach(a => { c[flowKeyOf(projectModeOf(a))] = (c[flowKeyOf(projectModeOf(a))] || 0) + 1; });
+    return c;
+  }, [baseAssetsList, projectModeOf]);
+  const filteredAssetsList = React.useMemo(
+    () => flowFilter === "ALL" ? baseAssetsList : baseAssetsList.filter(a => flowKeyOf(projectModeOf(a)) === flowFilter),
+    [baseAssetsList, flowFilter, projectModeOf]
+  );
 
   // Group the register by shipment group: assets dispatched together (same batchId) and still in the
   // journey (Fase 4–9) render under ONE "Surat Jalan" header, in every phase view — not scattered.
@@ -868,6 +880,7 @@ export default function LifecycleManager({
     const fmode = isInternalDeploy(asset) || asset.peruntukan === "Internal" ? "Internal" : flowKeyOf(projectModeOf(asset));
     const flow = FLOW_UI[fmode];
     const FlowIcon = flow.Icon;
+    const proj = asset.projectId != null ? projects.find(p => p.id === asset.projectId) : null;
     const batchable = batchMode && asset.currentStage === 3 && fmode === "Standard";
     const picked = batchSel.includes(asset.id);
     return (
@@ -893,6 +906,11 @@ export default function LifecycleManager({
           <p className="text-[11px] text-slate-500 grid grid-cols-2 gap-x-2">
             <span>Client: <strong className="font-semibold text-slate-700 truncate block">{asset.client.split(" ")[1] || asset.client}</strong></span>
             <span>WO-Code: <strong className="font-mono text-slate-700 block">{asset.projectCode}</strong></span>
+          </p>
+          <p className="flex items-center gap-1 text-[11px] text-slate-500 truncate" title={proj ? proj.name : "Tanpa proyek"}>
+            <Briefcase className="h-3 w-3 shrink-0 text-indigo-400" />
+            <span className="text-slate-400">Proyek:</span>{" "}
+            <strong className={`truncate ${proj ? "font-semibold text-slate-700" : "font-medium text-slate-400 italic"}`}>{proj ? proj.name : "Tanpa proyek"}</strong>
           </p>
         </div>
         <div className="px-5 py-4 bg-slate-50/50 flex justify-between items-center text-xs">
@@ -1632,6 +1650,34 @@ export default function LifecycleManager({
           <Truck className="h-3.5 w-3.5 shrink-0" /> Mode Kirim Bersama — centang aset di <strong>Gudang (Fase 3)</strong> yang berangkat dengan satu kendaraan/driver ke satu tujuan.
         </div>
       )}
+
+      {/* Flow legend — color guide + click a flow to filter the register */}
+      <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-100 rounded-xl px-3 py-2.5 shadow-xs">
+        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mr-1">Alur Deployment:</span>
+        {(["Standard", "Event", "Distribusi"] as const).map(k => {
+          const f = FLOW_UI[k]; const FIcon = f.Icon; const active = flowFilter === k;
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setFlowFilter(active ? "ALL" : k)}
+              title={`Filter alur: ${f.label}`}
+              className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border transition ${f.chip} ${active ? "ring-2 ring-offset-1 ring-slate-300" : "hover:brightness-95"}`}
+            >
+              <span className={`h-2 w-2 rounded-full ${f.bar}`} />
+              <FIcon className="h-3 w-3" />
+              {f.label}
+              <span className="ml-0.5 rounded bg-white/70 px-1 text-[10px] tabular-nums">{flowCounts[k] || 0}</span>
+            </button>
+          );
+        })}
+        {flowFilter !== "ALL" && (
+          <button type="button" onClick={() => setFlowFilter("ALL")} className="text-[11px] font-bold text-slate-500 underline underline-offset-2 hover:text-slate-800">Tampilkan semua</button>
+        )}
+        <span className="ml-auto inline-flex items-center gap-1.5 text-[10px] font-semibold text-violet-600">
+          <span className="h-2 w-2 rounded-full bg-violet-500" /> Internal Custodian → menu <strong>Aset Internal</strong>
+        </span>
+      </div>
 
       {/* Asset grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

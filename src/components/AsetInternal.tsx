@@ -93,7 +93,11 @@ export default function AsetInternal({ assets, user, onChanged }: { assets: Asse
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
         <div>
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2"><Boxes className="h-5 w-5 text-slate-700" /> Aset Internal</h2>
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
+            <span className="bg-violet-100 text-violet-700 p-1.5 rounded-lg"><Boxes className="h-4 w-4" /></span>
+            Aset Internal
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200">Internal Custodian</span>
+          </h2>
           <p className="text-slate-400 text-xs mt-0.5">Aset operasional Origin yang dipegang oleh karyawan. {internal.length} aset · {heldCount} sedang dipegang.</p>
         </div>
         <div className="relative">
@@ -103,7 +107,9 @@ export default function AsetInternal({ assets, user, onChanged }: { assets: Asse
       </div>
       {err && <div className="flex items-center gap-2 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><AlertTriangle className="h-4 w-4" /> {err}</div>}
 
-      <div className="bg-white border border-slate-100 rounded-xl shadow-xs overflow-x-auto">
+      <div className="bg-white border border-slate-100 rounded-xl shadow-xs overflow-hidden">
+        <div className="h-1.5 w-full bg-violet-500" />
+        <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead><tr className="text-slate-400 border-b border-slate-100 bg-slate-50/60">
             <th className="text-left font-extrabold px-4 py-2.5">Aset</th>
@@ -148,6 +154,7 @@ export default function AsetInternal({ assets, user, onChanged }: { assets: Asse
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Serah-terima / ganti custodian */}

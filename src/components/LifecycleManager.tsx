@@ -130,6 +130,16 @@ const COURIERS = [
   "GrabExpress", "Paxel", "Deliveree", "Lainnya"
 ];
 
+// Visual identity per deployment flow, so the 4 flows are distinguishable at a glance (color bar + chip).
+const FLOW_UI: Record<string, { label: string; bar: string; chip: string; ring: string; Icon: React.ComponentType<{ className?: string }> }> = {
+  Standard:   { label: "Kurir Standar",      bar: "bg-blue-500",   chip: "bg-blue-50 text-blue-700 border-blue-200",     ring: "hover:border-blue-300",   Icon: Truck },
+  Event:      { label: "Event Roadshow",     bar: "bg-amber-500",  chip: "bg-amber-50 text-amber-700 border-amber-200",  ring: "hover:border-amber-300",  Icon: Compass },
+  Distribusi: { label: "Distribusi Toko",    bar: "bg-teal-500",   chip: "bg-teal-50 text-teal-700 border-teal-200",     ring: "hover:border-teal-300",   Icon: Building },
+  Internal:   { label: "Internal Custodian", bar: "bg-violet-500", chip: "bg-violet-50 text-violet-700 border-violet-200", ring: "hover:border-violet-300", Icon: Briefcase },
+};
+const flowKeyOf = (m: string | null | undefined): "Standard" | "Event" | "Distribusi" | "Internal" =>
+  m === "Event" || m === "Distribusi" || m === "Internal" ? m : "Standard";
+
 // Per-item audit checklist (Fase 7) — shared with the mobile field app so both score identically.
 
 // The data captured when transitioning INTO each stage (drives the gate form)
@@ -855,15 +865,19 @@ export default function LifecycleManager({
     const IconComp = STAGE_ICONS[asset.currentStage] || ClipboardList;
     // "Kirim Bersama" is the Standard courier flow only — Event/Distribusi/Internal assets ship via
     // their own start action, so they are not selectable here.
-    const bmode = isInternalDeploy(asset) || asset.peruntukan === "Internal" ? "Internal" : projectModeOf(asset);
-    const batchable = batchMode && asset.currentStage === 3 && bmode !== "Event" && bmode !== "Distribusi" && bmode !== "Internal";
+    const fmode = isInternalDeploy(asset) || asset.peruntukan === "Internal" ? "Internal" : flowKeyOf(projectModeOf(asset));
+    const flow = FLOW_UI[fmode];
+    const FlowIcon = flow.Icon;
+    const batchable = batchMode && asset.currentStage === 3 && fmode === "Standard";
     const picked = batchSel.includes(asset.id);
     return (
       <div
         key={asset.id}
         onClick={() => { if (batchMode) { if (batchable) toggleBatchSel(asset.id); } else setDetailAssetId(asset.id); }}
-        className={`bg-white rounded-xl border transition-all flex flex-col justify-between overflow-hidden ${batchMode && !batchable ? "border-slate-100 opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md"} ${picked ? "border-blue-500 ring-2 ring-blue-500" : "border-slate-100 hover:border-slate-300"}`}
+        className={`bg-white rounded-xl border transition-all flex flex-col justify-between overflow-hidden ${batchMode && !batchable ? "border-slate-100 opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md"} ${picked ? "border-blue-500 ring-2 ring-blue-500" : `border-slate-100 ${flow.ring}`}`}
       >
+        {/* Flow identity bar — color signals the deployment flow at a glance */}
+        <div className={`h-1.5 w-full ${flow.bar}`} />
         <div className="p-5 border-b border-slate-50 space-y-2">
           <div className="flex justify-between items-start gap-2">
             <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider flex items-center gap-1.5">
@@ -873,6 +887,9 @@ export default function LifecycleManager({
             <span className="font-mono text-[10px] text-blue-600 font-extrabold bg-blue-50 px-2 py-0.5 rounded border border-blue-100/30">{asset.id}</span>
           </div>
           <h4 className="font-bold text-slate-800 text-sm tracking-tight hover:text-blue-600 transition truncate" title={asset.name}>{asset.name}</h4>
+          <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border w-fit ${flow.chip}`}>
+            <FlowIcon className="h-2.5 w-2.5" /> {flow.label}
+          </span>
           <p className="text-[11px] text-slate-500 grid grid-cols-2 gap-x-2">
             <span>Client: <strong className="font-semibold text-slate-700 truncate block">{asset.client.split(" ")[1] || asset.client}</strong></span>
             <span>WO-Code: <strong className="font-mono text-slate-700 block">{asset.projectCode}</strong></span>
@@ -1673,19 +1690,15 @@ export default function LifecycleManager({
                 // Identity + live status card (replaces the old non-functional QR placeholder block).
                 // Shows the asset's ID, which of the 4 flows it's in, its current phase, and location.
                 const St = STAGE_ICONS[detailAsset.currentStage] || ClipboardList;
-                const raw = isInternalDeploy(detailAsset) || detailAsset.peruntukan === "Internal" ? "Internal" : (projectModeOf(detailAsset) || "Standar");
-                const flow: any = {
-                  Standar: { l: "Kurir Standar", c: "bg-blue-50 text-blue-700 border-blue-200" },
-                  Standard: { l: "Kurir Standar", c: "bg-blue-50 text-blue-700 border-blue-200" },
-                  Event: { l: "Event Roadshow", c: "bg-amber-50 text-amber-700 border-amber-200" },
-                  Distribusi: { l: "Distribusi Toko", c: "bg-teal-50 text-teal-700 border-teal-200" },
-                  Internal: { l: "Internal Custodian", c: "bg-slate-100 text-slate-700 border-slate-300" },
-                }[raw] || { l: "Kurir Standar", c: "bg-blue-50 text-blue-700 border-blue-200" };
+                const fmode = isInternalDeploy(detailAsset) || detailAsset.peruntukan === "Internal" ? "Internal" : flowKeyOf(projectModeOf(detailAsset));
+                const flow = FLOW_UI[fmode]; const FlowIcon = flow.Icon;
                 return (
-                  <div className="bg-gradient-to-br from-slate-50 to-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                  <div className="rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className={`h-1.5 w-full ${flow.bar}`} />
+                    <div className="bg-gradient-to-br from-slate-50 to-white p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[11px] font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{detailAsset.id}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${flow.c}`}>{flow.l}</span>
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${flow.chip}`}><FlowIcon className="h-3 w-3" /> {flow.label}</span>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className={`shrink-0 p-2.5 rounded-xl border ${statusColors[detailAsset.currentStage] || "bg-slate-100 text-slate-500 border-slate-200"}`}>
@@ -1702,6 +1715,7 @@ export default function LifecycleManager({
                         <span className="min-w-0">{detailAsset.currentLocation}</span>
                       </div>
                     )}
+                    </div>
                   </div>
                 );
               })()}

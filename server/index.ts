@@ -2011,7 +2011,8 @@ app.post("/api/assets/:id/audit-sample", requireAuth, requireRole("Admin", "Logi
   dep.coverage = coverage;
   const stageDetails = { ...asset.stageDetails, deployment: dep };
   await updateAssetStageRow(asset.id, { currentStage: asset.currentStage, currentLocation: asset.currentLocation, stageDetails });
-  await insertLog({ id: `LOG-SAMPLE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: 7, action: `Audit sampling ${method === "auto" ? `auto-random${samplePct ? ` ${samplePct}%` : ""} ` : ""}${auditedList.length}/${pls.length} toko · ${coverage.compliancePct}% patuh`, operator: req.user!.name, type: "success" });
+  // Sampling audit is IN-PLACE (asset stays at its current phase) — log the REAL stage, not a phantom 7.
+  await insertLog({ id: `LOG-SAMPLE-${Date.now()}`, timestamp: new Date().toISOString(), assetId: asset.id, assetName: asset.name, stage: asset.currentStage, action: `Audit sampling ${method === "auto" ? `auto-random${samplePct ? ` ${samplePct}%` : ""} ` : ""}${auditedList.length}/${pls.length} toko · ${coverage.compliancePct}% patuh`, operator: req.user!.name, type: "success" });
   assetChanged(asset.id);
   res.json({ asset: await getAsset(asset.id), coverage });
 }));

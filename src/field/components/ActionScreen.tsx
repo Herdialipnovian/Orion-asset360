@@ -11,7 +11,7 @@ import React from "react";
 import { ArrowLeft, Camera, Loader2, Send, CircleDot, WifiOff } from "lucide-react";
 import type { Asset } from "../../types";
 import type { AuthUser } from "../fieldApi";
-import { TRANSITION_VERB, EVIDENCE_SLOTS, STAGE_FULL, STAGE_LABELS } from "../lifecycle";
+import { verbForField, EVIDENCE_SLOTS, STAGE_FULL, STAGE_LABELS } from "../lifecycle";
 import { GATE, initForm, missingFields, buildDetails, type GateField } from "../gateForms";
 import { AUDIT_ITEMS, QTY_ITEM_KEY, computeAudit } from "../../auditChecklist";
 import { enqueueCommit, type EvidenceItem } from "../outbox";
@@ -62,7 +62,7 @@ export default function ActionScreen({
         assetName: asset.name,
         currentStage: asset.currentStage,
         target,
-        verb: TRANSITION_VERB[target],
+        verb: verbForField(target, asset.currentStage),
         evidence,
         details: buildDetails(target, asset, form),
         operator: user.name,
@@ -93,7 +93,7 @@ export default function ActionScreen({
       </div>
 
       <header>
-        <h1 className="text-xl font-bold text-white">{TRANSITION_VERB[target]}</h1>
+        <h1 className="text-xl font-bold text-white">{verbForField(target, asset.currentStage)}</h1>
         <p className="mt-1 text-sm text-slate-400">{asset.name} · Fase {asset.currentStage} ke {target} ({STAGE_LABELS[target]})</p>
         <p className="text-xs text-slate-500">{STAGE_FULL[target]}</p>
       </header>
@@ -133,7 +133,7 @@ export default function ActionScreen({
 
       {/* Gate form */}
       <section className="flex flex-col gap-3">
-        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Data {TRANSITION_VERB[target]}</h2>
+        <h2 className="text-xs font-bold uppercase tracking-wide text-slate-500">Data {verbForField(target, asset.currentStage)}</h2>
         {gateFields.map(f => (
           <div key={f.k}>
             <FieldInput f={f} value={form[f.k]} onChange={v => setField(f.k, v)} />

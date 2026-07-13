@@ -214,25 +214,55 @@ export interface FieldAction {
   allSlots: EvidenceSlot[];
 }
 
+// Which of the 4 flows this asset is in (mobile mirror of the server flowModeOf). Mobile can't see the
+// project list, so an Event/Distribusi asset shows Standard until deploy-venue/distribute stamps the
+// mode — the server still rejects a wrong-flow commit, so this only tidies what the field UI offers.
+export function fieldFlowMode(asset?: Asset | null): "Internal" | "Event" | "Distribusi" | "Standard" {
+  if (!asset) return "Standard";
+  if (asset.peruntukan === "Internal") return "Internal";
+  const dm = (asset.stageDetails as any)?.deployment?.mode;
+  if (dm === "Internal" || dm === "Event" || dm === "Distribusi" || dm === "Standard") return dm;
+  return "Standard";
+}
+
+// Source-aware verb: 5→6 is a POD receipt (PIC menerima), not an install; redeploy back to 6 is a re-deploy.
+export function verbForField(target: number, currentStage: number): string {
+  if (target === 6 && currentStage === 5) return "Konfirmasi Penerimaan (POD)";
+  if (target === 6 && currentStage > 6) return "Pasang Kembali (Redeploy)";
+  return TRANSITION_VERB[target] || `Ke Fase ${target}`;
+}
+
+function actionAllowed(t: number, currentStage: number, asset?: Asset | null): boolean {
+  const mode = fieldFlowMode(asset);
+  const dep: any = (asset?.stageDetails as any)?.deployment || {};
+  const legs: any[] = Array.isArray(dep.legs) ? dep.legs : [];
+  const inTransit = legs.some(l => l.status === "transit") || dep.returnShipment?.status === "transit";
+  // Internal assets never use the Standard courier Surat Jalan (3→4).
+  if (mode === "Internal" && currentStage === 3 && t === 4) return false;
+  // An Event asset still in transit to/from a venue can't be audited / maintained / retrieved yet.
+  if (mode === "Event" && currentStage === 6 && inTransit && (t === 7 || t === 8 || t === 9)) return false;
+  return true;
+}
+
 // The legal next actions for this asset that THIS role may perform in the field.
-// Excludes Transit (5), which is not a field action.
-export function eligibleActions(currentStage: number, role: Role): FieldAction[] {
+// Excludes Transit (5), which is not a field action. Mode/leg-aware so the field UI mirrors the flow.
+export function eligibleActions(currentStage: number, role: Role, asset?: Asset | null): FieldAction[] {
   const nexts = TRANSITIONS[currentStage] || [];
   return nexts
-    .filter(t => t !== 5 && FIELD_STAGES.includes(t) && canRoleDoStage(role, t))
+    .filter(t => t !== 5 && FIELD_STAGES.includes(t) && canRoleDoStage(role, t) && actionAllowed(t, currentStage, asset))
     .map(t => {
       const all = EVIDENCE_SLOTS[t] || [];
-      return { target: t, verb: TRANSITION_VERB[t] || `Ke Fase ${t}`, requiredSlots: all.filter(s => !s.optional), allSlots: all };
+      return { target: t, verb: verbForField(t, currentStage), requiredSlots: all.filter(s => !s.optional), allSlots: all };
     });
 }
 
 // Next actions that are legal but blocked for this role (need a handoff to another role).
-export function handoffActions(currentStage: number, role: Role): { target: number; verb: string; roles: Role[] }[] {
+export function handoffActions(currentStage: number, role: Role, asset?: Asset | null): { target: number; verb: string; roles: Role[] }[] {
   if (role === "Admin") return [];
   const nexts = TRANSITIONS[currentStage] || [];
   return nexts
-    .filter(t => t !== 5 && FIELD_STAGES.includes(t) && !canRoleDoStage(role, t))
-    .map(t => ({ target: t, verb: TRANSITION_VERB[t] || `Ke Fase ${t}`, roles: STAGE_ROLE[t] || [] }));
+    .filter(t => t !== 5 && FIELD_STAGES.includes(t) && !canRoleDoStage(role, t) && actionAllowed(t, currentStage, asset))
+    .map(t => ({ target: t, verb: verbForField(t, currentStage), roles: STAGE_ROLE[t] || [] }));
 }
 
 export const STAGE_TONE: { [k: number]: string } = {

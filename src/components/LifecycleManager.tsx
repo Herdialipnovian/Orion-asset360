@@ -21,7 +21,6 @@ import {
   Wrench,
   CornerUpLeft,
   Trash2,
-  QrCode,
   ArrowRight,
   AlertTriangle,
   Check,
@@ -1670,18 +1669,42 @@ export default function LifecycleManager({
                 <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">{detailAsset.category}</p>
               </div>
 
-              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center space-y-3">
-                <div className="bg-slate-100 w-32 h-32 mx-auto rounded-lg border border-slate-200 flex flex-col items-center justify-center relative p-2">
-                  <QrCode className="h-28 w-28 text-slate-800" />
-                  <span className="absolute bottom-1 bg-blue-600 text-[8px] font-bold text-white px-1.5 rounded uppercase">
-                    Fase {detailAsset.currentStage} Aktif
-                  </span>
-                </div>
-                <div>
-                  <p className="text-xs font-mono font-bold text-slate-700 select-all">{detailAsset.qrcode}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Pindai tag QR ini pada unit fisik untuk verifikasi saat audit di lapangan.</p>
-                </div>
-              </div>
+              {(() => {
+                // Identity + live status card (replaces the old non-functional QR placeholder block).
+                // Shows the asset's ID, which of the 4 flows it's in, its current phase, and location.
+                const St = STAGE_ICONS[detailAsset.currentStage] || ClipboardList;
+                const raw = isInternalDeploy(detailAsset) || detailAsset.peruntukan === "Internal" ? "Internal" : (projectModeOf(detailAsset) || "Standar");
+                const flow: any = {
+                  Standar: { l: "Kurir Standar", c: "bg-blue-50 text-blue-700 border-blue-200" },
+                  Standard: { l: "Kurir Standar", c: "bg-blue-50 text-blue-700 border-blue-200" },
+                  Event: { l: "Event Roadshow", c: "bg-amber-50 text-amber-700 border-amber-200" },
+                  Distribusi: { l: "Distribusi Toko", c: "bg-teal-50 text-teal-700 border-teal-200" },
+                  Internal: { l: "Internal Custodian", c: "bg-slate-100 text-slate-700 border-slate-300" },
+                }[raw] || { l: "Kurir Standar", c: "bg-blue-50 text-blue-700 border-blue-200" };
+                return (
+                  <div className="bg-gradient-to-br from-slate-50 to-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[11px] font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{detailAsset.id}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${flow.c}`}>{flow.l}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`shrink-0 p-2.5 rounded-xl border ${statusColors[detailAsset.currentStage] || "bg-slate-100 text-slate-500 border-slate-200"}`}>
+                        <St className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Fase Saat Ini</p>
+                        <p className="font-extrabold text-slate-900 text-sm leading-tight">Fase {detailAsset.currentStage} · {cleanLabel(detailAsset.currentStage)}</p>
+                      </div>
+                    </div>
+                    {detailAsset.currentLocation && (
+                      <div className="flex items-start gap-1.5 text-[11px] text-slate-500 border-t border-slate-100 pt-2.5">
+                        <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5 text-slate-400" />
+                        <span className="min-w-0">{detailAsset.currentLocation}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="space-y-3 text-xs">
                 <h5 className="font-extrabold text-slate-800 uppercase tracking-widest border-b border-slate-200 pb-1">Spesifikasi Komponen:</h5>

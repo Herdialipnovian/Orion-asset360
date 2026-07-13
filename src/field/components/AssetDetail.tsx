@@ -52,8 +52,8 @@ export default function AssetDetail({
   onArriveVenue: () => void;
   onOpenSync: () => void;
 }) {
-  const actions = eligibleActions(asset.currentStage, user.role);
-  const handoffs = handoffActions(asset.currentStage, user.role);
+  const actions = eligibleActions(asset.currentStage, user.role, asset);
+  const handoffs = handoffActions(asset.currentStage, user.role, asset);
   const installTask = myInstallTask(asset, user.id);
   // Exclude toko whose placement is already queued offline (per-toko lock, not whole-asset).
   const placementTasks = myPlacementTasks(asset, user.id).filter(p => !(pendingLocs?.has(p.locationId)));

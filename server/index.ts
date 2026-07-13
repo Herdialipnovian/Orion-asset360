@@ -1040,11 +1040,15 @@ app.post(
     if (pre.currentStage !== 6) return res.status(422).json({ error: `Pemasangan hanya untuk aset di Fase 6. Aset ini di Fase ${pre.currentStage}.` });
 
     const role = req.user!.role;
+    // Event/Standard install confirmation: the Merchandiser confirms their OWN portion; a PIC (client
+    // supervisor) or Admin may confirm on behalf of a Merchandiser (pass merchandiserId). Logistik cannot.
     let targetId: number;
     if (role === "Merchandiser") targetId = req.user!.id;
-    else if (role === "Admin") targetId = Number(req.body?.merchandiserId);
-    else return res.status(403).json({ error: "Hanya Merchandiser (atau Admin) yang dapat melaporkan pemasangan." });
+    else if (role === "Admin" || role === "PIC") targetId = Number(req.body?.merchandiserId);
+    else return res.status(403).json({ error: "Hanya Merchandiser, PIC, atau Admin yang dapat melaporkan pemasangan." });
     if (!Number.isInteger(targetId)) return res.status(400).json({ error: "merchandiserId wajib." });
+    // PIC is client-scoped — only their own client's asset (Admin operates across clients).
+    if (role === "PIC" && (req.user!.client || null) !== (pre.client || null)) return res.status(403).json({ error: "Aset ini di luar client Anda." });
 
     const { signatureBase64, note } = req.body || {};
     // Signature OPTIONAL — stored only if a real one is provided.
@@ -1889,7 +1893,9 @@ app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logist
 // Merchandiser (or PIC/Admin) reports a placement at a toko: doneQty increment + GPS + optional
 // signature. Row-locked (concurrent per-toko reports can't drop an increment) + Idempotency-Key
 // (offline replay safe) + stage guard, mirroring /install/complete.
-app.post("/api/assets/:id/place", requireAuthFlexible, requireRole("Admin", "Logistik", "PIC", "Merchandiser"), wrap(async (req: AuthedReq, res) => {
+// Distribusi placement report = the field person who actually installs (Merchandiser, own toko only)
+// confirms it — plus Admin as a test/override. Logistik & PIC do NOT confirm placements.
+app.post("/api/assets/:id/place", requireAuthFlexible, requireRole("Admin", "Merchandiser"), wrap(async (req: AuthedReq, res) => {
   const id = req.params.id;
   const idemKey = String(req.headers["idempotency-key"] || "");
   const cached = await getIdempotent(idemKey);
@@ -1899,8 +1905,8 @@ app.post("/api/assets/:id/place", requireAuthFlexible, requireRole("Admin", "Log
   if (!pre) return res.status(404).json({ error: "Aset tidak ditemukan." });
   if (pre.currentStage !== 6) return res.status(422).json({ error: `Pemasangan hanya untuk aset di Fase 6. Aset ini di Fase ${pre.currentStage}.` });
   if (pre.peruntukan === "Internal") return res.status(422).json({ error: "Aset Internal tidak masuk alur distribusi." });
-  // Client-scoped roles can only touch their own client's asset.
-  if ((req.user!.role === "PIC" || req.user!.role === "Merchandiser") && (req.user!.client || null) !== (pre.client || null)) {
+  // A Merchandiser can only touch their own client's asset (Admin operates across clients).
+  if (req.user!.role === "Merchandiser" && (req.user!.client || null) !== (pre.client || null)) {
     return res.status(403).json({ error: "Aset ini di luar client Anda." });
   }
   const lid = Number(req.body?.locationId);

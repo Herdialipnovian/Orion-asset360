@@ -12,7 +12,7 @@ import { ArrowLeft, Camera, Loader2, Send, CircleDot, WifiOff } from "lucide-rea
 import type { Asset } from "../../types";
 import type { AuthUser } from "../fieldApi";
 import { verbForField, EVIDENCE_SLOTS, STAGE_FULL, STAGE_LABELS } from "../lifecycle";
-import { GATE, initForm, missingFields, buildDetails, type GateField } from "../gateForms";
+import { resolveGate, initForm, missingFields, buildDetails, type GateField } from "../gateForms";
 import { AUDIT_ITEMS, QTY_ITEM_KEY, computeAudit } from "../../auditChecklist";
 import { enqueueCommit, type EvidenceItem } from "../outbox";
 import type { Captured } from "../camera";
@@ -36,7 +36,7 @@ export default function ActionScreen({
 }) {
   const slots = EVIDENCE_SLOTS[target] || [];
   const required = slots.filter(s => !s.optional);
-  const gateFields = GATE[target]?.fields || [];
+  const gateFields = resolveGate(target, asset.currentStage)?.fields || [];
 
   const [shots, setShots] = React.useState<Record<string, Captured>>({});
   const [form, setForm] = React.useState<Record<string, any>>(() => initForm(target, asset, user));
@@ -49,7 +49,7 @@ export default function ActionScreen({
 
   async function commit() {
     if (!requiredPhotosDone) return setToast({ msg: "Ambil dulu semua foto yang wajib.", tone: "error" });
-    const miss = missingFields(target, form);
+    const miss = missingFields(target, form, asset.currentStage);
     if (miss.length) return setToast({ msg: `Lengkapi: ${miss.join(", ")}.`, tone: "error" });
     setBusy(true);
     try {

@@ -106,10 +106,31 @@ export const GATE: { [k: number]: GateSpec } = {
   }
 };
 
+// POD (Proof of Delivery) gate for the Standard courier 5→6 receipt — the PIC RECEIVES the goods
+// (distinct from installing them). Mirrors the CMS POD_GATE shape (stored in the transit section);
+// the receiver's signature is captured as the "signature" evidence photo. The install/assign of
+// Merchandisers is a SEPARATE in-place Fase-6 task afterwards.
+const POD_GATE_SPEC: GateSpec = {
+  stageKey: "transit",
+  fields: [
+    { k: "podRecipient", label: "Diterima Oleh (PIC)", type: "text", req: true, prefillUser: true },
+    { k: "podTime", label: "Tanggal Terima", type: "date", req: true },
+    { k: "conditionOnArrival", label: "Kondisi Barang saat Tiba", type: "select", req: true, options: ["Sempurna", "Bagus", "Ada Lecet", "Rusak Sebagian"] },
+    { k: "podNote", label: "Catatan Penerimaan", type: "textarea" },
+  ],
+};
+
+// Source-aware gate: entering Fase 6 FROM Transit (5) is a POD receipt; any other entry (install /
+// redeploy) uses the deployment gate.
+export function resolveGate(target: number, fromStage: number): GateSpec | undefined {
+  if (target === 6 && fromStage === 5) return POD_GATE_SPEC;
+  return GATE[target];
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 export function initForm(target: number, asset: Asset, user: AuthUser): Record<string, any> {
-  const spec = GATE[target];
+  const spec = resolveGate(target, asset.currentStage);
   if (!spec) return {};
   const existing: any = (asset.stageDetails as any)?.[spec.stageKey] || {};
   const form: Record<string, any> = {};
@@ -126,8 +147,8 @@ export function initForm(target: number, asset: Asset, user: AuthUser): Record<s
   return form;
 }
 
-export function missingFields(target: number, form: Record<string, any>): string[] {
-  const spec = GATE[target];
+export function missingFields(target: number, form: Record<string, any>, fromStage = 0): string[] {
+  const spec = resolveGate(target, fromStage);
   if (!spec) return [];
   return spec.fields
     .filter(f => f.req)
@@ -141,7 +162,8 @@ export function missingFields(target: number, form: Record<string, any>): string
 
 // Build the updatedDetails payload: merge form values into the right stageDetails slice.
 export function buildDetails(target: number, asset: Asset, form: Record<string, any>): any {
-  const spec = GATE[target];
+  const spec = resolveGate(target, asset.currentStage);
+  if (!spec) return JSON.parse(JSON.stringify(asset.stageDetails || {}));
   const d: any = JSON.parse(JSON.stringify(asset.stageDetails || {}));
   const slice: any = { ...(d[spec.stageKey] || {}) };
   for (const f of spec.fields) {

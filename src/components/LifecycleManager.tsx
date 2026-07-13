@@ -35,7 +35,7 @@ import { Asset, AssetStage } from "../types";
 import { api, type AuthUser } from "../api";
 import { installedOf } from "../installProgress";
 import { AUDIT_ITEMS, QTY_ITEM_KEY, computeAudit, defaultAuditMap } from "../auditChecklist";
-import { faseNo } from "../faseDisplay";
+import { faseNo, TOTAL_FASE } from "../faseDisplay";
 
 // Code-split: Leaflet (+ its CSS) only loads when the operator opens the distribusi map.
 const TokoMap = React.lazy(() => import("./TokoMap"));
@@ -43,8 +43,6 @@ const ReportDistribusi = React.lazy(() => import("./ReportDistribusi"));
 import { SAMPLE_CLIENTS } from "../data/initialData";
 
 const STAGE_ICONS: { [key: number]: any } = {
-  1: ClipboardList,
-  2: Settings,
   3: Home,
   4: Truck,
   5: MapPin,
@@ -55,17 +53,28 @@ const STAGE_ICONS: { [key: number]: any } = {
   10: Trash2
 };
 
+// One short, scannable operator term per phase (internal stage → name). Single source of truth:
+// every faseNo()+cleanLabel() call site reads from here, so a rename here updates the whole app.
 const STAGE_LABELS: { [key: number]: string } = {
-  1: "Permintaan & Work Order Proyek",
-  2: "Perakitan / Produksi",
-  3: "Inventaris & Gudang",
-  4: "Pengiriman / Surat Jalan",
-  5: "Transit / Pelacakan Kiriman",
-  6: "Pemasangan / Terpasang",
-  7: "Audit & Kepatuhan",
-  8: "Pemeliharaan Aktif",
-  9: "Penarikan & Relokasi",
-  10: "Pemusnahan / Disposal"
+  3: "Gudang",
+  4: "Surat Jalan",
+  5: "Transit",
+  6: "Terpasang",
+  7: "Audit",
+  8: "Pemeliharaan",
+  9: "Penarikan",
+  10: "Disposal"
+};
+// One-line context under each phase name (identity card + timeline).
+const STAGE_SUBTITLES: { [key: number]: string } = {
+  3: "Tersimpan di gudang, siap dikirim",
+  4: "Surat Jalan terbit, aset dilepas",
+  5: "Dalam perjalanan kurir/vendor",
+  6: "Aktif di lokasi / dipakai custodian",
+  7: "Pengecekan fisik & kepatuhan",
+  8: "Tiket perbaikan sedang berjalan",
+  9: "Ditarik / direlokasi dari lokasi",
+  10: "Dimusnahkan, nilai scrap dicatat"
 };
 
 const cleanLabel = (s: number) => (STAGE_LABELS[s] || "").replace(/&amp;/g, "&");
@@ -87,15 +96,14 @@ const TRANSITIONS: { [k: number]: number[] } = {
 
 // Short action verb shown on each transition button (keyed by target stage)
 const TRANSITION_VERB: { [k: number]: string } = {
-  2: "Kirim ke Produksi",
   3: "Terima di Gudang",
   4: "Terbitkan Surat Jalan",
   5: "Input Tracking / Transit",
   6: "Konfirmasi Pemasangan",
   7: "Lakukan Audit",
   8: "Buka Tiket Pemeliharaan",
-  9: "Tarik / Relokasi Aset",
-  10: "Disposal / Pemusnahan Aset"
+  9: "Tarik dari Peredaran",
+  10: "Musnahkan Aset"
 };
 
 type FieldDef = {
@@ -1784,6 +1792,7 @@ export default function LifecycleManager({
                       <div className="min-w-0">
                         <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Fase Saat Ini</p>
                         <p className="font-extrabold text-slate-900 text-sm leading-tight">Fase {faseNo(detailAsset.currentStage)} · {cleanLabel(detailAsset.currentStage)}</p>
+                        {STAGE_SUBTITLES[detailAsset.currentStage] && <p className="text-[10px] text-slate-400 leading-tight mt-0.5">{STAGE_SUBTITLES[detailAsset.currentStage]}</p>}
                       </div>
                     </div>
                     {detailAsset.currentLocation && (
@@ -1797,38 +1806,52 @@ export default function LifecycleManager({
                 );
               })()}
 
-              <div className="space-y-3 text-xs">
-                <h5 className="font-extrabold text-slate-800 uppercase tracking-widest border-b border-slate-200 pb-1">Spesifikasi Komponen:</h5>
-                <div className="space-y-2 text-slate-600">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400 font-medium">Merk / Brand:</span> <strong className="font-bold text-slate-800">{detailAsset.specs.brand || "—"}</strong>
+              {/* Spesifikasi — only rows that are actually filled (no "—" clutter); whole block hides if empty. */}
+              {(() => {
+                const s: any = detailAsset.specs || {};
+                const rows: { label: string; val?: string; mono?: boolean }[] = [
+                  { label: "Merk / Brand", val: s.brand },
+                  { label: "SKU Code", val: s.sku, mono: true },
+                  { label: "Dimensi Fisik", val: s.dimensions },
+                  { label: "Daya / Berat", val: s.powerWeight },
+                ].filter(r => r.val);
+                if (!rows.length) return null;
+                return (
+                  <div className="space-y-3 text-xs">
+                    <h5 className="font-extrabold text-slate-800 uppercase tracking-widest border-b border-slate-200 pb-1">Spesifikasi Komponen:</h5>
+                    <div className="space-y-2 text-slate-600">
+                      {rows.map(r => (
+                        <div key={r.label} className="flex justify-between">
+                          <span className="text-slate-400 font-medium">{r.label}:</span> <strong className={`${r.mono ? "font-mono" : "font-bold"} text-slate-800`}>{r.val}</strong>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400 font-medium">SKU Code:</span> <strong className="font-mono text-slate-800">{detailAsset.specs.sku || "—"}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400 font-medium">Dimensi Fisik:</span> <strong className="font-bold text-slate-800">{detailAsset.specs.dimensions || "—"}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400 font-medium">Daya / Berat:</span> <strong className="font-bold text-slate-800">{detailAsset.specs.powerWeight || "—"}</strong>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
-              <div className="space-y-3 text-xs pt-2">
-                <h5 className="font-extrabold text-slate-800 uppercase tracking-widest border-b border-slate-200 pb-1">Catatan Keuangan &amp; Nilai Buku:</h5>
-                <div className="space-y-2 text-slate-600">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400 font-medium">Harga Pengadaan:</span> <strong className="font-bold text-slate-800">{formatRupiah(detailAsset.financials.purchaseCost)}</strong>
+              {/* Keuangan — only non-zero rows; whole block hides when the asset has no book value. */}
+              {(() => {
+                const f: any = detailAsset.financials || {};
+                const rows: { label: string; val: number; accent?: boolean }[] = [
+                  { label: "Harga Pengadaan", val: Number(f.purchaseCost) || 0 },
+                  { label: "Biaya Servis", val: Number(f.maintenanceCost) || 0 },
+                  { label: "Estimasi Sisa Scrap", val: Number(f.disposalValue) || 0, accent: true },
+                ].filter(r => r.val > 0);
+                if (!rows.length) return null;
+                return (
+                  <div className="space-y-3 text-xs pt-2">
+                    <h5 className="font-extrabold text-slate-800 uppercase tracking-widest border-b border-slate-200 pb-1">Catatan Keuangan &amp; Nilai Buku:</h5>
+                    <div className="space-y-2 text-slate-600">
+                      {rows.map(r => (
+                        <div key={r.label} className="flex justify-between">
+                          <span className="text-slate-400 font-medium">{r.label}:</span> <strong className={`font-bold ${r.accent ? "text-blue-600" : "text-slate-800"}`}>{formatRupiah(r.val)}</strong>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400 font-medium">Biaya Servis:</span> <strong className="font-bold text-slate-800">{formatRupiah(detailAsset.financials.maintenanceCost)}</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400 font-medium">Estimasi Sisa Scrap:</span> <strong className="font-bold text-blue-600">{formatRupiah(detailAsset.financials.disposalValue)}</strong>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
             </div>
 
             {/* RIGHT: transition control + timeline */}
@@ -1836,8 +1859,7 @@ export default function LifecycleManager({
               <div className="space-y-5">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-100">
                   <div>
-                    <h4 className="font-extrabold text-slate-900 text-base">Alur Lifecycle Penuh (Fase 1–8)</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">Kelola perpindahan fase aset dari awal hingga akhir</p>
+                    <h4 className="font-extrabold text-slate-900 text-base">Lifecycle Aset (Fase 1–{TOTAL_FASE})</h4>
                   </div>
                   <button
                     onClick={() => setDetailAssetId(null)}
@@ -1920,7 +1942,7 @@ export default function LifecycleManager({
                 })() : null}
 
                 {detailAsset.stageDetails?.deployment?.assignments?.length ? (() => {
-                  const d: any = detailAsset.stageDetails.deployment;
+                  const d: any = detailAsset.stageDetails?.deployment || {};
                   const asg: any[] = d.assignments || [];
                   const installed = d.installedQty != null ? Number(d.installedQty) : installedOf(asg);
                   const totalQ = detailAsset.quantity || asg.reduce((s, a) => s + (Number(a.qty) || 0), 0);
@@ -1971,7 +1993,7 @@ export default function LifecycleManager({
                     </div>
                   );
                 })() : detailAsset.stageDetails?.deployment?.installTeam ? (() => {
-                  const d: any = detailAsset.stageDetails.deployment;
+                  const d: any = detailAsset.stageDetails?.deployment || {};
                   return (
                     <div className="rounded-xl p-4 space-y-2 border border-indigo-200 bg-indigo-50">
                       <div className="flex items-center gap-2">
@@ -1998,7 +2020,7 @@ export default function LifecycleManager({
 
                 {/* Internal (Fase 1) — custodian handover panel */}
                 {isInternalDeploy(detailAsset) && detailAsset.stageDetails?.deployment?.custodianName && (() => {
-                  const d: any = detailAsset.stageDetails.deployment;
+                  const d: any = detailAsset.stageDetails?.deployment || {};
                   return (
                     <div className="rounded-xl p-4 space-y-2 border border-slate-300 bg-slate-50">
                       <div className="flex items-center gap-2">
@@ -2020,7 +2042,7 @@ export default function LifecycleManager({
 
                 {/* Event (Fase 2) — roadshow timeline (ordered venue legs) */}
                 {Array.isArray(detailAsset.stageDetails?.deployment?.legs) && (detailAsset.stageDetails?.deployment?.legs?.length || 0) > 0 && (() => {
-                  const d: any = detailAsset.stageDetails.deployment;
+                  const d: any = detailAsset.stageDetails?.deployment || {};
                   const legs = [...d.legs].sort((a: any, b: any) => (a.seq || 0) - (b.seq || 0));
                   return (
                     <div className="rounded-xl p-4 space-y-3 border border-amber-200 bg-amber-50/60">
@@ -2107,7 +2129,7 @@ export default function LifecycleManager({
 
                 {/* Distribusi (Fase 3) — placement monitor + coverage */}
                 {Array.isArray(detailAsset.stageDetails?.deployment?.placements) && (detailAsset.stageDetails?.deployment?.placements?.length || 0) > 0 && (() => {
-                  const d: any = detailAsset.stageDetails.deployment;
+                  const d: any = detailAsset.stageDetails?.deployment || {};
                   const pls: any[] = d.placements;
                   const installed = pls.reduce((s, p) => s + (Number(p.doneQty) || 0), 0);
                   const cov = d.coverage;
@@ -2188,9 +2210,7 @@ export default function LifecycleManager({
                     </span>
                     <div>
                       <p className="text-xs font-extrabold text-slate-800">Proses / Pindahkan Fase</p>
-                      <p className="text-[10px] text-slate-500">
-                        Posisi saat ini: <strong className="text-blue-700">Fase {faseNo(detailAsset.currentStage)} · {cleanLabel(detailAsset.currentStage)}</strong>
-                      </p>
+                      <p className="text-[10px] text-slate-500">Pilih langkah berikutnya untuk aset ini</p>
                     </div>
                   </div>
 
@@ -2198,7 +2218,7 @@ export default function LifecycleManager({
                   {detailBatchId && groupMembers.length >= 2 && detailAsset.currentStage >= 4 && detailAsset.currentStage <= 9 && (
                     <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 text-[11px] text-blue-800">
                       <Truck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                      <span>Bagian dari <strong>grup pengiriman</strong> {detailBatchId} · {groupMembers.length} aset ({groupSameStage.length} di fase ini).{GROUP_NEXT[detailAsset.currentStage] ? " Langkah pindah bisa diproses sekaligus untuk seluruh grup (centang di form)." : ""}</span>
+                      <span><strong>Grup {detailBatchId}</strong> · {groupMembers.length} aset{GROUP_NEXT[detailAsset.currentStage] ? " · bisa dipindah sekaligus (centang di form)" : ""}</span>
                     </div>
                   )}
 
@@ -2262,7 +2282,7 @@ export default function LifecycleManager({
                             <Check className="h-4 w-4 shrink-0" />
                             <span className="min-w-0">
                               <span className="block text-[11px] font-bold leading-tight">Konfirmasi Kedatangan di Gudang</span>
-                              <span className="block text-[9px] text-emerald-50 leading-tight">Aset kembali ke Fase 1 (Gudang) — perjalanan selesai</span>
+                              <span className="block text-[9px] text-emerald-50 leading-tight">Aset kembali ke Fase 1 ({cleanLabel(3)}) — perjalanan selesai</span>
                             </span>
                           </button>
                         ) : (
@@ -2289,20 +2309,20 @@ export default function LifecycleManager({
                       <>
                         {errBanner}
                         <button onClick={openVenue}
-                          className="w-full flex items-center gap-2 text-left bg-amber-500 hover:bg-amber-600 text-white border border-amber-500 rounded-lg px-3 py-2.5 transition shadow-sm">
+                          className="w-full flex items-center gap-2 text-left bg-blue-600 hover:bg-blue-700 text-white border border-blue-600 rounded-lg px-3 py-2.5 transition shadow-sm">
                           <Truck className="h-4 w-4 shrink-0" />
                           <span className="min-w-0">
                             <span className="block text-[11px] font-bold leading-tight">Kirim ke Lokasi Berikutnya</span>
-                            <span className="block text-[9px] text-amber-50 leading-tight">Kirim aset + Surat Jalan &amp; tracking ke lokasi/venue berikutnya</span>
+                            <span className="block text-[9px] text-blue-100 leading-tight">Kirim aset + Surat Jalan &amp; tracking ke lokasi/venue berikutnya</span>
                           </span>
                         </button>
                         {onShipReturn && gudangRole && (
                           <button onClick={openReturn}
-                            className="w-full flex items-center gap-2 text-left bg-white hover:bg-cyan-50 text-cyan-700 border border-cyan-300 rounded-lg px-3 py-2.5 transition shadow-sm">
+                            className="w-full flex items-center gap-2 text-left bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg px-3 py-2.5 transition shadow-sm">
                             <Home className="h-4 w-4 shrink-0" />
                             <span className="min-w-0">
                               <span className="block text-[11px] font-bold leading-tight">Kirim Kembali ke Gudang</span>
-                              <span className="block text-[9px] text-cyan-600 leading-tight">Tidak ada tujuan lagi — kirim aset + Surat Jalan &amp; tracking balik ke gudang</span>
+                              <span className="block text-[9px] text-slate-500 leading-tight">Tidak ada tujuan lagi — kirim aset + Surat Jalan &amp; tracking balik ke gudang</span>
                             </span>
                           </button>
                         )}
@@ -2346,12 +2366,12 @@ export default function LifecycleManager({
                     return (
                       <button
                         onClick={() => openGate(6)}
-                        className="w-full flex items-center gap-2 text-left bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-600 rounded-lg px-3 py-2.5 transition shadow-sm"
+                        className="w-full flex items-center gap-2 text-left bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg px-3 py-2.5 transition shadow-sm"
                       >
                         <MapPin className="h-4 w-4 shrink-0" />
                         <span className="min-w-0">
                           <span className="block text-[11px] font-bold leading-tight">{hasAsg ? "Kelola Penugasan Pemasangan" : "Tugaskan Pemasangan"}</span>
-                          <span className="block text-[9px] text-indigo-100 leading-tight">{hasAsg ? "Tambah atau ubah pembagian Merchandiser (progres tetap aman)" : "Bagi qty ke Merchandiser; mereka melapor melalui aplikasi mobile"}</span>
+                          <span className="block text-[9px] text-slate-500 leading-tight">{hasAsg ? "Tambah atau ubah pembagian Merchandiser (progres tetap aman)" : "Bagi qty ke Merchandiser; mereka melapor melalui aplikasi mobile"}</span>
                         </span>
                       </button>
                     );
@@ -2363,37 +2383,52 @@ export default function LifecycleManager({
                     // start via their own handover action. Post-deployment branches are common to all.
                     const emode = isInternalDeploy(detailAsset) || detailAsset.peruntukan === "Internal" ? "Internal" : projectModeOf(detailAsset);
                     return emode === "Internal" && detailAsset.currentStage === 3;
-                  })() ? null : TRANSITIONS[detailAsset.currentStage]?.length ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {TRANSITIONS[detailAsset.currentStage].map(t => {
-                        const Icon = STAGE_ICONS[t];
-                        const dep: any = detailAsset.stageDetails?.deployment || {};
-                        const asg: any[] = dep.assignments || [];
-                        // Audit (6->7) with pending install portions is ALLOWED (soft gate),
-                        // but flagged amber so the operator sees the honest progress.
-                        const installed = installedOf(asg);
-                        const installPartial = t === 7 && detailAsset.currentStage === 6 && asg.length > 0 && !dep.fullyInstalled;
-                        return (
-                          <button
-                            key={t}
-                            onClick={() => openGate(t)}
-                            title={installPartial ? `Pemasangan baru ${installed}/${detailAsset.quantity} terpasang — Audit tetap boleh, progres sisanya tercatat.` : ""}
-                            className={`flex items-center gap-2 text-left border rounded-lg px-3 py-2 transition group shadow-xs ${installPartial ? "bg-amber-50 border-amber-200 hover:bg-amber-500 hover:border-amber-500 hover:text-white" : "bg-white hover:bg-blue-600 hover:text-white border-slate-200 hover:border-blue-600"}`}
-                          >
-                            <span className={installPartial ? "text-amber-600 group-hover:text-white" : "text-blue-600 group-hover:text-white"}>
-                              <Icon className="h-4 w-4" />
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[11px] font-bold leading-tight text-slate-800 group-hover:text-white">{verbFor(t, detailAsset.currentStage, detailAsset)}</span>
-                              <span className="block text-[9px] leading-tight text-slate-400 group-hover:text-blue-100">
-                                {installPartial ? `⚠ baru ${installed}/${detailAsset.quantity} terpasang` : `Fase ${faseNo(t)} · ${cleanLabel(t)}`}
-                              </span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
+                  })() ? null : TRANSITIONS[detailAsset.currentStage]?.length ? (() => {
+                    const targets = TRANSITIONS[detailAsset.currentStage];
+                    // One legal next step ⇒ that step IS the primary action (filled). Several ⇒ they're
+                    // follow-ups: audit stays a normal secondary, maintenance/penarikan drop to muted.
+                    const single = targets.length === 1;
+                    return (
+                      <div className="space-y-2">
+                        {!single && <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Lanjutan</p>}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {targets.map(t => {
+                            const Icon = STAGE_ICONS[t];
+                            const dep: any = detailAsset.stageDetails?.deployment || {};
+                            const asg: any[] = dep.assignments || [];
+                            const installed = installedOf(asg);
+                            // Audit (6->7) with pending install portions is ALLOWED (soft gate), flagged amber.
+                            const installPartial = t === 7 && detailAsset.currentStage === 6 && asg.length > 0 && !dep.fullyInstalled;
+                            const muted = !single && (t === 8 || t === 9); // maintenance / penarikan = rare
+                            const cls = installPartial
+                              ? "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100"
+                              : single
+                              ? "bg-blue-600 border-blue-600 text-white hover:bg-blue-700 sm:col-span-2"
+                              : muted
+                              ? "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                              : "bg-white border-slate-200 text-slate-800 hover:bg-slate-50";
+                            const subCls = installPartial ? "text-amber-600" : single ? "text-blue-100" : "text-slate-400";
+                            return (
+                              <button
+                                key={t}
+                                onClick={() => openGate(t)}
+                                title={installPartial ? `Pemasangan baru ${installed}/${detailAsset.quantity} terpasang — Audit tetap boleh, progres sisanya tercatat.` : ""}
+                                className={`flex items-center gap-2 text-left border rounded-lg px-3 py-2 transition shadow-xs ${cls}`}
+                              >
+                                <Icon className="h-4 w-4 shrink-0" />
+                                <span className="min-w-0">
+                                  <span className="block text-[11px] font-bold leading-tight">{verbFor(t, detailAsset.currentStage, detailAsset)}</span>
+                                  <span className={`block text-[9px] leading-tight ${subCls}`}>
+                                    {installPartial ? `⚠ baru ${installed}/${detailAsset.quantity} terpasang` : `Fase ${faseNo(t)} · ${cleanLabel(t)}`}
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })() : (
                     <div className="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-lg p-3 flex items-center gap-2">
                       <Check className="h-4 w-4 text-emerald-500" />
                       Aset sudah di fase akhir (Disposal). Data diarsipkan permanen — tidak ada perpindahan fase lanjutan.
@@ -2436,47 +2471,31 @@ export default function LifecycleManager({
 
                           {(isActive || isCompleted) && (
                             <div className="mt-1 bg-slate-50 rounded-lg p-2.5 border border-slate-200/50 space-y-1.5 text-[11px] text-slate-600">
-                              {stepNumber === 1 && (
-                                <p>
-                                  Kode WO: <strong className="font-mono text-slate-800">{detailAsset.projectCode}</strong> · ID Req:{" "}
-                                  <strong className="font-mono">{detailAsset.stageDetails.request.reqId}</strong>
-                                  <br />
-                                  PIC: <strong>{detailAsset.stageDetails.request.picName}</strong> · Vendor: <strong>{detailAsset.stageDetails.request.vendorName}</strong>
-                                </p>
-                              )}
-                              {stepNumber === 2 && (
-                                <p>
-                                  Leader Produksi: <strong>{detailAsset.stageDetails.production.prodLead || "—"}</strong>
-                                  <br />
-                                  QC: <strong className="text-emerald-600">{detailAsset.stageDetails.production.qcScore || 0}/100</strong> · Kode:{" "}
-                                  <strong className="font-mono">{detailAsset.stageDetails.production.productionReportCode || "—"}</strong>
-                                </p>
-                              )}
                               {stepNumber === 3 && (
                                 <p>
-                                  Gudang: <strong>{detailAsset.stageDetails.inventory.warehouseName || "—"}</strong>
+                                  Gudang: <strong>{detailAsset.stageDetails.inventory?.warehouseName || "—"}</strong>
                                   <br />
-                                  Rak: <strong>{detailAsset.stageDetails.inventory.shelfLoc || "—"}</strong> · Stok:{" "}
-                                  <strong className="font-mono">{detailAsset.stageDetails.inventory.stockCode || "—"}</strong>
+                                  Rak: <strong>{detailAsset.stageDetails.inventory?.shelfLoc || "—"}</strong> · Stok:{" "}
+                                  <strong className="font-mono">{detailAsset.stageDetails.inventory?.stockCode || "—"}</strong>
                                 </p>
                               )}
                               {stepNumber === 4 && (
                                 <p>
-                                  Surat Jalan: <strong className="font-mono text-slate-800">{detailAsset.stageDetails.shipping.suratJalanNo || "—"}</strong>
+                                  Surat Jalan: <strong className="font-mono text-slate-800">{detailAsset.stageDetails.shipping?.suratJalanNo || "—"}</strong>
                                   <br />
-                                  Driver: <strong>{detailAsset.stageDetails.shipping.driverName || "—"}</strong> · Plat:{" "}
-                                  <strong className="font-mono">{detailAsset.stageDetails.shipping.vehiclePlate || "—"}</strong>
+                                  Driver: <strong>{detailAsset.stageDetails.shipping?.driverName || "—"}</strong> · Plat:{" "}
+                                  <strong className="font-mono">{detailAsset.stageDetails.shipping?.vehiclePlate || "—"}</strong>
                                 </p>
                               )}
                               {stepNumber === 5 && (
                                 <p>
-                                  Koordinat: <strong className="font-mono text-slate-700">{detailAsset.stageDetails.transit.currentLat || 0}, {detailAsset.stageDetails.transit.currentLng || 0}</strong>
+                                  Kurir: <strong>{detailAsset.stageDetails.transit?.courier || "—"}</strong> · Resi: <strong className="font-mono">{detailAsset.stageDetails.transit?.trackingNo || "—"}</strong>
                                   <br />
-                                  ETA: <strong>{detailAsset.stageDetails.transit.eta || "—"}</strong>
+                                  ETA: <strong>{detailAsset.stageDetails.transit?.eta || "—"}</strong>
                                 </p>
                               )}
                               {stepNumber === 6 && (() => {
-                                const d: any = detailAsset.stageDetails.deployment;
+                                const d: any = detailAsset.stageDetails?.deployment || {};
                                 const asg: any[] = d.assignments || [];
                                 if (asg.length) {
                                   const installed = d.installedQty != null ? Number(d.installedQty) : installedOf(asg);
@@ -2498,32 +2517,32 @@ export default function LifecycleManager({
                               })()}
                               {stepNumber === 7 && (
                                 <p>
-                                  Auditor: <strong>{detailAsset.stageDetails.audit.auditorName || "—"}</strong>
+                                  Auditor: <strong>{detailAsset.stageDetails.audit?.auditorName || "—"}</strong>
                                   <br />
-                                  Tgl: <strong>{detailAsset.stageDetails.audit.lastAuditDate || "—"}</strong> · Skor:{" "}
-                                  <strong className="text-emerald-600">{detailAsset.stageDetails.audit.scoring || detailAsset.auditScore || 0}/100</strong>
+                                  Tgl: <strong>{detailAsset.stageDetails.audit?.lastAuditDate || "—"}</strong> · Skor:{" "}
+                                  <strong className="text-emerald-600">{detailAsset.stageDetails.audit?.scoring || detailAsset.auditScore || 0}/100</strong>
                                 </p>
                               )}
                               {stepNumber === 8 && (
                                 <p>
                                   Status: <strong className="text-rose-600">🛠 {detailAsset.maintenanceStatus === "REPAIRING" ? "Perbaikan Berjalan" : detailAsset.maintenanceStatus === "RESOLVED" ? "Selesai Diperbaiki" : "Tiket Menunggu"}</strong>
                                   <br />
-                                  Isu: <strong>{detailAsset.stageDetails.maintenance.issueType || "—"}</strong> · Tiket:{" "}
-                                  <strong className="font-mono">{detailAsset.stageDetails.maintenance.activeTicketId || "—"}</strong>
+                                  Isu: <strong>{detailAsset.stageDetails.maintenance?.issueType || "—"}</strong> · Tiket:{" "}
+                                  <strong className="font-mono">{detailAsset.stageDetails.maintenance?.activeTicketId || "—"}</strong>
                                 </p>
                               )}
                               {stepNumber === 9 && (
                                 <p>
-                                  Alasan: <strong>{detailAsset.stageDetails.retrieval.reason || "—"}</strong>
+                                  Alasan: <strong>{detailAsset.stageDetails.retrieval?.reason || "—"}</strong>
                                   <br />
-                                  Keputusan: <strong className="text-blue-600 bg-blue-50 px-1 rounded">{detailAsset.stageDetails.retrieval.assessResult || "—"}</strong>
+                                  Keputusan: <strong className="text-blue-600 bg-blue-50 px-1 rounded">{detailAsset.stageDetails.retrieval?.assessResult || "—"}</strong>
                                 </p>
                               )}
                               {stepNumber === 10 && (
                                 <p>
-                                  Metode: <strong>{detailAsset.stageDetails.disposal.disposalMethod || "—"}</strong> · Tgl: {detailAsset.stageDetails.disposal.disposalDate || "—"}
+                                  Metode: <strong>{detailAsset.stageDetails.disposal?.disposalMethod || "—"}</strong> · Tgl: {detailAsset.stageDetails.disposal?.disposalDate || "—"}
                                   <br />
-                                  Sisa Scrap: <strong className="text-emerald-600">{formatRupiah(detailAsset.stageDetails.disposal.scrapValue || 0)}</strong>
+                                  Sisa Scrap: <strong className="text-emerald-600">{formatRupiah(detailAsset.stageDetails.disposal?.scrapValue || 0)}</strong>
                                 </p>
                               )}
                             </div>
@@ -2586,7 +2605,7 @@ export default function LifecycleManager({
 
               <div className="p-2.5 bg-slate-50 border border-slate-200/70 rounded-lg text-[10.5px] text-slate-500 flex items-start gap-2">
                 <FileText className="h-3.5 w-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
-                <span>Menyimpan akan memindahkan aset ke <strong className="text-slate-700">Fase {transitionTarget} · {cleanLabel(transitionTarget)}</strong>, mencatat log aktivitas, dan memperbarui dashboard secara real-time.</span>
+                <span>Menyimpan akan memindahkan aset ke <strong className="text-slate-700">Fase {faseNo(transitionTarget)} · {cleanLabel(transitionTarget)}</strong>, mencatat log aktivitas, dan memperbarui dashboard secara real-time.</span>
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
@@ -2609,7 +2628,7 @@ export default function LifecycleManager({
           <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center">
               <div>
-                <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest block flex items-center gap-1">Serah-Terima Internal <ArrowRight className="h-3 w-3" /> Fase 6</span>
+                <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest block flex items-center gap-1">Serah-Terima Internal <ArrowRight className="h-3 w-3" /> Fase {faseNo(6)} · {cleanLabel(6)}</span>
                 <h3 className="text-base font-bold text-slate-950">Serahkan ke Karyawan (Custodian)</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name} · {detailAsset.quantity} unit</p>
               </div>
@@ -2639,7 +2658,7 @@ export default function LifecycleManager({
               {handoverError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{handoverError}</span></div>}
               <div className="p-2.5 bg-slate-50 border border-slate-200/70 rounded-lg text-[10.5px] text-slate-500 flex items-start gap-2">
                 <FileText className="h-3.5 w-3.5 text-slate-500 flex-shrink-0 mt-0.5" />
-                <span>Aset akan pindah ke <strong className="text-slate-700">Fase 6 · Terpasang/Dipakai</strong> dengan custodian tercatat (melewati surat jalan dan transit untuk aset internal).</span>
+                <span>Aset akan pindah ke <strong className="text-slate-700">Fase {faseNo(6)} · {cleanLabel(6)}</strong> dengan custodian tercatat (melewati surat jalan dan transit untuk aset internal).</span>
               </div>
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setHandoverOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>

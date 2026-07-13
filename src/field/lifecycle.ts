@@ -98,22 +98,22 @@ export const STAGE_LABELS: { [k: number]: string } = {
   5: "Transit",
   6: "Terpasang",
   7: "Audit",
-  8: "Maintenance",
+  8: "Pemeliharaan",
   9: "Penarikan",
   10: "Disposal"
 };
 
-// Full stage name for detail headers.
+// Full stage name for detail headers (display 1–8; clean single terms, matches the CMS).
 export const STAGE_FULL: { [k: number]: string } = {
   1: "Fase 1 — Request / Pengadaan",
   2: "Fase 2 — Produksi / Perakitan",
-  3: "Fase 1 — Inventory & Gudang",
-  4: "Fase 2 — Pengiriman / Surat Jalan",
+  3: "Fase 1 — Gudang",
+  4: "Fase 2 — Surat Jalan",
   5: "Fase 3 — Transit",
   6: "Fase 4 — Terpasang",
-  7: "Fase 5 — Audit & Kepatuhan",
-  8: "Fase 6 — Maintenance",
-  9: "Fase 7 — Penarikan / Relokasi",
+  7: "Fase 5 — Audit",
+  8: "Fase 6 — Pemeliharaan",
+  9: "Fase 7 — Penarikan",
   10: "Fase 8 — Disposal"
 };
 

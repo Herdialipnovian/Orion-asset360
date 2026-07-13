@@ -529,6 +529,14 @@ app.patch(
       delete dep.fullyInstalled;
       details = { ...details, deployment: dep };
     }
+    // Returning to Gudang (Fase 3) clears the deployment operational state so a "home" asset isn't left
+    // carrying a stale mode/custodian/legs/placements (which would block reclassify-to-Internal, let
+    // stock-opname run on a returned asset, and bleed stale legs into the next shipment). Mirrors the
+    // dedicated return endpoints (arrive-warehouse / return-internal). Keeps the project link.
+    if (ns === 3 && cur !== 3) {
+      const dep: any = (details as any)?.deployment || {};
+      details = { ...details, deployment: { projectId: dep.projectId, projectName: dep.projectName } };
+    }
     const location = computeLocation(ns, details?.inventory?.warehouseName, asset.client, asset.currentLocation);
 
     let maintenanceStatus = asset.maintenanceStatus;

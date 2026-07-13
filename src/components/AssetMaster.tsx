@@ -41,6 +41,9 @@ interface Props {
 export default function AssetMaster({ assets, categoryOptions, clientOptions, user, onChanged }: Props) {
   const canEdit = user.role === "Admin" || user.role === "Logistik";
   const canDelete = user.role === "Admin";
+  // Editing the phase from Master Data is a manual OVERRIDE of the lifecycle graph — it needs the
+  // server's Admin force path, so only Admin gets the inline dropdown.
+  const canSetPhase = user.role === "Admin";
 
   const [search, setSearch] = React.useState("");
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -53,6 +56,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
   const [confirmDel, setConfirmDel] = React.useState<Asset | null>(null);
   const [pending, setPending] = React.useState<{ rows: any[] } | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [phaseBusy, setPhaseBusy] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
   // Proyek options (bind asset → project; project mode drives the deployment flow).
   const [projects, setProjects] = React.useState<{ id: number; name: string; mode: string; client: string | null; status: string }[]>([]);
@@ -124,6 +128,32 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
       setFormErr(e?.message || "Gagal menyimpan aset.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Manual phase override from the FASE column. Uses the server's Admin force path so any phase is
+  // reachable, keeps the asset's existing stageDetails, and (via onChanged → global refetch + SSE)
+  // syncs the new phase to every view/process.
+  const changePhase = async (a: Asset, ns: number) => {
+    if (ns === a.currentStage || phaseBusy === a.id) return; // per-asset guard (other rows stay usable)
+    const isSplitChild = /-SJ\d+$/.test(a.id) || !!(a.specs as any)?.splitFrom;
+    // Spell out the destructive consequence of specific jumps so this isn't mistaken for a harmless relabel.
+    const warn =
+      ns === 6 && a.currentStage !== 6 ? "\n\n⚠ Masuk Fase 6 me-RESET progres pemasangan (assignment) siklus ini."
+      : ns === 3 && a.currentStage !== 3 && isSplitChild ? "\n\n⚠ Kartu split ini akan DIGABUNG ke aset induk bila induk ada di Gudang (baris ini bisa hilang)."
+      : ns === 3 && a.currentStage !== 3 ? "\n\n⚠ Data deployment (venue/toko/custodian) dikosongkan karena aset kembali ke Gudang."
+      : "";
+    if (!window.confirm(`Ubah fase ${a.id} dari ${a.currentStage}·${STAGE_SHORT[a.currentStage]} → ${ns}·${STAGE_SHORT[ns]} secara manual?\n\nOverride alur normal (tanpa mengisi data gate), langsung tersinkron ke semua proses.${warn}`)) return;
+    setPhaseBusy(a.id); setErr(null); setNotice(null);
+    try {
+      const r: any = await api.updateStage(a.id, ns, a.stageDetails, { force: true, logAction: `Fase di-set manual ke ${ns}·${STAGE_SHORT[ns]} dari Master Data`, operator: user.name });
+      if (r?.merged && r?.mergedInto) setNotice(`${a.id} kembali ke Gudang & digabung ke kartu asal ${r.mergedInto} — tersinkron ke semua proses.`);
+      else setNotice(`Fase ${a.id} diubah ke ${ns}·${STAGE_SHORT[ns]} — tersinkron ke semua proses.`);
+      onChanged();
+    } catch (e: any) {
+      setErr(e?.message || "Gagal mengubah fase.");
+    } finally {
+      setPhaseBusy(null);
     }
   };
 
@@ -299,7 +329,24 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
                     <td className="px-3 py-2.5 text-slate-500">{a.tglBeli || "—"}</td>
                     <td className="px-3 py-2.5 text-slate-700 font-semibold">{rupiah(a.financials?.purchaseCost || 0)}</td>
                     <td className="px-3 py-2.5 text-slate-800 font-bold">{a.quantity}</td>
-                    <td className="px-3 py-2.5"><span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${stageBadge(a.currentStage)}`}>{a.currentStage}·{STAGE_SHORT[a.currentStage]}</span></td>
+                    <td className="px-3 py-2.5">
+                      {canSetPhase ? (
+                        <select
+                          value={a.currentStage}
+                          disabled={phaseBusy === a.id}
+                          onChange={e => changePhase(a, Number(e.target.value))}
+                          title="Ubah fase (override manual — sinkron ke semua proses)"
+                          className={`text-[10px] font-bold pl-1.5 pr-4 py-0.5 rounded-full border outline-none cursor-pointer appearance-none bg-[length:0.7rem] bg-[right_0.25rem_center] bg-no-repeat disabled:opacity-50 ${stageBadge(a.currentStage)}`}
+                          style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23475569'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E\")" }}
+                        >
+                          {Object.keys(STAGE_SHORT).map(Number).filter(s => s >= 3).map(s => (
+                            <option key={s} value={s}>{s}·{STAGE_SHORT[s]}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${stageBadge(a.currentStage)}`}>{a.currentStage}·{STAGE_SHORT[a.currentStage]}</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
                         {canEdit && (

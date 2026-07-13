@@ -1703,18 +1703,34 @@ export default function LifecycleManager({
               const totalUnits = g.members.reduce((s, m) => s + (m.quantity || 0), 0);
               // ONE contained shipment box: header + all member cards nested inside, so a consolidated
               // dispatch reads as a single shipment (of N assets) — not as loose, separate-looking cards.
+              const chip = "inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white ring-1 ring-white/20";
               return (
-                <div key={"grp-" + g.batchId} className="col-span-full rounded-2xl border border-blue-200 bg-blue-50/50 p-3 md:p-4 space-y-3 shadow-xs">
-                  <div className="flex items-center gap-2.5">
-                    <span className="bg-blue-600 text-white p-1.5 rounded-lg shrink-0"><Truck className="h-3.5 w-3.5" /></span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-extrabold text-slate-800">Pengiriman Bersama · Surat Jalan {g.batchId}</p>
-                      <p className="text-[10px] text-slate-500">{g.members.length} aset · {totalUnits} unit{sh.driverName ? ` · Driver ${sh.driverName}` : ""}{sh.vehiclePlate ? ` · ${sh.vehiclePlate}` : ""}{dest?.area ? ` · Tujuan ${dest.area}` : ""} — berangkat bersama</p>
+                <div key={"grp-" + g.batchId} className="col-span-full overflow-hidden rounded-2xl border border-indigo-200/70 bg-white shadow-sm">
+                  {/* Gradient shipment manifest header */}
+                  <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-blue-600 to-indigo-600 px-4 py-3 text-white">
+                    <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.10]" style={{ backgroundImage: "repeating-linear-gradient(135deg, #fff 0, #fff 2px, transparent 2px, transparent 12px)" }} />
+                    <div className="relative flex items-center gap-3">
+                      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/25"><Truck className="h-5 w-5" /></span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-100">Pengiriman Bersama</span>
+                          <span className="font-mono text-[11px] font-bold rounded bg-white/15 px-1.5 py-0.5 ring-1 ring-white/20">{g.batchId}</span>
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <span className={chip}>{g.members.length} aset · {totalUnits} unit</span>
+                          {sh.driverName && <span className={chip}><UserCheck className="h-3 w-3" /> {sh.driverName}</span>}
+                          {sh.vehiclePlate && <span className={chip}>{sh.vehiclePlate}</span>}
+                          {dest?.area && <span className={chip}><MapPin className="h-3 w-3" /> {dest.area}</span>}
+                        </div>
+                      </div>
+                      <span className="ml-auto hidden shrink-0 items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[10px] font-extrabold text-blue-700 shadow-sm sm:inline-flex"><Truck className="h-3 w-3" /> berangkat bersama</span>
                     </div>
-                    <span className="ml-auto shrink-0 text-[10px] font-bold text-blue-700 bg-white border border-blue-200 rounded-full px-2.5 py-1">{g.members.length} aset · 1 Surat Jalan</span>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {g.members.map(renderCard)}
+                  {/* Member cards tray */}
+                  <div className="bg-gradient-to-b from-blue-50/70 to-transparent p-3 md:p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {g.members.map(renderCard)}
+                    </div>
                   </div>
                 </div>
               );

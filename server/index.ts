@@ -488,13 +488,6 @@ app.patch(
         });
       }
     }
-    // Flow guard: Fase 4 (Surat Jalan) & 5 (Transit) are the Standard courier flow ONLY. Don't let the
-    // generic ladder walk an Event/Distribusi/Internal asset into them (mirrors /ship + /batch-ship).
-    // An Admin force (e.g. a Master Data manual override) may still do it deliberately.
-    if ((ns === 4 || ns === 5) && ns !== cur && !(req.user!.role === "Admin" && meta?.force === true)) {
-      const sFlow = await flowModeOf(asset);
-      if (sFlow !== "Standard") return res.status(422).json({ code: "wrong_flow", error: `Aset alur ${sFlow} tidak melewati Fase ${ns} (Surat Jalan/Transit). ${FLOW_START_HINT[sFlow] || ""}` });
-    }
 
     // Pemasangan is now advisory (soft gate): 6->7 (Audit) is allowed even if some
     // assigned portions are still pending — the CMS shows the honest installed/total.
@@ -584,26 +577,6 @@ app.patch(
   })
 );
 
-// Resolve which of the FOUR flows an asset belongs to. Priority: peruntukan Internal → stamped
-// deployment.mode → bound project's mode → Standard (courier). Standard is the ONLY flow that uses
-// Surat Jalan / Transit (Fase 4-5); Event/Distribusi/Internal start from Gudang via their own action
-// and jump to Fase 6. This is the single server-side source of truth for the mode-exclusive guards.
-async function flowModeOf(asset: Asset): Promise<"Internal" | "Event" | "Distribusi" | "Standard"> {
-  if (asset.peruntukan === "Internal") return "Internal";
-  const dm = (asset.stageDetails as any)?.deployment?.mode;
-  if (dm === "Internal" || dm === "Event" || dm === "Distribusi" || dm === "Standard") return dm;
-  if (asset.projectId != null) {
-    const { rows } = await q(`select mode from projects where id=$1`, [asset.projectId]);
-    const pm = rows[0]?.mode;
-    if (pm === "Event" || pm === "Distribusi" || pm === "Internal") return pm;
-  }
-  return "Standard";
-}
-const FLOW_START_HINT: Record<string, string> = {
-  Event: "Gunakan \"Kirim ke Venue\" (roadshow), bukan Surat Jalan.",
-  Distribusi: "Gunakan \"Distribusi ke Toko\", bukan Surat Jalan.",
-  Internal: "Gunakan \"Serah-terima Custodian\", bukan Surat Jalan.",
-};
 
 // --- Issue Surat Jalan (Fase 4) with partial-shipment SPLIT — STANDARD/courier flow only ---
 // Shipped qty (sum of destinations) < stock -> split off a child record at Fase 4,
@@ -623,9 +596,9 @@ app.post(
     if (!isLegalTransition(asset.currentStage, 4)) {
       return res.status(422).json({ code: "illegal_transition", error: `Surat Jalan hanya dari Fase 3 (Gudang). Aset ini di Fase ${asset.currentStage}.` });
     }
-    // Surat Jalan is the STANDARD/courier flow only — Event/Distribusi/Internal use their own start action.
-    const shipFlow = await flowModeOf(asset);
-    if (shipFlow !== "Standard") return res.status(422).json({ code: "wrong_flow", error: `Aset ini beralur ${shipFlow}. ${FLOW_START_HINT[shipFlow] || ""}` });
+    // Any deployment asset ships out via Surat Jalan (single or bareng). Internal (custodian) assets
+    // are held by employees, not sent on a location journey.
+    if (asset.peruntukan === "Internal") return res.status(422).json({ code: "wrong_flow", error: "Aset Internal (custodian) tidak dikirim lewat Surat Jalan — dikelola di menu Aset Internal." });
 
     const { updatedDetails, meta } = req.body || {};
     const shipping = (updatedDetails && updatedDetails.shipping) || {};
@@ -639,7 +612,7 @@ app.post(
     // Stamp the flow authoritatively as Standard on first move so the CMS never has to infer it from
     // the project (which is what made a courier asset "look Event" and hid the Fase-6 install block).
     const baseDetails = updatedDetails || asset.stageDetails;
-    const details = { ...baseDetails, deployment: { ...((baseDetails as any)?.deployment || {}), mode: "Standard" } };
+    const details = baseDetails;
     const operator = meta?.operator || req.user!.name;
 
     // Authoritative move: lock the parent row and RE-VALIDATE stage + stock INSIDE the tx (mirrors
@@ -673,7 +646,7 @@ app.post(
             ...(asset.financials || { purchaseCost: 0, maintenanceCost: 0, disposalValue: 0 }),
             purchaseCost: Math.round(perUnit * shipQty), disposalValue: Math.round(perDisposal * shipQty)
           },
-          stageDetails: { ...asset.stageDetails, shipping, deployment: { ...((asset.stageDetails as any)?.deployment || {}), mode: "Standard" } }
+          stageDetails: { ...asset.stageDetails, shipping }
         };
         await insertAsset(child, exec);
         await exec(`update assets set quantity=$2, financials=$3::jsonb, updated_at=now() where id=$1`,
@@ -792,8 +765,6 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
     const asset = await getAsset(it.id);
     if (!asset) return res.status(404).json({ error: `Aset ${it.id} tidak ditemukan.` });
     if (asset.peruntukan === "Internal") return res.status(422).json({ error: `Aset ${it.id} berjenis Internal — tidak masuk alur pengiriman.` });
-    const itFlow = await flowModeOf(asset);
-    if (itFlow !== "Standard") return res.status(422).json({ code: "wrong_flow", error: `Aset ${it.id} beralur ${itFlow}. ${FLOW_START_HINT[itFlow] || ""}` });
     if (asset.currentStage !== 3) return res.status(422).json({ code: "illegal_transition", error: `Surat Jalan hanya dari Gudang (Fase 3). Aset ${it.id} di Fase ${asset.currentStage}.` });
     if (!Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: `Qty kirim untuk ${it.id} harus bilangan bulat > 0.` });
     if (qty > asset.quantity) return res.status(422).json({ code: "qty_exceeds", error: `Qty kirim untuk ${it.id} (${qty}) melebihi stok gudang (${asset.quantity}).` });
@@ -845,12 +816,11 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
       const stock = Number(rows[0].quantity);
       if (qty > stock) throw Object.assign(new Error(`Qty kirim untuk ${asset.id} (${qty}) melebihi stok (${stock}).`), { http: 422 });
       const shipping = mkShipping(qty);
-      const stdDep = { ...((asset.stageDetails as any)?.deployment || {}), mode: "Standard" };
       const location = computeLocation(4, undefined, asset.client, asset.currentLocation);
       if (qty === stock) {
         // whole record → Fase 4
         await exec(`update assets set current_stage=4, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`,
-          [asset.id, location, JSON.stringify({ ...asset.stageDetails, shipping, deployment: stdDep })]);
+          [asset.id, location, JSON.stringify({ ...asset.stageDetails, shipping })]);
         logs.push({ id: `LOG-SHIP-${ts}-${asset.id}`, timestamp: now, assetId: asset.id, assetName: asset.name, stage: 4, action: `Surat Jalan ${suratJalanNo}: ${qty} unit dikirim ke ${area} (kirim bersama).`, operator, type: "success" });
         affected.push(asset.id);
       } else {
@@ -866,7 +836,7 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
           qrcode: `ASETIFY-${cid}`, createdAt: now, updatedAt: now,
           specs: { ...(asset.specs || {}), splitFrom: asset.id },
           financials: { ...(asset.financials || { purchaseCost: 0, maintenanceCost: 0, disposalValue: 0 }), purchaseCost: Math.round(perUnit * qty), disposalValue: Math.round(perDisposal * qty) },
-          stageDetails: { ...asset.stageDetails, shipping, deployment: stdDep },
+          stageDetails: { ...asset.stageDetails, shipping },
         };
         await insertAsset(child, exec);
         await exec(`update assets set quantity=$2, financials=$3::jsonb, updated_at=now() where id=$1`,

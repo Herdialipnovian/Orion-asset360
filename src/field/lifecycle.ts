@@ -71,18 +71,21 @@ export function transitLeg(asset: Asset): { venue: string; area?: string; seq: n
 const eventPicOrAdmin = (asset: Asset, user: { role: Role; client?: string | null }) =>
   user.role === "Admin" || (user.role === "PIC" && (user.client || null) === (asset.client || null));
 
-// Can this user SHIP the asset to the (next) venue? Event, Fase 6, no shipment already in transit.
+// Can this user SHIP the asset to the NEXT location? Any non-Internal asset at a location (Fase 6),
+// no shipment already in transit. (Distribusi fan-out assets manage placements instead.)
 export function canDeployVenue(asset: Asset, user: { role: Role; client?: string | null }): boolean {
   if (asset?.currentStage !== 6) return false;
+  if (asset?.peruntukan === "Internal") return false;
   const dep: any = (asset?.stageDetails as any)?.deployment || {};
-  if (dep.mode !== "Event") return false;
+  if (dep.mode && dep.mode !== "Event") return false; // e.g. locked into Distribusi
+  if (Array.isArray(dep.placements) && dep.placements.length) return false; // Distribusi fan-out
   if (transitLeg(asset) || dep.returnShipment?.status === "transit") return false; // must confirm arrival first
   return eventPicOrAdmin(asset, user);
 }
 // Can this user CONFIRM the in-transit venue shipment arrived (transit→active)?
 export function canArriveVenue(asset: Asset, user: { role: Role; client?: string | null }): boolean {
   if (asset?.currentStage !== 6) return false;
-  if ((asset?.stageDetails as any)?.deployment?.mode !== "Event") return false;
+  if (asset?.peruntukan === "Internal") return false;
   if (!transitLeg(asset)) return false;
   return eventPicOrAdmin(asset, user);
 }
@@ -239,8 +242,8 @@ function actionAllowed(t: number, currentStage: number, asset?: Asset | null): b
   const inTransit = legs.some(l => l.status === "transit") || dep.returnShipment?.status === "transit";
   // Internal assets never use the Standard courier Surat Jalan (3→4).
   if (mode === "Internal" && currentStage === 3 && t === 4) return false;
-  // An Event asset still in transit to/from a venue can't be audited / maintained / retrieved yet.
-  if (mode === "Event" && currentStage === 6 && inTransit && (t === 7 || t === 8 || t === 9)) return false;
+  // An asset still in transit to/from a location can't be audited / maintained / retrieved yet.
+  if (currentStage === 6 && inTransit && (t === 7 || t === 8 || t === 9)) return false;
   return true;
 }
 

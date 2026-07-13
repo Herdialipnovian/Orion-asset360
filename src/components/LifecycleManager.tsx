@@ -888,14 +888,7 @@ export default function LifecycleManager({
     const FlowIcon = flow.Icon;
     const proj = asset.projectId != null ? projects.find(p => p.id === asset.projectId) : null;
     // Courier-eligible = not committed to Event/Distribusi/Internal (Belum/unbound + Standard qualify).
-    const batchable = batchMode && asset.currentStage === 3 && fmode !== "Event" && fmode !== "Distribusi" && fmode !== "Internal";
-    // In batch mode, tell the operator WHY a card can't be selected instead of just dimming it.
-    const batchBlockReason = !batchMode || batchable ? null
-      : asset.currentStage !== 3 ? "Hanya dari Gudang (Fase 1)"
-      : fmode === "Event" ? "Aset Event — pakai “Kirim ke Venue”"
-      : fmode === "Distribusi" ? "Aset Distribusi — pakai “Distribusi ke Toko”"
-      : fmode === "Internal" ? "Aset Internal — menu Aset Internal"
-      : null;
+    const batchable = batchMode && asset.currentStage === 3 && fmode !== "Internal";
     const picked = batchSel.includes(asset.id);
     return (
       <div
@@ -918,9 +911,6 @@ export default function LifecycleManager({
             <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border w-fit ${flow.chip}`}>
               <FlowIcon className="h-2.5 w-2.5" /> {flow.label}
             </span>
-            {batchBlockReason && (
-              <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200 w-fit"><AlertTriangle className="h-2.5 w-2.5" /> {batchBlockReason}</span>
-            )}
           </div>
           <p className="text-[11px] text-slate-500 grid grid-cols-2 gap-x-2">
             <span>Client: <strong className="font-semibold text-slate-700 truncate block">{asset.client.split(" ")[1] || asset.client}</strong></span>
@@ -1666,7 +1656,7 @@ export default function LifecycleManager({
       </div>
       {batchMode && (
         <div className="flex items-center gap-2 text-[11px] text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 font-semibold">
-          <Truck className="h-3.5 w-3.5 shrink-0" /> Mode Kirim Bersama (alur Kurir Standar) — centang aset <strong>Kurir Standar / belum diikat proyek</strong> di <strong>Gudang (Fase 1)</strong> yang berangkat dengan satu kendaraan/driver ke satu tujuan. Aset <strong>Event</strong> pakai “Kirim ke Venue”, <strong>Distribusi</strong> pakai “Distribusi ke Toko”.
+          <Truck className="h-3.5 w-3.5 shrink-0" /> Mode <strong>Kirim Bersama</strong> — centang aset apa saja di <strong>Gudang (Fase 1)</strong> yang berangkat dalam satu kendaraan/driver ke satu tujuan (Event, Distribusi, atau tanpa proyek — semua boleh). Terbitkan satu Surat Jalan untuk seluruh aset terpilih.
         </div>
       )}
 
@@ -2246,13 +2236,13 @@ export default function LifecycleManager({
                     );
                   })()}
 
-                  {/* Event roadshow — START from Gudang (Fase 3) or MANAGE/relocate at the venue (Fase 6).
-                      Never at courier transit (4/5) — that's the Standard flow, not Event. */}
-                  {onDeployVenue && projectModeOf(detailAsset) === "Event" && (detailAsset.currentStage === 3 || detailAsset.currentStage === 6) && (() => {
+                  {/* Location chain — ANY deployed (non-Internal) asset at a location (Fase 6): relocate to the
+                      NEXT location or ship back to Gudang. Every hop carries a Surat Jalan + tracking. The FIRST
+                      ship-out from Gudang uses the courier ladder (Surat Jalan→Transit→POD) below. */}
+                  {onDeployVenue && !(isInternalDeploy(detailAsset) || detailAsset.peruntukan === "Internal") && detailAsset.currentStage === 6 && (() => {
                     const dep: any = detailAsset.stageDetails?.deployment || {};
                     const legs: any[] = Array.isArray(dep.legs) ? dep.legs : [];
                     const transitLeg = legs.find(l => l.status === "transit");
-                    const activeLeg = legs.find(l => l.status === "active");
                     const retTransit = dep.returnShipment?.status === "transit";
                     // Gudang (warehouse) operations are Logistik/Admin only — matches the backend role gate.
                     const gudangRole = !user || user.role === "Admin" || user.role === "Logistik";
@@ -2270,7 +2260,7 @@ export default function LifecycleManager({
                             <Check className="h-4 w-4 shrink-0" />
                             <span className="min-w-0">
                               <span className="block text-[11px] font-bold leading-tight">Konfirmasi Kedatangan di Gudang</span>
-                              <span className="block text-[9px] text-emerald-50 leading-tight">Aset kembali ke Fase 3 (Gudang) — roadshow selesai</span>
+                              <span className="block text-[9px] text-emerald-50 leading-tight">Aset kembali ke Fase 1 (Gudang) — perjalanan selesai</span>
                             </span>
                           </button>
                         ) : (
@@ -2286,14 +2276,13 @@ export default function LifecycleManager({
                           className="w-full flex items-center gap-2 text-left bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white border border-emerald-600 rounded-lg px-3 py-2.5 transition shadow-sm">
                           <Check className="h-4 w-4 shrink-0" />
                           <span className="min-w-0">
-                            <span className="block text-[11px] font-bold leading-tight">Konfirmasi Kedatangan di Venue</span>
-                            <span className="block text-[9px] text-emerald-50 leading-tight">{transitLeg.venue}{transitLeg.area ? ` · ${transitLeg.area}` : ""} — aset menjadi aktif di venue</span>
+                            <span className="block text-[11px] font-bold leading-tight">Konfirmasi Kedatangan di Lokasi</span>
+                            <span className="block text-[9px] text-emerald-50 leading-tight">{transitLeg.venue}{transitLeg.area ? ` · ${transitLeg.area}` : ""} — aset menjadi aktif di lokasi</span>
                           </span>
                         </button>
                       </>
                     );
                     // Arrived (or fresh) → ship to (next) venue; and if at a venue, ship back to gudang (Logistik/Admin).
-                    const hasLegs = legs.length > 0;
                     return (
                       <>
                         {errBanner}
@@ -2301,17 +2290,17 @@ export default function LifecycleManager({
                           className="w-full flex items-center gap-2 text-left bg-amber-500 hover:bg-amber-600 text-white border border-amber-500 rounded-lg px-3 py-2.5 transition shadow-sm">
                           <Truck className="h-4 w-4 shrink-0" />
                           <span className="min-w-0">
-                            <span className="block text-[11px] font-bold leading-tight">{hasLegs ? "Kirim ke Venue Berikutnya" : "Kirim ke Venue (Mulai Event)"}</span>
-                            <span className="block text-[9px] text-amber-50 leading-tight">{hasLegs ? "Kirim aset beserta tracking ke venue berikutnya (roadshow)" : "Kirim aset beserta tracking ke venue pertama"}</span>
+                            <span className="block text-[11px] font-bold leading-tight">Kirim ke Lokasi Berikutnya</span>
+                            <span className="block text-[9px] text-amber-50 leading-tight">Kirim aset + Surat Jalan &amp; tracking ke lokasi/venue berikutnya</span>
                           </span>
                         </button>
-                        {activeLeg && onShipReturn && gudangRole && (
+                        {onShipReturn && gudangRole && (
                           <button onClick={openReturn}
                             className="w-full flex items-center gap-2 text-left bg-white hover:bg-cyan-50 text-cyan-700 border border-cyan-300 rounded-lg px-3 py-2.5 transition shadow-sm">
                             <Home className="h-4 w-4 shrink-0" />
                             <span className="min-w-0">
                               <span className="block text-[11px] font-bold leading-tight">Kirim Kembali ke Gudang</span>
-                              <span className="block text-[9px] text-cyan-600 leading-tight">Roadshow selesai — kirim aset beserta tracking kembali ke gudang</span>
+                              <span className="block text-[9px] text-cyan-600 leading-tight">Tidak ada tujuan lagi — kirim aset + Surat Jalan &amp; tracking balik ke gudang</span>
                             </span>
                           </button>
                         )}
@@ -2350,7 +2339,7 @@ export default function LifecycleManager({
                     </button>
                   )}
 
-                  {detailAsset.currentStage === 6 && !detailAsset.stageDetails?.deployment?.fullyInstalled && !isInternalDeploy(detailAsset) && projectModeOf(detailAsset) !== "Event" && projectModeOf(detailAsset) !== "Distribusi" && (() => {
+                  {detailAsset.currentStage === 6 && !detailAsset.stageDetails?.deployment?.fullyInstalled && !isInternalDeploy(detailAsset) && detailAsset.peruntukan !== "Internal" && projectModeOf(detailAsset) !== "Distribusi" && (() => {
                     const hasAsg = (detailAsset.stageDetails?.deployment?.assignments?.length || 0) > 0;
                     return (
                       <button
@@ -2367,12 +2356,11 @@ export default function LifecycleManager({
                   })()}
 
                   {(() => {
-                    // The Standard courier ladder (3→4 Surat Jalan) must NOT show for Event/Distribusi/
-                    // Internal — those start via their own action from Gudang. Post-deployment branches
-                    // (6→7/8/9, 9→…) are common to all modes and always show.
+                    // Every non-Internal asset ships out of Gudang via the courier ladder (3→4 Surat Jalan →
+                    // Transit → POD). Internal (custodian) assets are held by an employee, not shipped — they
+                    // start via their own handover action. Post-deployment branches are common to all.
                     const emode = isInternalDeploy(detailAsset) || detailAsset.peruntukan === "Internal" ? "Internal" : projectModeOf(detailAsset);
-                    const nonStd = emode === "Event" || emode === "Distribusi" || emode === "Internal";
-                    return nonStd && detailAsset.currentStage === 3;
+                    return emode === "Internal" && detailAsset.currentStage === 3;
                   })() ? null : TRANSITIONS[detailAsset.currentStage]?.length ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {TRANSITIONS[detailAsset.currentStage].map(t => {
@@ -2660,16 +2648,15 @@ export default function LifecycleManager({
         </div>
       )}
 
-      {/* MODAL 5: EVENT VENUE SETUP / RELOCATE (roadshow leg) */}
+      {/* MODAL 5: SHIP TO NEXT LOCATION (venue/relocation leg) */}
       {detailAsset && venueOpen && (() => {
-        const hasLegs = (detailAsset.stageDetails?.deployment?.legs?.length || 0) > 0;
         return (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-100">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center">
               <div>
-                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest block">Event / Roadshow · Kirim</span>
-                <h3 className="text-base font-bold text-slate-950">{hasLegs ? "Kirim ke Venue Berikutnya" : "Kirim ke Venue (Mulai Event)"}</h3>
+                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest block">Kirim ke Lokasi · Tracking</span>
+                <h3 className="text-base font-bold text-slate-950">Kirim ke Lokasi Berikutnya</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>
               </div>
               <button onClick={() => setVenueOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
@@ -2683,9 +2670,9 @@ export default function LifecycleManager({
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Venue <span className="text-rose-500">*</span></label>
+                <label className="font-bold text-slate-700">Lokasi / Venue Tujuan <span className="text-rose-500">*</span></label>
                 <select value={venueForm.locationId} onChange={e => setVenueForm({ ...venueForm, locationId: e.target.value })} className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg outline-none focus:bg-white focus:ring-1 focus:ring-amber-500 cursor-pointer">
-                  <option value="">— pilih venue —</option>
+                  <option value="">— pilih lokasi/venue —</option>
                   {venues.map(v => <option key={v.id} value={v.id}>{v.name}{v.area ? ` · ${v.area}` : ""}</option>)}
                 </select>
                 {venues.length === 0 && <p className="text-[10px] text-amber-600">Belum ada venue untuk client ini. Tambahkan dulu di Proyek &amp; Lokasi (tipe Venue).</p>}
@@ -2701,7 +2688,7 @@ export default function LifecycleManager({
               </div>
               {/* Tracking kiriman (seperti Fase 5 Pengiriman) — aset dikirim ke venue tujuan */}
               <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-2.5">
-                <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Tracking Pengiriman ke Venue</p>
+                <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Tracking Pengiriman ke Lokasi</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5"><label className="font-bold text-slate-700">Kurir / Vendor</label>
                     <select value={venueForm.courier} onChange={e => setVenueForm({ ...venueForm, courier: e.target.value })} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
@@ -2718,11 +2705,11 @@ export default function LifecycleManager({
               {venueError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /><span>{venueError}</span></div>}
               <div className="p-2.5 bg-amber-50 border border-amber-200/70 rounded-lg text-[10.5px] text-amber-700 flex items-start gap-2">
                 <Truck className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-                <span>{hasLegs ? "Venue aktif ditutup dan aset dikirim ke venue berikutnya. Konfirmasi “Kedatangan di Venue” saat aset sampai." : "Aset dikirim ke venue pertama. Konfirmasi “Kedatangan di Venue” saat aset sampai."}</span>
+                <span>Lokasi aktif ditutup dan aset dikirim ke lokasi berikutnya beserta Surat Jalan &amp; tracking. Konfirmasi “Kedatangan di Lokasi” saat aset sampai.</span>
               </div>
               <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setVenueOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
-                <button type="submit" disabled={venueBusy} className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />{hasLegs ? "Kirim ke Venue" : "Kirim & Pasang"}</button>
+                <button type="submit" disabled={venueBusy} className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5"><Truck className="h-4 w-4" />Kirim ke Lokasi</button>
               </div>
             </form>
           </div>

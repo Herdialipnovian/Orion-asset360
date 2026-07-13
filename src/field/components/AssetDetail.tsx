@@ -158,7 +158,7 @@ export default function AssetDetail({
           >
             <Compass className="h-5 w-5 shrink-0 text-emerald-300" />
             <div className="min-w-0 flex-1">
-              <div className="font-semibold text-white">Konfirmasi Kedatangan di Venue</div>
+              <div className="font-semibold text-white">Konfirmasi Kedatangan di Lokasi</div>
               <div className="text-xs text-slate-400">{tLeg ? `Kiriman ke ${tLeg.venue}${tLeg.shipping?.courier ? ` · ${tLeg.shipping.courier}` : ""} · tandai aktif` : "Tandai set aktif di venue"}</div>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-emerald-300" />
@@ -171,8 +171,8 @@ export default function AssetDetail({
           >
             <Compass className="h-5 w-5 shrink-0 text-amber-300" />
             <div className="min-w-0 flex-1">
-              <div className="font-semibold text-white">Kirim ke Venue (Roadshow)</div>
-              <div className="text-xs text-slate-400">{leg ? `Sekarang: ${leg.venue} (leg ${leg.seq}) · kirim ke venue berikutnya dan Tracking` : "Kirim ke venue berikutnya dan Tracking"}</div>
+              <div className="font-semibold text-white">Kirim ke Lokasi Berikutnya</div>
+              <div className="text-xs text-slate-400">{leg ? `Sekarang: ${leg.venue} (leg ${leg.seq}) · kirim ke lokasi berikutnya + tracking` : "Kirim ke lokasi berikutnya + tracking"}</div>
             </div>
             <ChevronRight className="h-5 w-5 shrink-0 text-amber-300" />
           </button>

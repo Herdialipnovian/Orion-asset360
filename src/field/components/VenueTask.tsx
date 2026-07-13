@@ -79,7 +79,7 @@ export default function VenueTask({
   }, [asset.client]);
 
   async function submit() {
-    if (!online) return setToast({ msg: "Perlu koneksi internet untuk mengirim ke venue.", tone: "error" });
+    if (!online) return setToast({ msg: "Perlu koneksi internet untuk mengirim ke lokasi.", tone: "error" });
     if (!locationId) return setToast({ msg: "Silakan pilih venue tujuan terlebih dahulu.", tone: "error" });
     if (trackingUrl.trim() && !/^https?:\/\//i.test(trackingUrl.trim())) return setToast({ msg: "Link tracking harus diawali dengan http:// atau https://.", tone: "error" });
     setBusy(true);
@@ -90,7 +90,7 @@ export default function VenueTask({
       });
       onDone();
     } catch (e: any) {
-      setToast({ msg: e?.message || "Gagal mengirim ke venue.", tone: "error" });
+      setToast({ msg: e?.message || "Gagal mengirim ke lokasi.", tone: "error" });
       setBusy(false);
     }
   }
@@ -104,7 +104,7 @@ export default function VenueTask({
       </div>
 
       <header>
-        <h1 className="text-xl font-bold text-white">Kirim ke Venue (Roadshow)</h1>
+        <h1 className="text-xl font-bold text-white">Kirim ke Lokasi Berikutnya</h1>
         <p className="mt-1 text-sm text-slate-400">{asset.name}</p>
         {leg && (
           <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[12px] font-bold text-amber-200">
@@ -160,7 +160,7 @@ export default function VenueTask({
 
       <button onClick={submit} disabled={busy || !online} className="tap flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 text-base font-bold text-white active:scale-[0.98] disabled:opacity-50">
         {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
-        {online ? "Kirim ke Venue Ini" : "Perlu Koneksi"}
+        {online ? "Kirim ke Lokasi Ini" : "Perlu Koneksi"}
       </button>
 
       {toast && <Toast msg={toast.msg} tone={toast.tone} onDone={() => setToast(null)} />}

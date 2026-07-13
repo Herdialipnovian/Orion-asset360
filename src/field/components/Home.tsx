@@ -66,7 +66,7 @@ export default function Home({
           myPlacementTasks(a, user.id)
             .filter(p => !pl?.has(p.locationId))
             .forEach(p => labels.push(`Pasang di ${p.toko} (${p.remaining} unit)`));
-          if (canDeployVenue(a, user)) labels.push("Pindah ke Venue (Roadshow)");
+          if (canDeployVenue(a, user)) labels.push("Kirim ke Lokasi Berikutnya");
           labels.push(...actions.map(x => x.verb));
           return { a, labels };
         })

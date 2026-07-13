@@ -334,7 +334,7 @@ export default function FieldApp() {
               onVenue={() => push({ t: "venue", id: detailAsset.id })}
               onArriveVenue={async () => {
                 if (!online) { setToast({ msg: "Perlu koneksi internet untuk mengonfirmasi kedatangan.", tone: "error" }); return; }
-                try { await fieldApi.arriveVenue(detailAsset.id); setToast({ msg: "Kedatangan di venue berhasil dikonfirmasi.", tone: "success" }); await load(); }
+                try { await fieldApi.arriveVenue(detailAsset.id); setToast({ msg: "Kedatangan di lokasi berhasil dikonfirmasi.", tone: "success" }); await load(); }
                 catch (e: any) { setToast({ msg: e?.message || "Gagal mengonfirmasi kedatangan.", tone: "error" }); }
               }}
               onOpenSync={() => goTab("sync")}
@@ -387,7 +387,7 @@ export default function FieldApp() {
           ))}
         {view.t === "venue" &&
           (detailAsset && canDeployVenue(detailAsset, user) ? (
-            <VenueTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Aset dikirim ke venue — konfirmasi \"Kedatangan di Venue\" saat tiba di lokasi.", tone: "success" }); pop(); await load(); }} />
+            <VenueTask asset={detailAsset} user={user} online={online} onBack={pop} onDone={async () => { setToast({ msg: "Aset dikirim ke lokasi — konfirmasi \"Kedatangan di Lokasi\" saat tiba di tujuan.", tone: "success" }); pop(); await load(); }} />
           ) : (
             <NotFound onBack={pop} />
           ))}

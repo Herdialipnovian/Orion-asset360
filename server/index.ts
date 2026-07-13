@@ -464,7 +464,7 @@ app.patch(
 
     // Idempotent replay (safe offline retry): same key -> same response, never double-apply.
     const idemKey = String(req.headers["idempotency-key"] || "");
-    const cached = await getIdempotent(idemKey);
+    const cached = await getIdempotent(idemKey, `stage:${id}`);
     if (cached) return res.status(200).json(cached);
 
     // Role gate for the target stage (Admin always allowed)
@@ -1031,7 +1031,7 @@ app.post(
   wrap(async (req: AuthedReq, res) => {
     const id = req.params.id;
     const idemKey = String(req.headers["idempotency-key"] || "");
-    const cached = await getIdempotent(idemKey);
+    const cached = await getIdempotent(idemKey, `install:${id}`);
     if (cached) return res.status(200).json(cached);
 
     // Pre-checks that don't need the lock (fail fast).
@@ -1086,16 +1086,20 @@ app.post(
       if (!Number.isInteger(inc) || inc < 1) return { http: 400, body: { error: "doneQty harus bilangan bulat >= 1." } };
       const applied = Math.min(inc, remaining);
 
-      // Fresh evidence gate: before + after uploaded by THIS caller AFTER the last report.
-      const { rows: ev } = await c.query(`select slot, operator, captured_at, created_at from evidence where asset_id=$1 and stage=6`, [id]);
-      const since = a.lastReportAt ? new Date(a.lastReportAt).getTime() : 0;
-      const fresh = new Set(
-        ev
-          .filter((e: any) => (e.operator || "") === req.user!.name && new Date(e.captured_at || e.created_at).getTime() > since)
-          .map((e: any) => e.slot)
-      );
-      const missing = ["before", "after"].filter(s => !fresh.has(s));
-      if (missing.length) return { http: 422, body: { code: "evidence_required", error: "Foto before & after (baru) wajib sebelum melapor.", missing } };
+      // Fresh evidence gate — ONLY for the Merchandiser (the field installer must show before+after
+      // photos). A PIC/Admin confirming from the CMS is a supervisor/desk action; photos are the
+      // field's job, so their confirmation is not photo-gated.
+      if (role === "Merchandiser") {
+        const { rows: ev } = await c.query(`select slot, operator, captured_at, created_at from evidence where asset_id=$1 and stage=6`, [id]);
+        const since = a.lastReportAt ? new Date(a.lastReportAt).getTime() : 0;
+        const fresh = new Set(
+          ev
+            .filter((e: any) => (e.operator || "") === req.user!.name && new Date(e.captured_at || e.created_at).getTime() > since)
+            .map((e: any) => e.slot)
+        );
+        const missing = ["before", "after"].filter(s => !fresh.has(s));
+        if (missing.length) return { http: 422, body: { code: "evidence_required", error: "Foto before & after (baru) wajib sebelum melapor.", missing } };
+      }
 
       const now = new Date().toISOString();
       const newDone = cur + applied;
@@ -1105,7 +1109,7 @@ app.post(
       if (sig) a.signature = sig;
       if (note) a.note = String(note);
       if (newDone >= cap) a.completedAt = now;
-      a.reports = [...(Array.isArray(a.reports) ? a.reports : []), { doneQty: applied, at: now, signature: sig || undefined, note: note ? String(note) : undefined, by: a.merchandiser, key: idemKey || undefined }];
+      a.reports = [...(Array.isArray(a.reports) ? a.reports : []), { doneQty: applied, at: now, signature: sig || undefined, note: note ? String(note) : undefined, by: req.user!.name, onBehalfOf: role !== "Merchandiser" ? a.merchandiser : undefined, actorRole: role, key: idemKey || undefined }];
 
       const { installedQty, fullyInstalled } = recomputeInstall(assignments, quantity);
       const details = { ...sd, deployment: { ...deployment, assignments, installedQty, fullyInstalled } };
@@ -1117,12 +1121,16 @@ app.post(
     const r = result as any;
 
     const now = new Date().toISOString();
+    // Honest audit line: the Merchandiser "melapor" their own work; a PIC/Admin "konfirmasi" on behalf.
+    const onBehalf = role !== "Merchandiser";
     await insertLog({
       id: `LOG-INSTALL-${Date.now()}`, timestamp: now, assetId: id, assetName: pre.name, stage: 6,
-      action: `${r.merchandiser} melapor +${r.applied} unit pemasangan (porsi ${r.newDone}/${r.cap}; total ${r.installedQty}/${r.quantity} terpasang)${r.fullyInstalled ? " — PENUH" : ""}.`,
-      operator: r.merchandiser, type: "success"
+      action: onBehalf
+        ? `${req.user!.name} (${role}) konfirmasi pemasangan porsi ${r.merchandiser}: +${r.applied} unit (${r.newDone}/${r.cap}; total ${r.installedQty}/${r.quantity} terpasang)${r.fullyInstalled ? " — PENUH" : ""}.`
+        : `${r.merchandiser} melapor +${r.applied} unit pemasangan (porsi ${r.newDone}/${r.cap}; total ${r.installedQty}/${r.quantity} terpasang)${r.fullyInstalled ? " — PENUH" : ""}.`,
+      operator: req.user!.name, type: "success"
     });
-    await notifyInstallCompleted({ id, name: pre.name, client: pre.client, quantity: r.quantity }, r.merchandiser, r.applied, r.installedQty, r.fullyInstalled);
+    await notifyInstallCompleted({ id, name: pre.name, client: pre.client, quantity: r.quantity }, r.merchandiser, r.applied, r.installedQty, r.fullyInstalled, { name: req.user!.name, role });
 
     const out = { asset: await getAsset(id), installedQty: r.installedQty, fullyInstalled: r.fullyInstalled };
     await saveIdempotent(idemKey, `install:${id}`, out);
@@ -1898,7 +1906,7 @@ app.post("/api/assets/:id/distribute", requireAuth, requireRole("Admin", "Logist
 app.post("/api/assets/:id/place", requireAuthFlexible, requireRole("Admin", "Merchandiser"), wrap(async (req: AuthedReq, res) => {
   const id = req.params.id;
   const idemKey = String(req.headers["idempotency-key"] || "");
-  const cached = await getIdempotent(idemKey);
+  const cached = await getIdempotent(idemKey, `place:${id}`);
   if (cached) return res.status(200).json(cached);
 
   const pre = await getAsset(id);
@@ -2179,7 +2187,7 @@ app.post(
     if (!asset) return res.status(404).json({ error: "Aset tidak ditemukan." });
 
     const idemKey = String(req.headers["idempotency-key"] || "");
-    const cached = await getIdempotent(idemKey);
+    const cached = await getIdempotent(idemKey, `evidence:${id}`);
     if (cached) return res.status(200).json(cached);
 
     const files = (req.files as Express.Multer.File[]) || [];

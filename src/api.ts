@@ -307,6 +307,10 @@ export const api = {
   placeAtToko(id: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }): Promise<{ asset: Asset; installedQty: number; fullyInstalled: boolean }> {
     return req(`/assets/${encodeURIComponent(id)}/place`, { method: "POST", body: JSON.stringify(p) });
   },
+  // Confirm an Event/Standard install portion done (Admin/PIC from the CMS, on behalf of a Merchandiser).
+  completeInstall(id: string, p: { merchandiserId: number; doneQty?: number; note?: string }): Promise<{ asset: Asset; installedQty: number; fullyInstalled: boolean }> {
+    return req(`/assets/${encodeURIComponent(id)}/install/complete`, { method: "POST", body: JSON.stringify(p) });
+  },
   auditSample(id: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }): Promise<{ asset: Asset; coverage: any }> {
     return req(`/assets/${encodeURIComponent(id)}/audit-sample`, { method: "POST", body: JSON.stringify({ samples, ...(meta || {}) }) });
   },

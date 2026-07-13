@@ -95,16 +95,23 @@ export async function notifyInstallCompleted(
   merchandiser: string,
   applied: number,
   installedQty: number,
-  fullyInstalled: boolean
+  fullyInstalled: boolean,
+  actor?: { name: string; role: string }
 ): Promise<void> {
   try {
     const pics = await getClientPICs(asset.client);
+    // A Merchandiser self-reports ("memasang"); a PIC/Admin confirms on behalf from the desk
+    // (no field photos) — say so, so the client PIC isn't misled into thinking the field crew reported.
+    const onBehalf = !!actor && actor.role !== "Merchandiser";
+    const body = onBehalf
+      ? `${actor!.name} (${actor!.role}) mengonfirmasi ${applied} unit "${asset.name}" atas nama ${merchandiser} — tanpa foto lapangan (${installedQty}/${asset.quantity} terpasang)${fullyInstalled ? " — PENUH" : ""}.`
+      : `${merchandiser} memasang ${applied} unit "${asset.name}" (${installedQty}/${asset.quantity} terpasang)${fullyInstalled ? " — PENUH" : ""}.`;
     for (const uid of pics) {
       await insertNotification({
         userId: uid,
         type: "install_progress",
         title: fullyInstalled ? "Pemasangan selesai penuh" : "Progres pemasangan",
-        body: `${merchandiser} memasang ${applied} unit "${asset.name}" (${installedQty}/${asset.quantity} terpasang)${fullyInstalled ? " — PENUH" : ""}.`,
+        body,
         assetId: asset.id
       });
     }

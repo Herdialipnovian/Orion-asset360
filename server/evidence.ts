@@ -239,10 +239,14 @@ export async function purgeEvidenceFiles(): Promise<number> {
 }
 
 // --- Idempotency (safe offline retries): remember a key -> the response we already sent. ---
-export async function getIdempotent(key: string): Promise<any | null> {
+export async function getIdempotent(key: string, expectedScope?: string): Promise<any | null> {
   if (!key) return null;
-  const { rows } = await q(`select response from idempotency_keys where key = $1`, [key]);
-  return rows[0] ? rows[0].response : null;
+  const { rows } = await q(`select response, scope from idempotency_keys where key = $1`, [key]);
+  if (!rows[0]) return null;
+  // A key cached by a DIFFERENT operation must not short-circuit this one (else a cross-endpoint
+  // replay could return a stale/foreign body and skip this endpoint's own gates). Same-scope only.
+  if (expectedScope && rows[0].scope !== expectedScope) return null;
+  return rows[0].response;
 }
 export async function saveIdempotent(key: string, scope: string, response: any): Promise<void> {
   if (!key) return;

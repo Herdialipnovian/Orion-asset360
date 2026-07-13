@@ -329,6 +329,13 @@ export default function App() {
     try { await api.placeAtToko(assetId, p); await refresh(); return { ok: true }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal menyimpan data pemasangan di Toko." }; }
   };
+  const handleCompleteInstall = async (
+    assetId: string,
+    p: { merchandiserId: number; doneQty?: number; note?: string }
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try { await api.completeInstall(assetId, p); await refresh(); return { ok: true }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal konfirmasi pemasangan." }; }
+  };
   const handleAuditSample = async (
     assetId: string,
     samples: { locationId: number; compliant: boolean }[],
@@ -873,6 +880,7 @@ export default function App() {
                   onGroupAdvance={handleGroupAdvance}
                   onDistribute={handleDistribute}
                   onPlaceToko={handlePlaceToko}
+                  onCompleteInstall={handleCompleteInstall}
                   onAuditSample={handleAuditSample}
                   onSetProject={handleSetProject}
                   initialStageFilter={initialStageFilter}

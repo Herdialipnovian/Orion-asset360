@@ -47,7 +47,10 @@ export function requireAuth(req: AuthedReq, res: Response, next: NextFunction) {
 // (image/media requests can't carry an Authorization header).
 export function requireAuthFlexible(req: AuthedReq, res: Response, next: NextFunction) {
   const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : (req.query?.token as string) || null;
+  // ?token= is honored ONLY for safe GET media reads (<img src>); a state-changing method must carry
+  // the Authorization header so a session token never lands in a URL (logs/history/Referer — CWE-598).
+  const queryToken = req.method === "GET" ? ((req.query?.token as string) || null) : null;
+  const token = header.startsWith("Bearer ") ? header.slice(7) : queryToken;
   if (!token) return res.status(401).json({ error: "Token tidak ada." });
   try {
     const p = jwt.verify(token, SECRET) as any;

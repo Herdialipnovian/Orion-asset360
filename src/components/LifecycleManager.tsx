@@ -364,6 +364,7 @@ interface LifecycleManagerProps {
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
+  onCompleteInstall?: (assetId: string, p: { merchandiserId: number; doneQty?: number; note?: string }) => Promise<{ ok: boolean; error?: string }>;
   onAuditSample?: (assetId: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }) => Promise<{ ok: boolean; error?: string }>;
   onSetProject?: (assetId: string, projectId: number | null) => Promise<{ ok: boolean; error?: string }>;
   initialStageFilter?: number | string;
@@ -461,6 +462,7 @@ export default function LifecycleManager({
   onGroupAdvance,
   onDistribute,
   onPlaceToko,
+  onCompleteInstall,
   onAuditSample,
   onSetProject,
   initialStageFilter = "ALL"
@@ -785,6 +787,33 @@ export default function LifecycleManager({
     const res = await onArriveWarehouse(detailAsset.id);
     setArriveBusy(false);
     if (!res.ok) setArriveError(res.error || "Gagal mengonfirmasi kedatangan di gudang.");
+  };
+
+  // ── Confirm pemasangan FROM THE CMS (no mobile) — Admin/PIC for Event assignments, Admin for
+  //    Distribusi placements. The field photo gate is waived server-side for these desk roles. ──
+  const [confirmBusy, setConfirmBusy] = React.useState<string | null>(null);
+  const [confirmError, setConfirmError] = React.useState<string | null>(null);
+  // Clear transient per-asset state when the open asset changes, so an error/busy flag never bleeds
+  // onto an unrelated asset's detail view.
+  React.useEffect(() => { setConfirmError(null); setConfirmBusy(null); setArriveError(null); }, [detailAssetId]);
+  // Event/Standard install confirm: Admin (any) or PIC (their OWN client only — mirrors the server).
+  const canConfirmInstall = !!user && (user.role === "Admin" || (user.role === "PIC" && (detailAsset?.client || null) === (user.client || null)));
+  const canConfirmPlacement = !!user && user.role === "Admin"; // Distribusi (PIC excluded per rule)
+  const doConfirmInstall = async (merchandiserId: number, who: string) => {
+    if (!detailAsset || !onCompleteInstall || confirmBusy) return;
+    if (!window.confirm(`Tandai sisa porsi pemasangan ${who} sebagai terpasang?`)) return;
+    setConfirmBusy(`a${merchandiserId}`); setConfirmError(null);
+    const res = await onCompleteInstall(detailAsset.id, { merchandiserId });
+    setConfirmBusy(null);
+    if (!res.ok) setConfirmError(res.error || "Gagal konfirmasi pemasangan.");
+  };
+  const doConfirmPlacement = async (locationId: number, toko: string) => {
+    if (!detailAsset || !onPlaceToko || confirmBusy) return;
+    if (!window.confirm(`Tandai sisa pemasangan di ${toko} sebagai terpasang?`)) return;
+    setConfirmBusy(`p${locationId}`); setConfirmError(null);
+    const res = await onPlaceToko(detailAsset.id, { locationId });
+    setConfirmBusy(null);
+    if (!res.ok) setConfirmError(res.error || "Gagal konfirmasi pemasangan.");
   };
 
   // ── Consolidated dispatch ("Kirim Bersama") — many Gudang assets → one Surat Jalan ──
@@ -1979,10 +2008,23 @@ export default function LifecycleManager({
                               </div>
                               {a.signature && (done || partial) && <img src={a.signature} alt="TTD" className="h-7 bg-white border border-slate-200 rounded" />}
                               <span className={`shrink-0 text-[9px] font-bold px-2 py-0.5 rounded-full ${pill}`}>{done ? "Selesai" : partial ? `Sebagian ${dq}/${a.qty}` : "Menunggu"}</span>
+                              {!done && canConfirmInstall && onCompleteInstall && a.merchandiserId != null && (
+                                <button
+                                  onClick={() => doConfirmInstall(Number(a.merchandiserId), a.merchandiser || "Merchandiser")}
+                                  disabled={confirmBusy === `a${a.merchandiserId}`}
+                                  className="shrink-0 text-[9px] font-extrabold px-2 py-1 rounded-md border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-50"
+                                >
+                                  {confirmBusy === `a${a.merchandiserId}` ? "…" : "Konfirmasi"}
+                                </button>
+                              )}
                             </div>
                           );
                         })}
                       </div>
+                      {canConfirmInstall && onCompleteInstall && !full && (
+                        <p className="text-[9px] text-slate-500 leading-snug">Merchandiser melapor dari aplikasi mobile. Sebagai {user?.role}, kamu bisa <strong>Konfirmasi</strong> pemasangan di sini (foto lapangan tidak wajib untuk konfirmasi kantor).</p>
+                      )}
+                      {confirmError && <p className="text-[10px] font-semibold text-rose-600">{confirmError}</p>}
                       {Array.isArray(d.verifiedItems) && d.verifiedItems.length > 0 && (
                         <div className="flex flex-wrap gap-1">
                           {d.verifiedItems.map((it: string, i: number) => (
@@ -2166,10 +2208,23 @@ export default function LifecycleManager({
                                 <span className="block text-[9px] text-slate-400">{p.merchandiser || "—"}{p.audited ? (p.auditCompliant ? " · ✓ patuh" : " · ✗ temuan") : ""}</span>
                               </span>
                               <span className={`shrink-0 text-[9px] font-bold px-2 py-0.5 rounded-full ${pill}`}>{done ? "Selesai" : partial ? `${dq}/${p.qty}` : "Menunggu"}</span>
+                              {!done && canConfirmPlacement && onPlaceToko && (
+                                <button
+                                  onClick={() => doConfirmPlacement(Number(p.locationId), p.toko || "toko")}
+                                  disabled={confirmBusy === `p${p.locationId}`}
+                                  className="shrink-0 text-[9px] font-extrabold px-2 py-1 rounded-md border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-50"
+                                >
+                                  {confirmBusy === `p${p.locationId}` ? "…" : "Konfirmasi"}
+                                </button>
+                              )}
                             </div>
                           );
                         })}
                       </div>
+                      {canConfirmPlacement && onPlaceToko && installed < (detailAsset.quantity || 0) && (
+                        <p className="text-[9px] text-slate-500 leading-snug">Merchandiser melapor per toko dari aplikasi mobile. Sebagai Admin kamu bisa <strong>Konfirmasi</strong> pemasangan toko di sini.</p>
+                      )}
+                      {confirmError && <p className="text-[10px] font-semibold text-rose-600">{confirmError}</p>}
                     </div>
                   );
                 })()}

@@ -7,7 +7,6 @@ import React from "react";
 import {
   FileText,
   Printer,
-  QrCode,
   FileCheck,
   ShieldCheck,
   Download,
@@ -19,6 +18,40 @@ import {
 } from "lucide-react";
 import { Asset } from "../types";
 import { ALL_STEPS_FLOW } from "../data/initialData";
+
+// Real, scannable CODE39 barcode (no external lib) — replaces the old decorative QR icon so the
+// "Kartu Kendali Barcode" actually encodes the asset code that the QR scanner reads.
+const C39: Record<string, string> = {
+  "0": "nnnwwnwnn", "1": "wnnwnnnnw", "2": "nnwwnnnnw", "3": "wnwwnnnnn", "4": "nnnwwnnnw",
+  "5": "wnnwwnnnn", "6": "nnwwwnnnn", "7": "nnnwnnwnw", "8": "wnnwnnwnn", "9": "nnwwnnwnn",
+  "A": "wnnnnwnnw", "B": "nnwnnwnnw", "C": "wnwnnwnnn", "D": "nnnnwwnnw", "E": "wnnnwwnnn",
+  "F": "nnwnwwnnn", "G": "nnnnnwwnw", "H": "wnnnnwwnn", "I": "nnwnnwwnn", "J": "nnnnwwwnn",
+  "K": "wnnnnnnww", "L": "nnwnnnnww", "M": "wnwnnnnwn", "N": "nnnnwnnww", "O": "wnnnwnnwn",
+  "P": "nnwnwnnwn", "Q": "nnnnnnwww", "R": "wnnnnnwwn", "S": "nnwnnnwwn", "T": "nnnnwnwwn",
+  "U": "wwnnnnnnw", "V": "nwwnnnnnw", "W": "wwwnnnnnn", "X": "nwnnwnnnw", "Y": "wwnnwnnnn",
+  "Z": "nwwnwnnnn", "-": "nwnnnnwnw", ".": "wwnnnnwnn", " ": "nwwnnnwnn", "*": "nwnnwnwnn",
+};
+function Barcode39({ value, height = 96 }: { value: string; height?: number }) {
+  const code = "*" + String(value || "").toUpperCase().replace(/[^0-9A-Z\-. ]/g, "") + "*";
+  const unit = 2, gap = 2;
+  const bars: { x: number; w: number }[] = [];
+  let x = 0;
+  for (const ch of code) {
+    const pat = C39[ch];
+    if (!pat) continue;
+    for (let i = 0; i < 9; i++) {
+      const w = (pat[i] === "w" ? 3 : 1) * unit;
+      if (i % 2 === 0) bars.push({ x, w }); // even index = bar
+      x += w;
+    }
+    x += gap; // inter-character narrow space
+  }
+  return (
+    <svg width="100%" height={height} viewBox={`0 0 ${x} ${height}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`Barcode ${value}`} className="mx-auto block max-w-[240px]">
+      {bars.map((b, i) => <rect key={i} x={b.x} y={0} width={b.w} height={height} fill="#0f172a" />)}
+    </svg>
+  );
+}
 
 interface OperationsDocsProps {
   assets: Asset[];
@@ -314,8 +347,9 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                     <div className="space-y-6 text-center py-6">
                       <h5 className="font-extrabold text-slate-900 text-xs uppercase tracking-widest">KARTU KENDALI BARCODE / QR-CODE</h5>
                       <div className="border-2 border-dashed border-slate-300 p-6 max-w-sm mx-auto rounded-xl space-y-4 bg-slate-50">
-                        <div className="bg-white p-3 inline-block rounded-lg shadow-sm border border-slate-200">
-                          <QrCode className="h-28 w-28 text-slate-950 mx-auto" />
+                        <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
+                          <Barcode39 value={activeAssetObj?.qrcode || activeAssetObj?.id || ""} />
+                          <p className="mt-1 font-mono text-[10px] tracking-widest text-slate-700">{activeAssetObj?.qrcode || activeAssetObj?.id}</p>
                         </div>
                         <div className="space-y-1">
                           <p className="text-[11px] font-bold text-slate-800">{activeAssetObj?.name}</p>

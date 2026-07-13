@@ -854,7 +854,10 @@ export default function LifecycleManager({
   // One asset card (reused for grouped members + standalone assets).
   const renderCard = (asset: Asset) => {
     const IconComp = STAGE_ICONS[asset.currentStage] || ClipboardList;
-    const batchable = batchMode && asset.currentStage === 3;
+    // "Kirim Bersama" is the Standard courier flow only — Event/Distribusi/Internal assets ship via
+    // their own start action, so they are not selectable here.
+    const bmode = isInternalDeploy(asset) || asset.peruntukan === "Internal" ? "Internal" : projectModeOf(asset);
+    const batchable = batchMode && asset.currentStage === 3 && bmode !== "Event" && bmode !== "Distribusi" && bmode !== "Internal";
     const picked = batchSel.includes(asset.id);
     return (
       <div
@@ -2121,8 +2124,9 @@ export default function LifecycleManager({
                     );
                   })()}
 
-                  {/* Fase 2 Event — setup / relocate asset at a venue (roadshow). */}
-                  {onDeployVenue && projectModeOf(detailAsset) === "Event" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 6 && (() => {
+                  {/* Event roadshow — START from Gudang (Fase 3) or MANAGE/relocate at the venue (Fase 6).
+                      Never at courier transit (4/5) — that's the Standard flow, not Event. */}
+                  {onDeployVenue && projectModeOf(detailAsset) === "Event" && (detailAsset.currentStage === 3 || detailAsset.currentStage === 6) && (() => {
                     const dep: any = detailAsset.stageDetails?.deployment || {};
                     const legs: any[] = Array.isArray(dep.legs) ? dep.legs : [];
                     const transitLeg = legs.find(l => l.status === "transit");
@@ -2193,8 +2197,8 @@ export default function LifecycleManager({
                     );
                   })()}
 
-                  {/* Fase 3 Distribusi — fan-out placement per toko. */}
-                  {onDistribute && projectModeOf(detailAsset) === "Distribusi" && detailAsset.currentStage >= 3 && detailAsset.currentStage <= 6 && (() => {
+                  {/* Distribusi — START from Gudang (Fase 3) or MANAGE placements once fanned out (Fase 6). */}
+                  {onDistribute && projectModeOf(detailAsset) === "Distribusi" && (detailAsset.currentStage === 3 || detailAsset.currentStage === 6) && (() => {
                     const hasPls = (detailAsset.stageDetails?.deployment?.placements?.length || 0) > 0;
                     return (
                       <button
@@ -2240,7 +2244,14 @@ export default function LifecycleManager({
                     );
                   })()}
 
-                  {TRANSITIONS[detailAsset.currentStage]?.length ? (
+                  {(() => {
+                    // The Standard courier ladder (3→4 Surat Jalan) must NOT show for Event/Distribusi/
+                    // Internal — those start via their own action from Gudang. Post-deployment branches
+                    // (6→7/8/9, 9→…) are common to all modes and always show.
+                    const emode = isInternalDeploy(detailAsset) || detailAsset.peruntukan === "Internal" ? "Internal" : projectModeOf(detailAsset);
+                    const nonStd = emode === "Event" || emode === "Distribusi" || emode === "Internal";
+                    return nonStd && detailAsset.currentStage === 3;
+                  })() ? null : TRANSITIONS[detailAsset.currentStage]?.length ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {TRANSITIONS[detailAsset.currentStage].map(t => {
                         const Icon = STAGE_ICONS[t];

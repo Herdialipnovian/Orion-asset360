@@ -1625,18 +1625,23 @@ export default function LifecycleManager({
             {shipmentBlocks.groups.map(g => {
               const sh: any = g.members[0].stageDetails?.shipping || {};
               const dest = Array.isArray(sh.destinations) ? sh.destinations[0] : null;
+              const totalUnits = g.members.reduce((s, m) => s + (m.quantity || 0), 0);
+              // ONE contained shipment box: header + all member cards nested inside, so a consolidated
+              // dispatch reads as a single shipment (of N assets) — not as loose, separate-looking cards.
               return (
-                <React.Fragment key={"grp-" + g.batchId}>
-                  <div className="col-span-full flex items-center gap-2.5 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-2.5 mt-1">
+                <div key={"grp-" + g.batchId} className="col-span-full rounded-2xl border border-blue-200 bg-blue-50/50 p-3 md:p-4 space-y-3 shadow-xs">
+                  <div className="flex items-center gap-2.5">
                     <span className="bg-blue-600 text-white p-1.5 rounded-lg shrink-0"><Truck className="h-3.5 w-3.5" /></span>
                     <div className="min-w-0">
                       <p className="text-xs font-extrabold text-slate-800">Pengiriman Bersama · Surat Jalan {g.batchId}</p>
-                      <p className="text-[10px] text-slate-500">{g.members.length} aset{sh.driverName ? ` · Driver ${sh.driverName}` : ""}{sh.vehiclePlate ? ` · ${sh.vehiclePlate}` : ""}{dest?.area ? ` · Tujuan ${dest.area}` : ""} — berangkat bersama</p>
+                      <p className="text-[10px] text-slate-500">{g.members.length} aset · {totalUnits} unit{sh.driverName ? ` · Driver ${sh.driverName}` : ""}{sh.vehiclePlate ? ` · ${sh.vehiclePlate}` : ""}{dest?.area ? ` · Tujuan ${dest.area}` : ""} — berangkat bersama</p>
                     </div>
-                    <span className="ml-auto shrink-0 text-[10px] font-bold text-blue-700 bg-white border border-blue-200 rounded-full px-2.5 py-1">{g.members.length} aset</span>
+                    <span className="ml-auto shrink-0 text-[10px] font-bold text-blue-700 bg-white border border-blue-200 rounded-full px-2.5 py-1">{g.members.length} aset · 1 Surat Jalan</span>
                   </div>
-                  {g.members.map(renderCard)}
-                </React.Fragment>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {g.members.map(renderCard)}
+                  </div>
+                </div>
               );
             })}
             {shipmentBlocks.singles.map(renderCard)}

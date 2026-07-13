@@ -1660,7 +1660,11 @@ export default function LifecycleManager({
       {/* Flow legend — color guide + click a flow to filter the register */}
       <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-100 rounded-xl px-3 py-2.5 shadow-xs">
         <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mr-1">Alur Deployment:</span>
-        {(["Belum", "Standard", "Event", "Distribusi"] as const).map(k => {
+        {(["Belum", "Standard", "Event", "Distribusi"] as const)
+          // Only show a flow chip when it actually has cards in the current view (or it's the active
+          // filter) — so the legend always matches what's on screen (e.g. no "Kurir Standar" in Gudang).
+          .filter(k => (flowCounts[k] || 0) > 0 || flowFilter === k)
+          .map(k => {
           const f = FLOW_UI[k]; const FIcon = f.Icon; const active = flowFilter === k;
           return (
             <button

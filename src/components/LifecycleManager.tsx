@@ -35,6 +35,7 @@ import { Asset, AssetStage } from "../types";
 import { api, type AuthUser } from "../api";
 import { installedOf } from "../installProgress";
 import { AUDIT_ITEMS, QTY_ITEM_KEY, computeAudit, defaultAuditMap } from "../auditChecklist";
+import { faseNo } from "../faseDisplay";
 
 // Code-split: Leaflet (+ its CSS) only loads when the operator opens the distribusi map.
 const TokoMap = React.lazy(() => import("./TokoMap"));
@@ -945,7 +946,7 @@ export default function LifecycleManager({
         <div className="p-3 border-t border-slate-50 bg-white flex items-center justify-between">
           <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-bold ${statusColors[asset.currentStage]}`}>
             <IconComp className="h-3.5 w-3.5" />
-            <span>Fase {asset.currentStage}: {cleanLabel(asset.currentStage)}</span>
+            <span>Fase {faseNo(asset.currentStage)}: {cleanLabel(asset.currentStage)}</span>
           </div>
           <div className="flex items-center text-slate-400 group hover:text-blue-600 text-xs font-semibold gap-0.5">
             <span>Detail</span>
@@ -1630,10 +1631,10 @@ export default function LifecycleManager({
               onChange={e => setFilterStage(e.target.value)}
               className="bg-transparent border-0 text-slate-700 font-bold text-xs select-none cursor-pointer pr-4 focus:ring-0 outline-none"
             >
-              <option value="ALL">Semua Alur (3 s/d 10)</option>
+              <option value="ALL">Semua Alur (1 s/d 8)</option>
               {[3, 4, 5, 6, 7, 8, 9, 10].map(s => (
                 <option key={s} value={s}>
-                  Fase {s} - {cleanLabel(s)}
+                  Fase {faseNo(s)} - {cleanLabel(s)}
                 </option>
               ))}
             </select>
@@ -1778,7 +1779,7 @@ export default function LifecycleManager({
                       </span>
                       <div className="min-w-0">
                         <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Fase Saat Ini</p>
-                        <p className="font-extrabold text-slate-900 text-sm leading-tight">Fase {detailAsset.currentStage} · {cleanLabel(detailAsset.currentStage)}</p>
+                        <p className="font-extrabold text-slate-900 text-sm leading-tight">Fase {faseNo(detailAsset.currentStage)} · {cleanLabel(detailAsset.currentStage)}</p>
                       </div>
                     </div>
                     {detailAsset.currentLocation && (
@@ -1831,7 +1832,7 @@ export default function LifecycleManager({
               <div className="space-y-5">
                 <div className="flex justify-between items-center pb-2 border-b border-slate-100">
                   <div>
-                    <h4 className="font-extrabold text-slate-900 text-base">Alur Lifecycle Penuh (Fase 1–10)</h4>
+                    <h4 className="font-extrabold text-slate-900 text-base">Alur Lifecycle Penuh (Fase 1–8)</h4>
                     <p className="text-xs text-slate-500 mt-0.5">Kelola perpindahan fase aset dari awal hingga akhir</p>
                   </div>
                   <button
@@ -2184,7 +2185,7 @@ export default function LifecycleManager({
                     <div>
                       <p className="text-xs font-extrabold text-slate-800">Proses / Pindahkan Fase</p>
                       <p className="text-[10px] text-slate-500">
-                        Posisi saat ini: <strong className="text-blue-700">Fase {detailAsset.currentStage} · {cleanLabel(detailAsset.currentStage)}</strong>
+                        Posisi saat ini: <strong className="text-blue-700">Fase {faseNo(detailAsset.currentStage)} · {cleanLabel(detailAsset.currentStage)}</strong>
                       </p>
                     </div>
                   </div>
@@ -2383,7 +2384,7 @@ export default function LifecycleManager({
                             <span className="min-w-0">
                               <span className="block text-[11px] font-bold leading-tight text-slate-800 group-hover:text-white">{verbFor(t, detailAsset.currentStage, detailAsset)}</span>
                               <span className="block text-[9px] leading-tight text-slate-400 group-hover:text-blue-100">
-                                {installPartial ? `⚠ baru ${installed}/${detailAsset.quantity} terpasang` : `Fase ${t} · ${cleanLabel(t)}`}
+                                {installPartial ? `⚠ baru ${installed}/${detailAsset.quantity} terpasang` : `Fase ${faseNo(t)} · ${cleanLabel(t)}`}
                               </span>
                             </span>
                           </button>
@@ -2418,7 +2419,7 @@ export default function LifecycleManager({
                     return (
                       <div key={stepNumber} className="relative group">
                         <span className={`absolute -left-[27px] top-0.5 flex h-5.5 w-5.5 items-center justify-center rounded-full border text-[9px] font-bold shadow-sm transition-all ${bubbleClass}`}>
-                          {stepNumber}
+                          {faseNo(stepNumber)}
                         </span>
 
                         <div className="pl-3 space-y-1 text-xs">
@@ -2552,7 +2553,7 @@ export default function LifecycleManager({
             <div className="p-5 border-b border-slate-100 flex justify-between items-center">
               <div>
                 <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block flex items-center gap-1">
-                  Fase {detailAsset.currentStage} <ArrowRight className="h-3 w-3" /> Fase {transitionTarget}
+                  Fase {faseNo(detailAsset.currentStage)} <ArrowRight className="h-3 w-3" /> Fase {faseNo(transitionTarget)}
                 </span>
                 <h3 className="text-base font-bold text-slate-950">{gateFor(transitionTarget, detailAsset.currentStage, detailAsset).title}</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">{detailAsset.name}</p>

@@ -28,6 +28,7 @@ import {
   TrendingUp,
   Users
 } from "lucide-react";
+import { faseNo } from "../faseDisplay";
 import { Asset, ActivityLog } from "../types";
 import type { AuthUser } from "../api";
 
@@ -417,7 +418,7 @@ export default function Dashboard({
           <div>
             <div className="flex justify-between items-center pb-3 border-b border-slate-50">
               <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest">Distribusi per Fase</h3>
-              <span className="text-[10px] font-bold text-slate-400">Fase 1–10</span>
+              <span className="text-[10px] font-bold text-slate-400">Fase 1–8</span>
             </div>
 
             <div className="py-4">
@@ -426,7 +427,7 @@ export default function Dashboard({
                   <button
                     key={st.stage}
                     onClick={() => onNavigateToStage(st.stage)}
-                    title={`Fase ${st.stage} · ${st.label}: ${st.units} unit (${st.recs} aset)`}
+                    title={`Fase ${faseNo(st.stage)} · ${st.label}: ${st.units} unit (${st.recs} aset)`}
                     className="group flex-1 h-full flex flex-col items-center justify-end gap-1"
                   >
                     <span className="text-[8px] font-bold text-slate-500 opacity-0 group-hover:opacity-100 transition">
@@ -436,7 +437,7 @@ export default function Dashboard({
                       className={`w-full rounded-t ${st.bar} opacity-85 group-hover:opacity-100 transition-all`}
                       style={{ height: `${Math.max(st.units > 0 ? 6 : 0, st.h)}%` }}
                     />
-                    <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-700">{st.stage}</span>
+                    <span className="text-[8px] font-bold text-slate-400 group-hover:text-slate-700">{faseNo(st.stage)}</span>
                   </button>
                 ))}
               </div>
@@ -582,7 +583,7 @@ export default function Dashboard({
                 </div>
               ) : (
                 m.logs.slice(0, 8).map(log => {
-                  const meta = STAGE_META[log.stage] || { label: `Fase ${log.stage}`, hex: "#94a3b8", bar: "bg-slate-400", icon: ClipboardList };
+                  const meta = STAGE_META[log.stage] || { label: `Fase ${faseNo(log.stage)}`, hex: "#94a3b8", bar: "bg-slate-400", icon: ClipboardList };
                   const Icon = meta.icon;
                   const tone =
                     log.type === "success"

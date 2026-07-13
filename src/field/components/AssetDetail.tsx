@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import React from "react";
+import { faseNo } from "../../faseDisplay";
 import { ArrowLeft, ChevronRight, MapPin, History, Lock, Camera, CloudUpload, AlertTriangle, Wrench, Compass } from "lucide-react";
 import type { Asset, ActivityLog } from "../../types";
 import type { AuthUser } from "../fieldApi";
@@ -182,7 +183,7 @@ export default function AssetDetail({
               {pending.status === "conflict" || pending.status === "error" ? <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-400" /> : <CloudUpload className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />}
               <div className="text-sm text-slate-200">
                 <div className="font-semibold text-white">
-                  {pending.status === "conflict" ? "Konflik sinkronisasi" : pending.status === "error" ? "Gagal sinkron" : "Menunggu sinkron"} ke Fase {pending.target} ({STAGE_LABELS[pending.target]})
+                  {pending.status === "conflict" ? "Konflik sinkronisasi" : pending.status === "error" ? "Gagal sinkron" : "Menunggu sinkron"} ke Fase {faseNo(pending.target)} ({STAGE_LABELS[pending.target]})
                 </div>
                 <p className="text-xs text-slate-400">
                   {pending.status === "conflict"
@@ -215,7 +216,7 @@ export default function AssetDetail({
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-white">{act.verb}</div>
                   <div className="text-xs text-slate-400">
-                    {act.requiredSlots.length} foto wajib · Fase {asset.currentStage} ke {act.target}
+                    {act.requiredSlots.length} foto wajib · Fase {faseNo(asset.currentStage)} ke {faseNo(act.target)}
                   </div>
                 </div>
                 <ChevronRight className="h-5 w-5 shrink-0 text-[#8fb4ff]" />

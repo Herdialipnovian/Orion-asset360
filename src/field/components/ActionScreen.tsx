@@ -8,6 +8,7 @@
  * online (idempotent, evidence-gated, optimistic-concurrency).
  */
 import React from "react";
+import { faseNo } from "../../faseDisplay";
 import { ArrowLeft, Camera, Loader2, Send, CircleDot, WifiOff } from "lucide-react";
 import type { Asset } from "../../types";
 import type { AuthUser } from "../fieldApi";
@@ -94,7 +95,7 @@ export default function ActionScreen({
 
       <header>
         <h1 className="text-xl font-bold text-white">{verbForField(target, asset.currentStage)}</h1>
-        <p className="mt-1 text-sm text-slate-400">{asset.name} · Fase {asset.currentStage} ke {target} ({STAGE_LABELS[target]})</p>
+        <p className="mt-1 text-sm text-slate-400">{asset.name} · Fase {faseNo(asset.currentStage)} ke {faseNo(target)} ({STAGE_LABELS[target]})</p>
         <p className="text-xs text-slate-500">{STAGE_FULL[target]}</p>
       </header>
 

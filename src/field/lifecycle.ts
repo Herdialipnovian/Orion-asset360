@@ -104,14 +104,14 @@ export const STAGE_LABELS: { [k: number]: string } = {
 export const STAGE_FULL: { [k: number]: string } = {
   1: "Fase 1 — Request / Pengadaan",
   2: "Fase 2 — Produksi / Perakitan",
-  3: "Fase 3 — Inventory & Gudang",
-  4: "Fase 4 — Pengiriman / Surat Jalan",
-  5: "Fase 5 — Transit",
-  6: "Fase 6 — Terpasang",
-  7: "Fase 7 — Audit & Kepatuhan",
-  8: "Fase 8 — Maintenance",
-  9: "Fase 9 — Penarikan / Relokasi",
-  10: "Fase 10 — Disposal"
+  3: "Fase 1 — Inventory & Gudang",
+  4: "Fase 2 — Pengiriman / Surat Jalan",
+  5: "Fase 3 — Transit",
+  6: "Fase 4 — Terpasang",
+  7: "Fase 5 — Audit & Kepatuhan",
+  8: "Fase 6 — Maintenance",
+  9: "Fase 7 — Penarikan / Relokasi",
+  10: "Fase 8 — Disposal"
 };
 
 // Verb shown on the action button that moves an asset INTO the target stage.

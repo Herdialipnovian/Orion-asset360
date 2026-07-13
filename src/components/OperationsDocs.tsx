@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Asset } from "../types";
 import { ALL_STEPS_FLOW } from "../data/initialData";
+import { faseNo } from "../faseDisplay";
 
 // Real, scannable CODE39 barcode (no external lib) — replaces the old decorative QR icon so the
 // "Kartu Kendali Barcode" actually encodes the asset code that the QR scanner reads.
@@ -170,13 +171,13 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
               >
                 {docAssets.map(a => (
                   <option key={a.id} value={a.id}>
-                    [{a.id}] {a.name.slice(0, 22)} · Fase {a.currentStage}
+                    [{a.id}] {a.name.slice(0, 22)} · Fase {faseNo(a.currentStage)}
                   </option>
                 ))}
               </select>
               <div className="flex items-center justify-between text-[10px] bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">
                 <span className="text-slate-400 font-semibold uppercase">Posisi aset</span>
-                <span className="font-bold text-slate-700">Fase {activeAssetObj.currentStage} dari 10</span>
+                <span className="font-bold text-slate-700">Fase {faseNo(activeAssetObj.currentStage)} dari 8</span>
               </div>
             </div>
           )}
@@ -204,7 +205,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                         isActive ? "bg-white text-indigo-600" : reached ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"
                       }`}
                     >
-                      {fStep.step}
+                      {faseNo(fStep.step)}
                     </span>
                     <span className="truncate flex-1">{fStep.title.split(". ")[1]}</span>
                     {!reached && <Lock className={`h-3 w-3 shrink-0 ${isActive ? "text-indigo-200" : "text-slate-400"}`} />}
@@ -635,7 +636,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                   <div className="pt-6 border-t border-slate-200 flex justify-between items-end text-[9px] text-slate-400">
                     <div>
                       <p>Keabsahan data diverifikasi oleh sistem ORIGIN Asset360.</p>
-                      <p className="font-mono">Host: origin-asset360 · Fase {selectedStep}/10</p>
+                      <p className="font-mono">Host: origin-asset360 · Fase {faseNo(selectedStep)}/8</p>
                     </div>
                     <div className="bg-slate-100 border px-2 py-1 rounded text-center text-[10px] font-bold text-slate-700 uppercase font-mono tracking-widest">{statusBadge.label}</div>
                   </div>
@@ -648,8 +649,8 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                   </div>
                   <h4 className="font-extrabold text-slate-800 text-sm">Dokumen Belum Diterbitkan</h4>
                   <p className="text-slate-500 text-xs max-w-sm mx-auto leading-relaxed">
-                    <strong className="text-slate-700">{activeAssetObj?.name}</strong> masih berada di <strong>Fase {activeAssetObj?.currentStage}</strong>. Dokumen{" "}
-                    <strong>{DOC_TITLES[selectedStep]}</strong> (Fase {selectedStep}) baru tersedia setelah aset mencapai tahap tersebut dalam siklus hidup.
+                    <strong className="text-slate-700">{activeAssetObj?.name}</strong> masih berada di <strong>Fase {faseNo(activeAssetObj?.currentStage ?? 0)}</strong>. Dokumen{" "}
+                    <strong>{DOC_TITLES[selectedStep]}</strong> (Fase {faseNo(selectedStep)}) baru tersedia setelah aset mencapai tahap tersebut dalam siklus hidup.
                   </p>
                   <p className="text-[10px] text-slate-400">Proses aset melalui menu <strong>Asset Register</strong> untuk menerbitkan dokumen ini.</p>
                 </div>
@@ -663,7 +664,7 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
               {isIssued ? (
                 <>Dokumen ini diekspor secara dinamis dari arsip client {activeAssetObj?.client}.</>
               ) : (
-                <>Dokumen terkunci hingga aset mencapai Fase {selectedStep}.</>
+                <>Dokumen terkunci hingga aset mencapai Fase {faseNo(selectedStep)}.</>
               )}
             </span>
             <button

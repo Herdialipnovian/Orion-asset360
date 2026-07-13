@@ -7,6 +7,7 @@
  * (queue persists); "Sync Sekarang" flushes when back online.
  */
 import React from "react";
+import { faseNo } from "../../faseDisplay";
 import { RefreshCw, Wifi, WifiOff, CheckCircle2, AlertTriangle, Clock, Loader2, Trash2, RotateCw, ImageIcon } from "lucide-react";
 import type { CommitRecord } from "../outbox";
 import { STAGE_LABELS } from "../lifecycle";
@@ -72,7 +73,7 @@ export default function SyncCenter({
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <span>{c.verb}</span>
                 <span className="text-slate-600">·</span>
-                <span>Fase {c.currentStage} ke {c.target} ({STAGE_LABELS[c.target]})</span>
+                <span>Fase {faseNo(c.currentStage)} ke {faseNo(c.target)} ({STAGE_LABELS[c.target]})</span>
               </div>
               <div className="flex items-center gap-3 text-[11px] text-slate-500">
                 <span className="inline-flex items-center gap-1"><ImageIcon className="h-3 w-3" /> {c.evidence.length} foto</span>

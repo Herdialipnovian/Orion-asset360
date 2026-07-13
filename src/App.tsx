@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 
 import Dashboard from "./components/Dashboard";
+import { faseNo } from "./faseDisplay";
 import LifecycleManager from "./components/LifecycleManager";
 import OperationsDocs from "./components/OperationsDocs";
 
@@ -479,7 +480,7 @@ export default function App() {
                     }`}
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="w-5 shrink-0 text-center font-mono text-[9px] text-slate-600">{stage}</span>
+                      <span className="w-5 shrink-0 text-center font-mono text-[9px] text-slate-600">{faseNo(stage)}</span>
                       <Icon className="h-4 w-4" />
                       <span>{label}</span>
                     </div>
@@ -711,7 +712,7 @@ export default function App() {
                           }`}
                         >
                           <span className="flex items-center gap-2.5">
-                            <span className="w-4 shrink-0 text-center font-mono text-[9px] text-slate-600">{stage}</span>
+                            <span className="w-4 shrink-0 text-center font-mono text-[9px] text-slate-600">{faseNo(stage)}</span>
                             <Icon className="h-4 w-4" />
                             <span>{label}</span>
                           </span>
@@ -1079,7 +1080,7 @@ export default function App() {
               <div className="bg-[#121a2c] p-3 rounded-xl border border-[#1c2c4d] space-y-2">
                 <div className="flex justify-between items-center text-[11px]">
                   <span className="font-mono text-blue-400 font-extrabold">{scannedAssetDetail.id}</span>
-                  <span className="bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded font-extrabold text-[9px]">Fase {scannedAssetDetail.currentStage}</span>
+                  <span className="bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded font-extrabold text-[9px]">Fase {faseNo(scannedAssetDetail.currentStage)}</span>
                 </div>
                 <div>
                   <p className="font-bold text-white text-[11px] leading-tight">{scannedAssetDetail.name}</p>

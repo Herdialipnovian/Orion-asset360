@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { api, type AuthUser } from "../api";
 import { Asset } from "../types";
+import { faseNo } from "../faseDisplay";
 
 const STAGE_SHORT: { [k: number]: string } = {
   1: "Request", 2: "Produksi", 3: "Gudang", 4: "Kirim", 5: "Transit",
@@ -109,7 +110,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
           owner: form.owner, usageType: form.usageType, peruntukan: form.peruntukan,
           projectId: pid
         }]);
-        setNotice(`Aset "${form.name.trim()}" berhasil ditambahkan dan masuk ke Fase 3 · Gudang.`);
+        setNotice(`Aset "${form.name.trim()}" berhasil ditambahkan dan masuk ke Fase 1 · Gudang.`);
       } else if (editing) {
         await api.updateAsset(editing.id, {
           name: form.name.trim(), category: form.category.trim(), client: form.client.trim(),
@@ -139,16 +140,16 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
     const isSplitChild = /-SJ\d+$/.test(a.id) || !!(a.specs as any)?.splitFrom;
     // Spell out the destructive consequence of specific jumps so this isn't mistaken for a harmless relabel.
     const warn =
-      ns === 6 && a.currentStage !== 6 ? "\n\n⚠ Masuk Fase 6 me-RESET progres pemasangan (assignment) siklus ini."
+      ns === 6 && a.currentStage !== 6 ? "\n\n⚠ Masuk Fase 4 me-RESET progres pemasangan (assignment) siklus ini."
       : ns === 3 && a.currentStage !== 3 && isSplitChild ? "\n\n⚠ Kartu split ini akan DIGABUNG ke aset induk bila induk ada di Gudang (baris ini bisa hilang)."
       : ns === 3 && a.currentStage !== 3 ? "\n\n⚠ Data deployment (venue/toko/custodian) dikosongkan karena aset kembali ke Gudang."
       : "";
-    if (!window.confirm(`Ubah fase ${a.id} dari ${a.currentStage}·${STAGE_SHORT[a.currentStage]} → ${ns}·${STAGE_SHORT[ns]} secara manual?\n\nOverride alur normal (tanpa mengisi data gate), langsung tersinkron ke semua proses.${warn}`)) return;
+    if (!window.confirm(`Ubah fase ${a.id} dari ${faseNo(a.currentStage)}·${STAGE_SHORT[a.currentStage]} → ${faseNo(ns)}·${STAGE_SHORT[ns]} secara manual?\n\nOverride alur normal (tanpa mengisi data gate), langsung tersinkron ke semua proses.${warn}`)) return;
     setPhaseBusy(a.id); setErr(null); setNotice(null);
     try {
-      const r: any = await api.updateStage(a.id, ns, a.stageDetails, { force: true, logAction: `Fase di-set manual ke ${ns}·${STAGE_SHORT[ns]} dari Master Data`, operator: user.name });
+      const r: any = await api.updateStage(a.id, ns, a.stageDetails, { force: true, logAction: `Fase di-set manual ke ${faseNo(ns)}·${STAGE_SHORT[ns]} dari Master Data`, operator: user.name });
       if (r?.merged && r?.mergedInto) setNotice(`${a.id} kembali ke Gudang & digabung ke kartu asal ${r.mergedInto} — tersinkron ke semua proses.`);
-      else setNotice(`Fase ${a.id} diubah ke ${ns}·${STAGE_SHORT[ns]} — tersinkron ke semua proses.`);
+      else setNotice(`Fase ${a.id} diubah ke ${faseNo(ns)}·${STAGE_SHORT[ns]} — tersinkron ke semua proses.`);
       onChanged();
     } catch (e: any) {
       setErr(e?.message || "Gagal mengubah fase.");
@@ -238,7 +239,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
     setErr(null);
     try {
       const r = await api.importAssets(mode, pending.rows);
-      setNotice(`Impor "${mode === "replace" ? "Ganti Semua" : "Tambah"}" selesai. ${r.added} aset masuk ke Fase 3 · Gudang, ${r.categories} kategori dan ${r.clients} client tersinkron ke Master.`);
+      setNotice(`Impor "${mode === "replace" ? "Ganti Semua" : "Tambah"}" selesai. ${r.added} aset masuk ke Fase 1 · Gudang, ${r.categories} kategori dan ${r.clients} client tersinkron ke Master.`);
       setPending(null);
       onChanged();
     } catch (e: any) {
@@ -259,7 +260,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
             <Database className="h-5 w-5 text-blue-600" /> Master Data Aset
           </h2>
           <p className="text-slate-400 text-xs mt-0.5">
-            {assets.length} aset terdaftar · tersinkron dengan alur 10 fase. Aset baru dimulai di Fase 3 · Gudang. Kelola melalui Asset Register untuk memajukan fasenya.
+            {assets.length} aset terdaftar · tersinkron dengan alur 8 fase. Aset baru dimulai di Fase 1 · Gudang. Kelola melalui Asset Register untuk memajukan fasenya.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -340,11 +341,11 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
                           style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23475569'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E\")" }}
                         >
                           {Object.keys(STAGE_SHORT).map(Number).filter(s => s >= 3).map(s => (
-                            <option key={s} value={s}>{s}·{STAGE_SHORT[s]}</option>
+                            <option key={s} value={s}>{faseNo(s)}·{STAGE_SHORT[s]}</option>
                           ))}
                         </select>
                       ) : (
-                        <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${stageBadge(a.currentStage)}`}>{a.currentStage}·{STAGE_SHORT[a.currentStage]}</span>
+                        <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${stageBadge(a.currentStage)}`}>{faseNo(a.currentStage)}·{STAGE_SHORT[a.currentStage]}</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5">
@@ -373,7 +374,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
             <div className="p-5 border-b border-slate-100 flex justify-between items-center sticky top-0 bg-white">
               <div>
                 <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block">{editing === "new" ? "Registrasi Aset Baru" : `Edit ${editing.id}`}</span>
-                <h3 className="text-base font-bold text-slate-950">{editing === "new" ? "Tambah Aset (masuk ke Fase 3 · Gudang)" : editing.name}</h3>
+                <h3 className="text-base font-bold text-slate-950">{editing === "new" ? "Tambah Aset (masuk ke Fase 1 · Gudang)" : editing.name}</h3>
               </div>
               <button onClick={() => setEditing(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
             </div>
@@ -486,7 +487,7 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
             <div className="space-y-2.5">
               <button onClick={() => doImport("append")} disabled={busy} className="w-full text-left bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg px-4 py-3 transition disabled:opacity-50">
                 <p className="text-xs font-extrabold text-blue-800">Tambah Data Baru</p>
-                <p className="text-[10.5px] text-blue-600/80 mt-0.5">Aset lama tetap ada. Baris dari file ditambahkan sebagai aset baru di Fase 3 · Gudang.</p>
+                <p className="text-[10.5px] text-blue-600/80 mt-0.5">Aset lama tetap ada. Baris dari file ditambahkan sebagai aset baru di Fase 1 · Gudang.</p>
               </button>
               <button onClick={() => doImport("replace")} disabled={busy} className="w-full text-left bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg px-4 py-3 transition disabled:opacity-50">
                 <p className="text-xs font-extrabold text-rose-800">Ganti Semua (Hapus Aset Lama)</p>

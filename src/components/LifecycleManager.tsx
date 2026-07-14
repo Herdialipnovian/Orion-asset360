@@ -952,8 +952,8 @@ export default function LifecycleManager({
     e.preventDefault();
     if (!onBatchShip) return;
     if (!batchForm.deployMode) return setBatchError("Pilih Type Kategori (Internal / Event / Distribusi) dulu.");
-    if (!batchForm.area.trim()) return setBatchError("Tujuan pengiriman (area) wajib diisi.");
-    if (!batchForm.driverName.trim()) return setBatchError("Nama driver wajib diisi.");
+    // Tujuan/Area & driver dropped from the Gudang cart — those shipping details are filled in the
+    // next phase (Surat Jalan). Dispatch here only needs Type + qty.
     if (batchForm.trackingUrl && !/^https?:\/\//i.test(batchForm.trackingUrl.trim())) return setBatchError("Link tracking harus diawali http:// atau https://.");
     const items = batchSel.map(id => ({ id, qty: Math.floor(Number(batchQty[id])) }));
     for (const it of items) {
@@ -1976,19 +1976,6 @@ export default function LifecycleManager({
                           </div>
                         );
                       })}
-                    </div>
-                    <div className="space-y-2 pt-2 border-t border-slate-100">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-600">Tujuan / Area <span className="text-rose-500">*</span></label>
-                        <select value={batchForm.area} onChange={e => setBatchForm(f => ({ ...f, area: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer">
-                          <option value="">— pilih area —</option>
-                          {(batchForm.area && !areaOptions.includes(batchForm.area) ? [batchForm.area, ...areaOptions] : areaOptions).map(ar => <option key={ar} value={ar}>{ar}</option>)}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-600">Nama Driver <span className="text-rose-500">*</span></label>
-                        <input value={batchForm.driverName} onChange={e => setBatchForm(f => ({ ...f, driverName: e.target.value }))} placeholder="nama driver" className="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500" />
-                      </div>
                     </div>
                     {batchError && <p className="text-[10px] font-semibold text-rose-600">{batchError}</p>}
                     <button type="button" onClick={e => submitBatch(e as any)} disabled={batchBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">

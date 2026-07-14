@@ -751,8 +751,9 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
   const deployMode: string | null = ["Internal", "Event", "Distribusi"].includes(String(b.deployMode || "")) ? String(b.deployMode) : null;
   const depOf = (a: any) => deployMode ? { deployment: { ...((a.stageDetails as any)?.deployment || {}), mode: deployMode } } : {};
   const vehiclePlate = String(b.vehiclePlate || "").trim();
-  if (!area) return res.status(400).json({ error: "Tujuan pengiriman (area) wajib diisi." });
-  if (!driverName) return res.status(400).json({ error: "Nama driver wajib diisi." });
+  // Tujuan/Area & driver are no longer captured at Gudang dispatch (dropped from the cart) — they are
+  // filled in the next phase (Surat Jalan). So they're optional here; the Surat Jalan is issued with
+  // an empty destination area/driver that gets completed downstream.
   const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
   if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
   const clientSuppliedSJ = !!String(b.suratJalanNo || "").trim();

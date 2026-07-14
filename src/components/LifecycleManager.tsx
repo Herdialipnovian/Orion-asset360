@@ -2360,6 +2360,14 @@ export default function LifecycleManager({
                       <span className="min-w-0">
                         <span className="block font-bold flex items-center gap-1.5"><Truck className="h-3.5 w-3.5 shrink-0" /> Proses untuk seluruh grup ({groupSameStage.length} aset)</span>
                         <span className="block text-[10px] text-blue-600/90 leading-snug">Grup {detailBatchId} — semua aset yang berangkat bersama &amp; masih di fase ini ikut pindah sekaligus (satu Surat Jalan). Matikan untuk memproses aset ini saja.</span>
+                        {/* Show WHICH assets are covered — the detail only renders one member, so list the rest. */}
+                        <span className="mt-1.5 flex flex-wrap gap-1">
+                          {groupSameStage.map(mm => (
+                            <span key={mm.id} className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold ${mm.id === detailAsset.id ? "bg-blue-600 text-white" : "bg-white text-blue-700 border border-blue-200"}`}>
+                              <span className="font-mono">{mm.id}</span> {mm.name}
+                            </span>
+                          ))}
+                        </span>
                       </span>
                     </label>
                   )}

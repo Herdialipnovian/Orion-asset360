@@ -15,7 +15,7 @@ import { faseNo } from "../faseDisplay";
 
 const STAGE_SHORT: { [k: number]: string } = {
   1: "Request", 2: "Produksi", 3: "Gudang", 4: "Kirim", 5: "Transit",
-  6: "Proses Pemasangan", 7: "Audit", 8: "Maintenance", 9: "Penarikan", 10: "Disposal"
+  6: "Proses Pemasangan", 7: "Asset Terpasang", 8: "Audit", 9: "Penarikan", 10: "Disposal"
 };
 const stageBadge = (s: number) =>
   s === 3 ? "bg-green-50 text-green-700 border-green-200"

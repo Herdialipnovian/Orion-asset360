@@ -61,8 +61,8 @@ const STAGE_LABELS: { [key: number]: string } = {
   4: "Surat Jalan",
   5: "Transit",
   6: "Proses Pemasangan",
-  7: "Audit",
-  8: "Pemeliharaan",
+  7: "Asset Terpasang",
+  8: "Audit",
   9: "Penarikan",
   10: "Disposal"
 };

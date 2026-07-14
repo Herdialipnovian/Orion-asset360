@@ -72,8 +72,8 @@ const PHASE_NAV: { stage: number; label: string; Icon: React.ComponentType<{ cla
   { stage: 4, label: "Surat Jalan", Icon: Truck },
   { stage: 5, label: "Transit", Icon: Compass },
   { stage: 6, label: "Proses Pemasangan", Icon: MapPin },
-  { stage: 7, label: "Audit", Icon: ShieldCheck },
-  { stage: 8, label: "Pemeliharaan", Icon: Wrench },
+  { stage: 7, label: "Asset Terpasang", Icon: CheckSquare },
+  { stage: 8, label: "Audit", Icon: ShieldCheck },
   { stage: 9, label: "Penarikan", Icon: CornerUpLeft },
   { stage: 10, label: "Disposal", Icon: Trash2 }
 ];

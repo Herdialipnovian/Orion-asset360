@@ -97,8 +97,8 @@ export const STAGE_LABELS: { [k: number]: string } = {
   4: "Surat Jalan",
   5: "Transit",
   6: "Proses Pemasangan",
-  7: "Audit",
-  8: "Pemeliharaan",
+  7: "Asset Terpasang",
+  8: "Audit",
   9: "Penarikan",
   10: "Disposal"
 };
@@ -111,8 +111,8 @@ export const STAGE_FULL: { [k: number]: string } = {
   4: "Fase 2 — Surat Jalan",
   5: "Fase 3 — Transit",
   6: "Fase 4 — Proses Pemasangan",
-  7: "Fase 5 — Audit",
-  8: "Fase 6 — Pemeliharaan",
+  7: "Fase 5 — Asset Terpasang",
+  8: "Fase 6 — Audit",
   9: "Fase 7 — Penarikan",
   10: "Fase 8 — Disposal"
 };

@@ -2035,10 +2035,37 @@ export default function LifecycleManager({
                       </div>
                     </div>
                   </div>
-                  {/* Member cards tray */}
-                  <div className="bg-gradient-to-b from-blue-50/70 to-transparent p-3 md:p-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {g.members.map(renderCard)}
+                  {/* Members as a compact table (like the Gudang list) — one card per shipment */}
+                  <div className="p-3 md:p-4">
+                    <div className="overflow-x-auto rounded-xl border border-slate-100">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-100">
+                            <th className="px-3 py-2 font-extrabold">Asset ID</th>
+                            <th className="px-3 py-2 font-extrabold">Nama Aset</th>
+                            <th className="px-3 py-2 font-extrabold">Client</th>
+                            <th className="px-3 py-2 font-extrabold">Proyek</th>
+                            <th className="px-3 py-2 font-extrabold">Type</th>
+                            <th className="px-3 py-2 font-extrabold text-right">Qty</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {g.members.map(m => {
+                            const proj = m.projectId != null ? projects.find(p => p.id === m.projectId) : null;
+                            const projName = (m.stageDetails as any)?.deployment?.projectName || proj?.name || "";
+                            return (
+                              <tr key={m.id} className="text-[12px] bg-white hover:bg-slate-50 transition">
+                                <td className="px-3 py-2"><span className="font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">{m.id}</span></td>
+                                <td className="px-3 py-2 font-bold text-slate-800">{m.name}</td>
+                                <td className="px-3 py-2 text-slate-600">{m.client || "—"}</td>
+                                <td className="px-3 py-2 text-slate-600">{projName || "—"}</td>
+                                <td className="px-3 py-2 text-slate-600">{m.type || "—"}</td>
+                                <td className="px-3 py-2 text-right whitespace-nowrap"><span className="text-sm font-extrabold text-slate-700 tabular-nums">{m.quantity}</span> <span className="text-[9px] text-slate-400">unit</span></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </div>

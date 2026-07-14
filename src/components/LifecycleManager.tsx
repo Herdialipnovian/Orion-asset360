@@ -29,8 +29,7 @@ import {
   Building,
   UserCheck,
   Briefcase,
-  Loader2,
-  Eye
+  Loader2
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
 import { api, type AuthUser } from "../api";
@@ -1882,28 +1881,28 @@ export default function LifecycleManager({
                         <th className="px-3 py-2.5 font-extrabold">Asset ID</th>
                         <th className="px-3 py-2.5 font-extrabold">Nama Aset</th>
                         <th className="px-3 py-2.5 font-extrabold">Client</th>
-                        <th className="px-3 py-2.5 font-extrabold">Peruntukan</th>
-                        <th className="px-3 py-2.5 font-extrabold">Fase</th>
+                        <th className="px-3 py-2.5 font-extrabold">Owner</th>
+                        <th className="px-3 py-2.5 font-extrabold">Merk</th>
+                        <th className="px-3 py-2.5 font-extrabold">Type</th>
                         <th className="px-3 py-2.5 font-extrabold whitespace-nowrap">Masuk Gudang</th>
                         <th className="px-3 py-2.5 font-extrabold text-right">Stok</th>
-                        <th className="px-3 py-2.5 font-extrabold text-right">Aksi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {capped.map(a => {
                         const picked = batchSel.includes(a.id);
-                        const internal = (a.peruntukan || "Deployment") === "Internal";
+                        const clientOwned = (a.owner || "Origin") === "Client";
                         return (
                           <tr key={a.id} onClick={canDispatch ? () => pickRow(a) : undefined} className={`text-[12px] transition ${canDispatch ? "cursor-pointer" : ""} ${picked ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                             {canDispatch && <td className="px-3 py-2.5"><input type="checkbox" checked={picked} readOnly tabIndex={-1} className="h-4 w-4 rounded accent-blue-600 pointer-events-none align-middle" /></td>}
                             <td className="px-3 py-2.5"><span className="font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">{a.id}</span></td>
                             <td className="px-3 py-2.5 font-bold text-slate-800">{a.name}</td>
                             <td className="px-3 py-2.5 text-slate-600">{a.client || "—"}</td>
-                            <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${internal ? "bg-slate-800 text-white" : "bg-blue-50 text-blue-700"}`}>{internal ? "Internal" : "Deployment"}</span></td>
-                            <td className="px-3 py-2.5"><span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200 whitespace-nowrap">{faseNo(a.currentStage)} · {cleanLabel(a.currentStage)}</span></td>
+                            <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${clientOwned ? "bg-violet-50 text-violet-700" : "bg-slate-100 text-slate-600"}`}>{a.owner || "Origin"}</span></td>
+                            <td className="px-3 py-2.5 text-slate-600">{a.specs?.brand || "—"}</td>
+                            <td className="px-3 py-2.5 text-slate-600">{a.type || "—"}</td>
                             <td className="px-3 py-2.5 text-slate-500 tabular-nums whitespace-nowrap">{a.createdAt ? new Date(a.createdAt).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "—"}</td>
                             <td className="px-3 py-2.5 text-right whitespace-nowrap"><span className="text-sm font-extrabold text-slate-700 tabular-nums">{a.quantity}</span> <span className="text-[9px] text-slate-400">unit</span></td>
-                            <td className="px-3 py-2.5 text-right"><button type="button" onClick={e => { e.stopPropagation(); setDetailAssetId(a.id); }} className="text-[11px] font-bold text-slate-500 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-md transition inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5" /> Detail</button></td>
                           </tr>
                         );
                       })}

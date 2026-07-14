@@ -29,7 +29,8 @@ import {
   Building,
   UserCheck,
   Briefcase,
-  Loader2
+  Loader2,
+  Eye
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
 import { api, type AuthUser } from "../api";
@@ -530,6 +531,28 @@ export default function LifecycleManager({
   const [batchBusy, setBatchBusy] = React.useState(false);
   const [batchError, setBatchError] = React.useState<string | null>(null);
   const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; tanggal: string; projectName?: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; courier?: string; trackingNo?: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
+  // Shipment "View + Process" panel (opened from a group card) — view the shipment + advance the whole
+  // group to the next phase. Surat Jalan (Fase 2/stage 4) → Transit (stage 5) via a tracking form.
+  const [shipView, setShipView] = React.useState<{ batchId: string; members: Asset[] } | null>(null);
+  const [shipForm, setShipForm] = React.useState({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
+  const [shipBusy, setShipBusy] = React.useState(false);
+  const [shipError, setShipError] = React.useState<string | null>(null);
+  const openShipView = (g: { batchId: string; members: Asset[] }) => { setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" }); setShipError(null); setShipView(g); };
+  const submitShipTransit = async () => {
+    if (!shipView || !onGroupAdvance) return;
+    if (!shipForm.courier) return setShipError("Pilih kurir/vendor dulu.");
+    if (!/^https?:\/\//i.test(shipForm.trackingUrl.trim())) return setShipError("Link tracking harus diawali http:// atau https://.");
+    if (!shipForm.eta.trim()) return setShipError("Estimasi tiba (ETA) wajib diisi.");
+    setShipBusy(true); setShipError(null);
+    const res = await onGroupAdvance({
+      batchId: shipView.batchId, fromStage: 4, toStage: 5, stageKey: "transit",
+      section: { courier: shipForm.courier, trackingNo: shipForm.trackingNo.trim(), trackingUrl: shipForm.trackingUrl.trim(), eta: shipForm.eta.trim() },
+      meta: { logAction: `Input tracking (${shipForm.courier}) — pengiriman ${shipView.batchId} masuk Transit`, operator: "Admin Origin (Surat Jalan)" },
+    });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal memproses pengiriman.");
+    setShipView(null);
+  };
 
   // Transition gate state
   const [transitionTarget, setTransitionTarget] = React.useState<number | null>(null);
@@ -2033,6 +2056,13 @@ export default function LifecycleManager({
                           {dest?.area && <span className={chip}><MapPin className="h-3 w-3" /> {dest.area}</span>}
                         </div>
                       </div>
+                      <button
+                        onClick={() => openShipView(g)}
+                        title="Lihat detail pengiriman & proses ke fase berikut"
+                        className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[11px] font-extrabold text-blue-700 shadow-sm hover:bg-blue-50 transition"
+                      >
+                        <Eye className="h-3.5 w-3.5" /> Lihat &amp; Proses
+                      </button>
                     </div>
                   </div>
                   {/* Members as a compact table (like the Gudang list) — one card per shipment */}
@@ -2076,6 +2106,62 @@ export default function LifecycleManager({
         )}
       </div>
       )}
+
+      {/* SHIPMENT VIEW + PROCESS — lihat detail pengiriman & proses seluruh grup ke fase berikut */}
+      {shipView && (() => {
+        const sh: any = shipView.members[0]?.stageDetails?.shipping || {};
+        const dest = Array.isArray(sh.destinations) ? sh.destinations[0] : null;
+        const gStage = shipView.members[0]?.currentStage ?? 4;
+        const projName = (shipView.members[0]?.stageDetails as any)?.deployment?.projectName || "";
+        return (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-start">
+              <div>
+                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block">Pengiriman Bersama · Fase {faseNo(gStage)} · {cleanLabel(gStage)}</span>
+                <h3 className="text-base font-bold text-slate-950">{shipView.members.length} aset · satu Surat Jalan</h3>
+                <p className="font-mono text-[11px] text-slate-400 mt-0.5">{shipView.batchId}</p>
+              </div>
+              <button onClick={() => setShipView(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Proyek</span><span className="text-[11px] font-bold text-slate-700">{projName || "—"}</span></div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Area</span><span className="text-[11px] font-bold text-slate-700">{dest?.area || "—"}</span></div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">PIC</span><span className="text-[11px] font-bold text-slate-700">{dest?.picPenerima || "—"}</span></div>
+              </div>
+              <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 max-h-40 overflow-y-auto">
+                {shipView.members.map(m => (
+                  <div key={m.id} className="flex items-center gap-2 px-3 py-2">
+                    <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span>
+                    <span className="text-right shrink-0"><span className="text-xs font-extrabold text-slate-700 tabular-nums">{m.quantity}</span><span className="text-[9px] text-slate-400"> unit</span></span>
+                  </div>
+                ))}
+              </div>
+              {gStage === 4 && onGroupAdvance ? (
+                <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
+                  <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Compass className="h-3.5 w-3.5" /> Proses ke Transit — input tracking</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1"><label className="font-bold text-slate-700">Kurir / Vendor <span className="text-rose-500">*</span></label>
+                      <select value={shipForm.courier} onChange={e => setShipForm(f => ({ ...f, courier: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                        <option value="">— pilih kurir —</option>{COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1"><label className="font-bold text-slate-700">No. Resi</label><input value={shipForm.trackingNo} onChange={e => setShipForm(f => ({ ...f, trackingNo: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="opsional" /></div>
+                  </div>
+                  <div className="space-y-1"><label className="font-bold text-slate-700">Link Tracking <span className="text-rose-500">*</span></label><input value={shipForm.trackingUrl} onChange={e => setShipForm(f => ({ ...f, trackingUrl: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://…" /></div>
+                  <div className="space-y-1"><label className="font-bold text-slate-700">Estimasi Tiba (ETA) <span className="text-rose-500">*</span></label><input value={shipForm.eta} onChange={e => setShipForm(f => ({ ...f, eta: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: 2 hari" /></div>
+                  {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                  <button type="button" onClick={submitShipTransit} disabled={shipBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Compass className="h-4 w-4" />} Proses ke Transit (seluruh grup)</button>
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400 text-center py-2 border-t border-slate-100">Proses untuk fase ini menyusul.</p>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
 
       {/* MODAL: PENGIRIMAN GABUNGAN — satu Surat Jalan untuk banyak aset */}

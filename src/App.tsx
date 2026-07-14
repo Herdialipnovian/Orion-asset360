@@ -301,7 +301,7 @@ export default function App() {
   };
   // Consolidated dispatch: many assets → one Surat Jalan / driver / destination.
   const handleBatchShip = async (
-    p: { items: { id: string; qty: number }[]; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
+    p: { items: { id: string; qty: number }[]; deployMode?: string; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
   ): Promise<{ ok: boolean; error?: string; suratJalanNo?: string }> => {
     try { const r = await api.batchShip(p); await refresh(); return { ok: true, suratJalanNo: r.suratJalanNo }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal mengirim bersama." }; }

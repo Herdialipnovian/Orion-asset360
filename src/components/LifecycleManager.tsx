@@ -360,7 +360,7 @@ interface LifecycleManagerProps {
   onArriveVenue?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onShipReturn?: (assetId: string, p: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
   onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
-  onBatchShip?: (p: { items: { id: string; qty: number }[]; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
+  onBatchShip?: (p: { items: { id: string; qty: number }[]; deployMode?: string; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; perAsset?: Record<string, any>; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onGroupVenue?: (p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
@@ -524,8 +524,9 @@ export default function LifecycleManager({
   const [batchMode, setBatchMode] = React.useState(false);
   const [batchSel, setBatchSel] = React.useState<string[]>([]);
   const [batchOpen, setBatchOpen] = React.useState(false);
+  const [batchFlash, setBatchFlash] = React.useState<{ sent: number; remained: number; count: number } | null>(null); // Gudang dispatch success animation
   const [batchQty, setBatchQty] = React.useState<Record<string, string>>({});
-  const [batchForm, setBatchForm] = React.useState({ suratJalanNo: "", driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+  const [batchForm, setBatchForm] = React.useState({ suratJalanNo: "", deployMode: "", driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
   const [batchBusy, setBatchBusy] = React.useState(false);
   const [batchError, setBatchError] = React.useState<string | null>(null);
   const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; courier?: string; trackingNo?: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
@@ -721,7 +722,7 @@ export default function LifecycleManager({
     if (initialStageFilter !== undefined) setFilterStage(initialStageFilter);
   }, [initialStageFilter]);
   // Reset any batch selection when the phase view changes (Gudang cart vs card views share batchSel).
-  React.useEffect(() => { setBatchSel([]); setBatchQty({}); setBatchMode(false); setBatchError(null); }, [filterStage]);
+  React.useEffect(() => { setBatchSel([]); setBatchQty({}); setBatchMode(false); setBatchError(null); setBatchForm(f => ({ ...f, deployMode: "" })); }, [filterStage]);
 
   const detailAsset = React.useMemo(
     () => assets.find(a => a.id === detailAssetId) || null,
@@ -950,6 +951,7 @@ export default function LifecycleManager({
   const submitBatch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!onBatchShip) return;
+    if (!batchForm.deployMode) return setBatchError("Pilih Type Kategori (Internal / Event / Distribusi) dulu.");
     if (!batchForm.area.trim()) return setBatchError("Tujuan pengiriman (area) wajib diisi.");
     if (!batchForm.driverName.trim()) return setBatchError("Nama driver wajib diisi.");
     if (batchForm.trackingUrl && !/^https?:\/\//i.test(batchForm.trackingUrl.trim())) return setBatchError("Link tracking harus diawali http:// atau https://.");
@@ -960,16 +962,21 @@ export default function LifecycleManager({
     }
     setBatchBusy(true); setBatchError(null);
     const res = await onBatchShip({
-      items, suratJalanNo: batchForm.suratJalanNo || undefined, driverName: batchForm.driverName.trim(),
+      items, deployMode: batchForm.deployMode || undefined, suratJalanNo: batchForm.suratJalanNo || undefined, driverName: batchForm.driverName.trim(),
       vehiclePlate: batchForm.vehiclePlate.trim(), vendorShipping: batchForm.vendorShipping.trim(), departureTime: batchForm.departureTime.trim(),
       area: batchForm.area.trim(), picPenerima: batchForm.picPenerima.trim(),
       courier: batchForm.courier || undefined, trackingUrl: batchForm.trackingUrl.trim() || undefined, trackingNo: batchForm.trackingNo.trim() || undefined, eta: batchForm.eta.trim() || undefined,
     });
     setBatchBusy(false);
     if (!res.ok) return setBatchError(res.error || "Gagal mengirim bersama.");
+    // Success → play the split animation in the cart: qty sent vs remainder kept in Gudang.
+    const flashSent = items.reduce((n, it) => n + it.qty, 0);
+    const flashRemained = items.reduce((n, it) => n + Math.max(0, (assets.find(x => x.id === it.id)?.quantity || 0) - it.qty), 0);
+    setBatchFlash({ sent: flashSent, remained: flashRemained, count: items.length });
+    setTimeout(() => setBatchFlash(null), 4200);
     const rows = items.map(it => ({ id: it.id, name: assets.find(x => x.id === it.id)?.name || it.id, qty: it.qty }));
     setBatchPrint({ suratJalanNo: res.suratJalanNo || batchForm.suratJalanNo, area: batchForm.area.trim(), picPenerima: batchForm.picPenerima.trim(), driverName: batchForm.driverName.trim(), vehiclePlate: batchForm.vehiclePlate.trim(), rows });
-    setBatchOpen(false); setBatchMode(false); setBatchSel([]); setBatchQty({});
+    setBatchOpen(false); setBatchMode(false); setBatchSel([]); setBatchQty({}); setBatchForm(f => ({ ...f, deployMode: "" }));
   };
 
   const [newForm, setNewForm] = React.useState({
@@ -987,6 +994,7 @@ export default function LifecycleManager({
 
   // Register-eligible assets (all filters EXCEPT the flow filter) — used both for the flow legend
   // counts and, after applying the flow filter, for the rendered grid.
+  const assetById = React.useMemo(() => new Map(assets.map(a => [a.id, a])), [assets]);
   const baseAssetsList = React.useMemo(() => {
     return assets.filter(asset => {
       const q = searchQuery.toLowerCase();
@@ -1791,16 +1799,8 @@ export default function LifecycleManager({
           </div>
 
           {/* Aset ditambah di menu Master Data (lahir di Gudang/Fase 3) — bukan lagi lewat wizard di sini. */}
-          {/* Old toggle hidden in the Gudang view — that view has its own list + selection cart. */}
-          {canBatchShip && Number(filterStage) !== 3 && (
-            <button
-              onClick={toggleBatchMode}
-              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg border transition ${batchMode ? "bg-slate-800 text-white border-slate-800 hover:bg-slate-900" : "bg-white text-blue-700 border-blue-300 hover:bg-blue-50"}`}
-              title="Pilih beberapa aset di Gudang untuk dikirim bersama dalam satu Surat Jalan"
-            >
-              <Truck className="h-3.5 w-3.5" /> {batchMode ? "Batal Kirim Bersama" : "Kirim Bersama"}
-            </button>
-          )}
+          {/* Consolidated dispatch now happens ONLY from the Gudang view (list + selection cart);
+              the old card-checkbox "Kirim Bersama" toggle/modal is retired. */}
         </div>
       </div>
       {batchMode && (
@@ -1809,7 +1809,9 @@ export default function LifecycleManager({
         </div>
       )}
 
-      {/* Flow legend — color guide + click a flow to filter the register */}
+      {/* Flow legend — hidden in the Gudang view: assets no longer pre-carry a deployment flow; the
+          TYPE (Event/Distribusi/Internal) is chosen at dispatch in the cart. Kept for other phases. */}
+      {Number(filterStage) !== 3 && (
       <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-100 rounded-xl px-3 py-2.5 shadow-xs">
         <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mr-1">Alur Deployment:</span>
         {(["Belum", "Standard", "Event", "Distribusi"] as const)
@@ -1840,31 +1842,43 @@ export default function LifecycleManager({
           <span className="h-2 w-2 rounded-full bg-violet-500" /> Internal Custodian → menu <strong>Aset Internal</strong>
         </span>
       </div>
+      )}
 
       {/* Gudang (Fase 1) = dense LIST + a selection cart (scales to thousands of assets); pick 1 or many,
           set the qty to use per asset (the remainder stays in Gudang), then issue one Surat Jalan. */}
       {Number(filterStage) === 3 ? (() => {
         const list = filteredAssetsList.filter(a => !(isInternalDeploy(a) || a.peruntukan === "Internal"));
+        const CAP = 300; // render at most CAP rows (search to narrow) so a 2000-asset gudang stays snappy
+        const capped = list.length > CAP ? list.slice(0, CAP) : list;
+        const canDispatch = canBatchShip; // only Admin/Logistik may pick + issue Surat Jalan
         const totalUse = batchSel.reduce((s, id) => s + (Math.floor(Number(batchQty[id])) || 0), 0);
         const pickRow = (a: Asset) => {
           if (batchSel.includes(a.id)) toggleBatchSel(a.id);
           else { toggleBatchSel(a.id); setBatchQty(q => ({ ...q, [a.id]: q[a.id] || String(a.quantity || 1) })); }
         };
+        const allIds = capped.map(a => a.id); // select-all covers the VISIBLE (capped/filtered) set
+        const allPicked = allIds.length > 0 && allIds.every(id => batchSel.includes(id));
+        const toggleAll = () => {
+          if (allPicked) setBatchSel(s => s.filter(id => !allIds.includes(id)));
+          else { setBatchSel(s => [...new Set([...s, ...allIds])]); setBatchQty(q => { const n = { ...q }; for (const a of capped) if (!n[a.id]) n[a.id] = String(a.quantity || 1); return n; }); }
+        };
         return (
           <div className="flex flex-col lg:flex-row gap-4 items-start">
             {/* LEFT — dense selectable list */}
-            <div className="flex-1 min-w-0 w-full bg-white rounded-xl border border-slate-100 overflow-hidden">
-              <div className="hidden sm:grid grid-cols-[24px_1fr_72px] gap-3 px-4 py-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                <span>✓</span><span>Aset di Gudang</span><span className="text-right">Stok</span>
+            <div className="flex-1 min-w-0 w-full bg-white rounded-xl border border-slate-100 overflow-hidden shadow-xs">
+              <div className="grid grid-cols-[24px_1fr_72px] items-center gap-3 px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                {canDispatch ? <input type="checkbox" checked={allPicked} onChange={toggleAll} title="Pilih semua" className="h-4 w-4 rounded accent-blue-600" /> : <span />}
+                <span className="text-[11px] font-extrabold text-slate-600">Aset di Gudang <span className="font-bold text-slate-400">({list.length})</span></span>
+                <span className="text-right text-[10px] font-bold uppercase tracking-wider text-slate-400">Stok</span>
               </div>
               <div className="divide-y divide-slate-100 max-h-[68vh] overflow-y-auto">
                 {list.length === 0 ? (
                   <div className="p-10 text-center text-slate-400 text-sm">Tidak ada aset di Gudang untuk kriteria ini.</div>
-                ) : list.map(a => {
+                ) : capped.map(a => {
                   const picked = batchSel.includes(a.id);
                   return (
-                    <label key={a.id} className={`grid grid-cols-[24px_1fr_72px] items-center gap-3 px-4 py-2.5 cursor-pointer transition ${picked ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                      <input type="checkbox" checked={picked} onChange={() => pickRow(a)} className="h-4 w-4 rounded accent-blue-600" />
+                    <label key={a.id} className={`grid grid-cols-[24px_1fr_72px] items-center gap-3 px-4 py-2.5 transition ${canDispatch ? "cursor-pointer" : ""} ${picked ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                      {canDispatch ? <input type="checkbox" checked={picked} onChange={() => pickRow(a)} className="h-4 w-4 rounded accent-blue-600" /> : <span />}
                       <span className="min-w-0">
                         <span className="flex items-center gap-2">
                           <span className="font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">{a.id}</span>
@@ -1876,9 +1890,13 @@ export default function LifecycleManager({
                     </label>
                   );
                 })}
+                {capped.length < list.length && (
+                  <div className="px-4 py-2.5 text-center text-[10px] text-slate-400 bg-slate-50/50">Menampilkan {capped.length} dari {list.length} aset — persempit dengan pencarian di atas.</div>
+                )}
               </div>
             </div>
-            {/* RIGHT — selection cart: qty-to-use per asset + remainder + one Surat Jalan */}
+            {/* RIGHT — selection cart (Admin/Logistik only): qty-to-use per asset + remainder + one Surat Jalan */}
+            {canDispatch && (
             <div className="w-full lg:w-80 shrink-0">
               <div className="lg:sticky lg:top-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 text-white flex items-center gap-2">
@@ -1886,12 +1904,51 @@ export default function LifecycleManager({
                   <span className="ml-auto text-[11px] font-semibold bg-white/15 px-2 py-0.5 rounded-full">{batchSel.length} aset · {totalUse} unit</span>
                 </div>
                 {batchSel.length === 0 ? (
+                  batchFlash ? (
+                    <div className="p-4 animate-[fadeIn_0.25s_ease]">
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+                        <div className="mx-auto h-9 w-9 grid place-items-center rounded-full bg-emerald-500 text-white shadow-sm animate-[fadeIn_0.3s_ease]"><Check className="h-5 w-5" /></div>
+                        <p className="mt-2 text-[12px] font-extrabold text-emerald-800">Surat Jalan diterbitkan!</p>
+                        <p className="text-[10px] text-emerald-700/80">{batchFlash.count} aset diproses</p>
+                        <div className="mt-3 flex items-stretch gap-2 text-left">
+                          <div className="flex-1 rounded-lg bg-white border border-blue-200 p-2.5 animate-[fadeIn_0.4s_ease]">
+                            <div className="flex items-center gap-1.5 text-blue-700"><Truck className="h-3.5 w-3.5" /><span className="text-[9px] font-bold uppercase tracking-wide">Berangkat</span></div>
+                            <p className="mt-0.5 text-lg font-extrabold text-blue-700 tabular-nums leading-none">{batchFlash.sent}<span className="text-[10px] font-bold text-blue-400"> unit</span></p>
+                          </div>
+                          <div className="flex-1 rounded-lg bg-white border border-slate-200 p-2.5 animate-[fadeIn_0.55s_ease]">
+                            <div className="flex items-center gap-1.5 text-slate-500"><Home className="h-3.5 w-3.5" /><span className="text-[9px] font-bold uppercase tracking-wide">Tetap di Gudang</span></div>
+                            <p className="mt-0.5 text-lg font-extrabold text-slate-600 tabular-nums leading-none">{batchFlash.remained}<span className="text-[10px] font-bold text-slate-400"> unit</span></p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
                   <div className="p-6 text-center text-slate-400 text-xs leading-relaxed">Centang aset di daftar untuk mulai.<br />Bisa pilih <strong>1 atau beberapa</strong>; atur <strong>qty yang dipakai</strong> di sini — sisanya tetap di gudang.</div>
+                  )
                 ) : (
                   <div className="p-3 space-y-2.5">
-                    <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+                    {/* Type Kategori — deployment TYPE is chosen HERE at dispatch (assets don't pre-carry a flow). */}
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 flex items-center gap-1">Type Kategori <span className="text-rose-500">*</span></label>
+                      <div className="mt-1 grid grid-cols-3 gap-1.5">
+                        {[
+                          { v: "Event", Icon: Compass, on: "bg-amber-500 border-amber-500 text-white shadow-sm" },
+                          { v: "Distribusi", Icon: Building, on: "bg-teal-600 border-teal-600 text-white shadow-sm" },
+                          { v: "Internal", Icon: Briefcase, on: "bg-violet-600 border-violet-600 text-white shadow-sm" }
+                        ].map(t => {
+                          const sel = batchForm.deployMode === t.v;
+                          return (
+                            <button key={t.v} type="button" onClick={() => setBatchForm(f => ({ ...f, deployMode: t.v }))}
+                              className={`flex flex-col items-center gap-1 py-2 rounded-lg border text-[10px] font-bold transition ${sel ? t.on : "bg-white border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50"}`}>
+                              <t.Icon className="h-4 w-4" /> {t.v}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="space-y-2 max-h-[40vh] overflow-y-auto pt-1 border-t border-slate-100">
                       {batchSel.map(id => {
-                        const a = assets.find(x => x.id === id); if (!a) return null;
+                        const a = assetById.get(id); if (!a) return null;
                         const q = Math.floor(Number(batchQty[id])) || 0;
                         const sisa = (a.quantity || 0) - q;
                         return (
@@ -1907,6 +1964,10 @@ export default function LifecycleManager({
                               {sisa > 0 ? <span className="ml-auto text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">sisa {sisa} tetap di gudang</span>
                                        : sisa === 0 ? <span className="ml-auto text-[9px] font-bold text-emerald-600">semua dikirim</span>
                                        : <span className="ml-auto text-[9px] font-bold text-rose-600">melebihi stok</span>}
+                            </div>
+                            {/* used vs remaining bar: blue = berangkat, slate = tetap di gudang */}
+                            <div className="mt-1.5 h-1.5 w-full rounded-full bg-slate-200 overflow-hidden flex">
+                              <div className="h-full bg-blue-500 transition-all" style={{ width: `${Math.min(100, Math.max(0, (q / (a.quantity || 1)) * 100))}%` }} />
                             </div>
                           </div>
                         );
@@ -1934,6 +1995,7 @@ export default function LifecycleManager({
                 )}
               </div>
             </div>
+            )}
           </div>
         );
       })() : (

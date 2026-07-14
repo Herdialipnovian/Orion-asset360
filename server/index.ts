@@ -746,6 +746,10 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
   const area = String(b.area || "").trim();
   const picPenerima = String(b.picPenerima || "").trim();
   const driverName = String(b.driverName || "").trim();
+  // Deployment TYPE chosen at Gudang dispatch (not pre-assigned to the asset) — stamped onto the
+  // shipped record so the downstream flow (Event venue / Distribusi toko / Internal) follows the choice.
+  const deployMode: string | null = ["Internal", "Event", "Distribusi"].includes(String(b.deployMode || "")) ? String(b.deployMode) : null;
+  const depOf = (a: any) => deployMode ? { deployment: { ...((a.stageDetails as any)?.deployment || {}), mode: deployMode } } : {};
   const vehiclePlate = String(b.vehiclePlate || "").trim();
   if (!area) return res.status(400).json({ error: "Tujuan pengiriman (area) wajib diisi." });
   if (!driverName) return res.status(400).json({ error: "Nama driver wajib diisi." });
@@ -820,7 +824,7 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
       if (qty === stock) {
         // whole record → Fase 4
         await exec(`update assets set current_stage=4, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`,
-          [asset.id, location, JSON.stringify({ ...asset.stageDetails, shipping })]);
+          [asset.id, location, JSON.stringify({ ...asset.stageDetails, shipping, ...depOf(asset) })]);
         logs.push({ id: `LOG-SHIP-${ts}-${asset.id}`, timestamp: now, assetId: asset.id, assetName: asset.name, stage: 4, action: `Surat Jalan ${suratJalanNo}: ${qty} unit dikirim ke ${area} (kirim bersama).`, operator, type: "success" });
         affected.push(asset.id);
       } else {
@@ -836,7 +840,7 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
           qrcode: `ASETIFY-${cid}`, createdAt: now, updatedAt: now,
           specs: { ...(asset.specs || {}), splitFrom: asset.id },
           financials: { ...(asset.financials || { purchaseCost: 0, maintenanceCost: 0, disposalValue: 0 }), purchaseCost: Math.round(perUnit * qty), disposalValue: Math.round(perDisposal * qty) },
-          stageDetails: { ...asset.stageDetails, shipping },
+          stageDetails: { ...asset.stageDetails, shipping, ...depOf(asset) },
         };
         await insertAsset(child, exec);
         await exec(`update assets set quantity=$2, financials=$3::jsonb, updated_at=now() where id=$1`,

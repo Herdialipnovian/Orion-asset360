@@ -86,3 +86,7 @@ html {
     margin: 12mm;
   }
 }
+
+/* Gudang dispatch cart: subtle enter + ship-out animations */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes shipOut { 0% { opacity: 1; transform: translateX(0) scale(1); } 100% { opacity: 0; transform: translateX(24px) scale(0.96); } }

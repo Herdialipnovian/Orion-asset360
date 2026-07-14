@@ -247,10 +247,11 @@ export default function App() {
   const handleAssignInstall = async (
     assetId: string,
     assignments: { merchandiserId: number; qty: number }[],
-    baseUpdatedAt?: string
+    baseUpdatedAt?: string,
+    locationId?: number | null
   ): Promise<{ ok: boolean; error?: string }> => {
     try {
-      await api.assignInstall(assetId, { assignments, baseUpdatedAt });
+      await api.assignInstall(assetId, { assignments, baseUpdatedAt, locationId });
       await refresh();
       return { ok: true };
     } catch (e: any) {

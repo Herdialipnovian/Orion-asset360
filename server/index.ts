@@ -1156,8 +1156,16 @@ app.post(
     const totalQty = merged.reduce((s, a) => s + a.qty, 0);
     if (totalQty > asset.quantity) return res.status(422).json({ code: "assign_exceeds", error: `Total tugas (${totalQty}) melebihi qty aset (${asset.quantity}).` });
 
+    // Optional Venue (Proses Pemasangan): record the install venue on the deployment (a simple
+    // record, NOT a transit leg — so the area-lock above is unchanged), client-scoped.
+    let venueRec: any = (deployment as any).venue || undefined;
+    if (req.body?.locationId != null && String(req.body.locationId) !== "") {
+      const lid = Number(req.body.locationId);
+      const { rows: lr } = await q(`select id, name, area, client from locations where id=$1`, [lid]);
+      if (lr[0] && ((lr[0].client || "") === (asset.client || "") || !lr[0].client)) venueRec = { locationId: lr[0].id, name: lr[0].name, area: lr[0].area || null };
+    }
     const { installedQty, fullyInstalled } = recomputeInstall(merged, asset.quantity);
-    const details = { ...asset.stageDetails, deployment: { ...deployment, assignments: merged, installedQty, fullyInstalled } };
+    const details = { ...asset.stageDetails, deployment: { ...deployment, assignments: merged, installedQty, fullyInstalled, ...(venueRec ? { venue: venueRec } : {}) } };
     await updateAssetStageRow(id, { currentStage: 6, currentLocation: asset.currentLocation, stageDetails: details, auditScore: asset.auditScore, maintenanceStatus: asset.maintenanceStatus });
 
     const now = new Date().toISOString();

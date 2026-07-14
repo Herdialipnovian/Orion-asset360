@@ -355,7 +355,7 @@ interface LifecycleManagerProps {
     meta?: { logAction?: string; operator?: string; maintenanceStatus?: Asset["maintenanceStatus"]; auditScore?: number }
   ) => Promise<{ ok: boolean; error?: string }>;
   onShipAsset: (assetId: string, updatedDetails: any, meta?: { logAction?: string; operator?: string }) => Promise<{ ok: boolean; error?: string }>;
-  onAssignInstall: (assetId: string, assignments: { merchandiserId: number; qty: number }[], baseUpdatedAt?: string) => Promise<{ ok: boolean; error?: string }>;
+  onAssignInstall: (assetId: string, assignments: { merchandiserId: number; qty: number }[], baseUpdatedAt?: string, locationId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onHandoverInternal?: (assetId: string, p: { custodianId: number; handoverDate?: string; signatureBase64?: string; note?: string; projectId?: number | null }) => Promise<{ ok: boolean; error?: string }>;
   onDeployVenue?: (assetId: string, p: { locationId: number; pic?: string; setupDate?: string; note?: string; signatureBase64?: string; projectId?: number | null; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
   onArriveVenue?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
@@ -540,24 +540,28 @@ export default function LifecycleManager({
   const [podForm, setPodForm] = React.useState({ podTime: "", conditionOnArrival: "Sempurna", podNote: "" });
   const [podSig, setPodSig] = React.useState("");
   const [podChecklist, setPodChecklist] = React.useState<Record<string, boolean>>({}); // per-asset "diterima" checklist (Transit)
-  const [shipMd, setShipMd] = React.useState(""); // Terpasang: MD assigned for installation
+  const [shipMd, setShipMd] = React.useState(""); // Proses Pemasangan: MD assigned for installation
+  const [shipVenue, setShipVenue] = React.useState(""); // Proses Pemasangan: venue location for the install
   const openShipView = (g: { batchId: string; members: Asset[] }) => {
     setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
-    setPodSig(""); setShipMd("");
+    setPodSig(""); setShipMd(""); setShipVenue(String((g.members[0]?.stageDetails as any)?.deployment?.venue?.locationId || ""));
     const chk: Record<string, boolean> = {}; g.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
     void loadDirectory(g.members[0]?.client); // MD/PIC directory for this shipment's client (assignment dropdown)
+    void loadVenues(g.members[0]?.client);    // Venue locations for the install-location dropdown
     setShipError(null); setShipView(g);
   };
   // Terpasang (Fase 4/stage 6): PIC assigns a Merchandiser (MD) to install the whole shipment.
   const submitAssignMD = async () => {
     if (!shipView) return;
+    if (!shipVenue) return setShipError("Pilih lokasi Venue dulu.");
     if (!shipMd) return setShipError("Pilih Merchandiser (MD) dulu.");
     setShipBusy(true); setShipError(null);
     const mid = Number(shipMd);
+    const locId = Number(shipVenue);
     let failed = "";
     for (const m of shipView.members) {
-      const r = await onAssignInstall(m.id, [{ merchandiserId: mid, qty: m.quantity }], m.updatedAt);
+      const r = await onAssignInstall(m.id, [{ merchandiserId: mid, qty: m.quantity }], m.updatedAt, locId);
       if (!r.ok) { failed = `${m.name}: ${r.error || "gagal ditugaskan"}`; break; }
     }
     setShipBusy(false);
@@ -2259,6 +2263,14 @@ export default function LifecycleManager({
               ) : gStage === 6 && onAssignInstall ? (
                 <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 space-y-3">
                   <p className="text-[11px] font-extrabold text-violet-800 flex items-center gap-1.5"><UserCheck className="h-3.5 w-3.5" /> Penunjukan MD untuk Pemasangan</p>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">Lokasi Venue <span className="text-rose-500">*</span></label>
+                    <select value={shipVenue} onChange={e => setShipVenue(e.target.value)} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer">
+                      <option value="">— pilih venue —</option>
+                      {venues.map(v => <option key={v.id} value={String(v.id)}>{v.name}{v.area ? ` · ${v.area}` : ""}</option>)}
+                    </select>
+                    {venues.length === 0 && <p className="text-[10px] text-amber-600">Belum ada venue untuk client ini — tambahkan di menu Proyek & Lokasi.</p>}
+                  </div>
                   <div className="space-y-1">
                     <label className="font-bold text-slate-700">Merchandiser (MD) <span className="text-rose-500">*</span></label>
                     <select value={shipMd} onChange={e => setShipMd(e.target.value)} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer">

@@ -331,7 +331,7 @@ export const api = {
     return req(`/users/directory?role=${encodeURIComponent(role)}${client ? `&client=${encodeURIComponent(client)}` : ""}${area ? `&area=${encodeURIComponent(area)}` : ""}`);
   },
   // Assign / re-assign Merchandiser install portions (Fase 6, in-place, server-merged).
-  assignInstall(id: string, p: { assignments: { merchandiserId: number; qty: number }[]; baseUpdatedAt?: string; operator?: string }): Promise<any> {
+  assignInstall(id: string, p: { assignments: { merchandiserId: number; qty: number }[]; locationId?: number | null; baseUpdatedAt?: string; operator?: string }): Promise<any> {
     return req(`/assets/${encodeURIComponent(id)}/install/assign`, { method: "POST", body: JSON.stringify(p) });
   },
   // In-app notifications (poll-based).

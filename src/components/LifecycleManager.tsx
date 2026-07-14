@@ -30,7 +30,8 @@ import {
   UserCheck,
   Briefcase,
   Loader2,
-  Eye
+  Eye,
+  Camera
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
 import { api, type AuthUser } from "../api";
@@ -546,10 +547,37 @@ export default function LifecycleManager({
     setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
     setPodSig(""); setShipMd(""); setShipVenue(String((g.members[0]?.stageDetails as any)?.deployment?.venue?.locationId || ""));
+    setInstallChk({}); setInstallPhoto({}); setInstallPrev({});
     const chk: Record<string, boolean> = {}; g.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
     void loadDirectory(g.members[0]?.client); // MD/PIC directory for this shipment's client (assignment dropdown)
     void loadVenues(g.members[0]?.client);    // Venue locations for the install-location dropdown
     setShipError(null); setShipView(g);
+  };
+  // MD confirms installation (Proses Pemasangan 6 → Asset Terpasang 7): checklist installed + a photo
+  // per asset; date/time is auto (read-only). Photos upload to /evidence, then the group advances.
+  const [installChk, setInstallChk] = React.useState<Record<string, boolean>>({});
+  const [installPhoto, setInstallPhoto] = React.useState<Record<string, File>>({});
+  const [installPrev, setInstallPrev] = React.useState<Record<string, string>>({});
+  const setInstallFile = (id: string, f: File | null) => {
+    setInstallPhoto(p => { const n = { ...p }; if (f) n[id] = f; else delete n[id]; return n; });
+    setInstallPrev(p => { const n = { ...p }; if (f) n[id] = URL.createObjectURL(f); else delete n[id]; return n; });
+  };
+  const submitInstallConfirm = async () => {
+    if (!shipView || !onGroupAdvance) return;
+    if (!shipView.members.every(m => installChk[m.id])) return setShipError("Ceklist semua aset yang sudah terpasang dulu.");
+    if (!shipView.members.every(m => installPhoto[m.id])) return setShipError("Foto wajib untuk setiap aset yang dipasang.");
+    setShipBusy(true); setShipError(null);
+    try {
+      for (const m of shipView.members) await api.uploadEvidence(m.id, "after", 6, [installPhoto[m.id]], "Foto pemasangan (Proses Pemasangan)");
+    } catch (e: any) { setShipBusy(false); return setShipError(e?.message || "Gagal mengunggah foto."); }
+    const res = await onGroupAdvance({
+      batchId: shipView.batchId, fromStage: 6, toStage: 7, stageKey: "deployment",
+      section: { installConfirmed: true, installedAt: new Date().toISOString() },
+      meta: { logAction: `Pemasangan dikonfirmasi & difoto (${shipView.members.length} aset) — masuk Asset Terpasang`, operator: "Admin Origin (Proses Pemasangan)" },
+    });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal konfirmasi pemasangan.");
+    setShipView(null);
   };
   // Terpasang (Fase 4/stage 6): PIC assigns a Merchandiser (MD) to install the whole shipment.
   const submitAssignMD = async () => {
@@ -2176,6 +2204,7 @@ export default function LifecycleManager({
         const gStage = shipView.members[0]?.currentStage ?? 4;
         const projName = (shipView.members[0]?.stageDetails as any)?.deployment?.projectName || "";
         const checkedCount = shipView.members.filter(m => podChecklist[m.id]).length;
+        const assigned = (((shipView.members[0]?.stageDetails as any)?.deployment?.assignments) || []).length > 0;
         return (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100">
@@ -2260,7 +2289,36 @@ export default function LifecycleManager({
                     <button type="button" onClick={submitShipPod} disabled={shipBusy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Konfirmasi Diterima (seluruh grup)</button>
                   </div>
                 </div>
-              ) : gStage === 6 && onAssignInstall ? (
+              ) : gStage === 6 && onAssignInstall ? (assigned ? (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-3">
+                  <p className="text-[11px] font-extrabold text-emerald-800 flex items-center gap-1.5"><Check className="h-3.5 w-3.5" /> MD Konfirmasi Pemasangan</p>
+                  <div className="bg-white border border-slate-200 rounded-lg px-3 py-2">
+                    <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Tanggal &amp; Waktu Pemasangan</span>
+                    <span className="text-[11px] font-bold text-slate-700 tabular-nums">{new Date().toLocaleString("id-ID", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })} <span className="text-[9px] font-normal text-slate-400">· otomatis</span></span>
+                  </div>
+                  <div className="space-y-2">
+                    {shipView.members.map(m => (
+                      <div key={m.id} className={`rounded-lg border p-2.5 space-y-2 ${installChk[m.id] ? "border-emerald-300 bg-emerald-50/40" : "border-slate-200"}`}>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={!!installChk[m.id]} onChange={() => setInstallChk(c => ({ ...c, [m.id]: !c[m.id] }))} className="h-4 w-4 rounded accent-emerald-600 shrink-0" />
+                          <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id} · {m.quantity} unit</span></span>
+                          <span className="text-[9px] font-bold text-slate-400">Terpasang</span>
+                        </label>
+                        <div className="flex items-center gap-2">
+                          {installPrev[m.id] ? <img src={installPrev[m.id]} alt="" className="h-12 w-12 rounded-lg object-cover border border-slate-200" /> : <div className="h-12 w-12 rounded-lg border border-dashed border-slate-300 grid place-items-center text-slate-300"><Camera className="h-5 w-5" /></div>}
+                          <label className="flex-1 cursor-pointer text-[10px] font-bold text-emerald-700 bg-white border border-emerald-200 rounded-lg px-3 py-2 text-center hover:bg-emerald-50">
+                            {installPhoto[m.id] ? "Ganti Foto" : "Ambil / Pilih Foto"} <span className="text-rose-500">*</span>
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => setInstallFile(m.id, e.target.files?.[0] || null)} />
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-500">Ceklist tiap aset yang sudah terpasang &amp; lampirkan foto. Semua aset wajib difoto sebelum masuk Asset Terpasang.</p>
+                  {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                  <button type="button" onClick={submitInstallConfirm} disabled={shipBusy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Konfirmasi Pemasangan (seluruh grup)</button>
+                </div>
+              ) : (
                 <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 space-y-3">
                   <p className="text-[11px] font-extrabold text-violet-800 flex items-center gap-1.5"><UserCheck className="h-3.5 w-3.5" /> Penunjukan MD untuk Pemasangan</p>
                   <div className="space-y-1">
@@ -2283,7 +2341,7 @@ export default function LifecycleManager({
                   {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
                   <button type="button" onClick={submitAssignMD} disabled={shipBusy} className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />} Tugaskan Pemasangan ke MD</button>
                 </div>
-              ) : (
+              )) : (
                 <p className="text-[11px] text-slate-400 text-center py-2 border-t border-slate-100">Proses untuk fase ini menyusul.</p>
               )}
             </div>

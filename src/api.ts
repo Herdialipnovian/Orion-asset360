@@ -326,6 +326,21 @@ export const api = {
   async getEvidence(assetId: string): Promise<EvidenceView[]> {
     return (await req(`/assets/${encodeURIComponent(assetId)}/evidence`)).evidence;
   },
+  // Upload one or more evidence photos for an asset (CMS multipart → /evidence).
+  async uploadEvidence(assetId: string, slot: string, stage: number, files: File[], note?: string): Promise<EvidenceView[]> {
+    const fd = new FormData();
+    fd.append("slot", slot);
+    fd.append("stage", String(stage));
+    if (note) fd.append("note", note);
+    files.forEach((f, i) => fd.append("files", f, f.name || `photo_${i}.jpg`));
+    const token = getToken();
+    const res = await fetch(`/api/assets/${encodeURIComponent(assetId)}/evidence`, {
+      method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd,
+    });
+    let body: any = null; try { body = await res.json(); } catch { /* no-op */ }
+    if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+    return body.evidence;
+  },
   // Directory of PIC / Merchandiser for a client (dropdown sources). Optional area filter (MD lock).
   usersDirectory(role: "PIC" | "Merchandiser", client?: string, area?: string): Promise<{ id: number; name: string; client: string | null; area: string | null }[]> {
     return req(`/users/directory?role=${encodeURIComponent(role)}${client ? `&client=${encodeURIComponent(client)}` : ""}${area ? `&area=${encodeURIComponent(area)}` : ""}`);

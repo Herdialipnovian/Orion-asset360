@@ -539,10 +539,12 @@ export default function LifecycleManager({
   const [shipError, setShipError] = React.useState<string | null>(null);
   const [podForm, setPodForm] = React.useState({ podTime: "", conditionOnArrival: "Sempurna", podNote: "" });
   const [podSig, setPodSig] = React.useState("");
+  const [podChecklist, setPodChecklist] = React.useState<Record<string, boolean>>({}); // per-asset "diterima" checklist (Transit)
   const openShipView = (g: { batchId: string; members: Asset[] }) => {
     setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
     setPodSig("");
+    const chk: Record<string, boolean> = {}; g.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
     setShipError(null); setShipView(g);
   };
   // Share the shipment's tracking (courier/resi/link/ETA) to the recipient PIC via WhatsApp.
@@ -562,6 +564,7 @@ export default function LifecycleManager({
   };
   const submitShipPod = async () => {
     if (!shipView || !onGroupAdvance) return;
+    if (!shipView.members.every(m => podChecklist[m.id])) return setShipError("Checklist semua aset yang diterima dulu.");
     if (!podForm.conditionOnArrival) return setShipError("Pilih kondisi barang saat tiba.");
     if (!podSig || podSig.length < 50) return setShipError("Tanda tangan penerima wajib diisi.");
     const sh: any = shipView.members[0]?.stageDetails?.shipping || {};
@@ -569,7 +572,7 @@ export default function LifecycleManager({
     setShipBusy(true); setShipError(null);
     const res = await onGroupAdvance({
       batchId: shipView.batchId, fromStage: 5, toStage: 6, stageKey: "transit",
-      section: { podRecipient: dest?.picPenerima || "", podTime: podForm.podTime, conditionOnArrival: podForm.conditionOnArrival, podNote: podForm.podNote.trim(), signatureBase64: podSig },
+      section: { podRecipient: dest?.picPenerima || "", podTime: podForm.podTime, conditionOnArrival: podForm.conditionOnArrival, podNote: podForm.podNote.trim(), signatureBase64: podSig, receivedItems: shipView.members.map(m => m.id) },
       meta: { logAction: `POD: ${shipView.batchId} diterima (${podForm.conditionOnArrival}) & ditandatangani ${dest?.picPenerima || "penerima"}`, operator: "Admin Origin (Surat Jalan)" },
     });
     setShipBusy(false);
@@ -2151,6 +2154,7 @@ export default function LifecycleManager({
         const dest = Array.isArray(sh.destinations) ? sh.destinations[0] : null;
         const gStage = shipView.members[0]?.currentStage ?? 4;
         const projName = (shipView.members[0]?.stageDetails as any)?.deployment?.projectName || "";
+        const checkedCount = shipView.members.filter(m => podChecklist[m.id]).length;
         return (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100">
@@ -2168,13 +2172,23 @@ export default function LifecycleManager({
                 <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Area</span><span className="text-[11px] font-bold text-slate-700">{dest?.area || "—"}</span></div>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">PIC</span><span className="text-[11px] font-bold text-slate-700">{dest?.picPenerima || "—"}</span></div>
               </div>
-              <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 max-h-40 overflow-y-auto">
-                {shipView.members.map(m => (
-                  <div key={m.id} className="flex items-center gap-2 px-3 py-2">
-                    <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span>
-                    <span className="text-right shrink-0"><span className="text-xs font-extrabold text-slate-700 tabular-nums">{m.quantity}</span><span className="text-[9px] text-slate-400"> unit</span></span>
+              <div>
+                {gStage === 5 && (
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-emerald-600" /> Checklist Aset Diterima</span>
+                    <span className={`text-[10px] font-bold ${checkedCount === shipView.members.length ? "text-emerald-600" : "text-slate-400"}`}>{checkedCount}/{shipView.members.length} dicentang</span>
                   </div>
-                ))}
+                )}
+                <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 max-h-40 overflow-y-auto">
+                  {shipView.members.map(m => (
+                    <label key={m.id} className={`flex items-center gap-2 px-3 py-2 ${gStage === 5 ? "cursor-pointer hover:bg-slate-50" : ""} ${gStage === 5 && podChecklist[m.id] ? "bg-emerald-50" : ""}`}>
+                      {gStage === 5 && <input type="checkbox" checked={!!podChecklist[m.id]} onChange={() => setPodChecklist(c => ({ ...c, [m.id]: !c[m.id] }))} className="h-4 w-4 rounded accent-emerald-600 shrink-0" />}
+                      <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span>
+                      <span className="text-right shrink-0"><span className="text-xs font-extrabold text-slate-700 tabular-nums">{m.quantity}</span><span className="text-[9px] text-slate-400"> unit</span></span>
+                    </label>
+                  ))}
+                </div>
+                {gStage === 5 && <p className="mt-1 text-[9px] text-slate-400">Centang tiap aset yang benar-benar diterima sebelum menandatangani Surat Jalan.</p>}
               </div>
               {gStage === 4 && onGroupAdvance ? (
                 <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">

@@ -894,6 +894,11 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
   if (!isLegalTransition(fromStage, toStage)) return res.status(422).json({ error: `Perpindahan grup Fase ${fromStage} → ${toStage} tidak sah.` });
   const allowed = STAGE_ROLE[toStage] || [];
   if (req.user!.role !== "Admin" && !allowed.includes(req.user!.role)) return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang untuk perpindahan ini.` });
+  // POD gate (Transit → Terpasang): the recipient/PIC MUST sign the Surat Jalan first — no signature,
+  // no advance (Udin 2026-07-14). Enforced server-side so it's a true gate, not just a UI check.
+  if (fromStage === 5 && toStage === 6 && String((section as any).signatureBase64 || "").length < 50) {
+    return res.status(422).json({ code: "signature_required", error: "Surat Jalan harus ditandatangani penerima/PIC dulu sebelum lanjut ke fase berikutnya." });
+  }
   const now = new Date().toISOString();
   const operator = b.meta?.operator || req.user!.name;
   const logAction = String(b.meta?.logAction || `Proses grup: Fase ${fromStage} → Fase ${toStage}.`);

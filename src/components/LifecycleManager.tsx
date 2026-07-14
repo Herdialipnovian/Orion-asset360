@@ -537,7 +537,45 @@ export default function LifecycleManager({
   const [shipForm, setShipForm] = React.useState({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
   const [shipBusy, setShipBusy] = React.useState(false);
   const [shipError, setShipError] = React.useState<string | null>(null);
-  const openShipView = (g: { batchId: string; members: Asset[] }) => { setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" }); setShipError(null); setShipView(g); };
+  const [podForm, setPodForm] = React.useState({ podTime: "", conditionOnArrival: "Sempurna", podNote: "" });
+  const [podSig, setPodSig] = React.useState("");
+  const openShipView = (g: { batchId: string; members: Asset[] }) => {
+    setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
+    setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
+    setPodSig("");
+    setShipError(null); setShipView(g);
+  };
+  // Share the shipment's tracking (courier/resi/link/ETA) to the recipient PIC via WhatsApp.
+  const shareTrackingWA = (g: { batchId: string; members: Asset[] }) => {
+    const t: any = g.members[0]?.stageDetails?.transit || {};
+    const sh: any = g.members[0]?.stageDetails?.shipping || {};
+    const dest = Array.isArray(sh.destinations) ? sh.destinations[0] : null;
+    const lines = [
+      `Pelacakan pengiriman ${g.batchId}`,
+      dest?.area ? `Tujuan: ${dest.area}${dest.picPenerima ? ` (PIC: ${dest.picPenerima})` : ""}` : "",
+      t.courier ? `Kurir: ${t.courier}${t.trackingNo ? ` · Resi: ${t.trackingNo}` : ""}` : "",
+      t.eta ? `Estimasi tiba: ${t.eta}` : "",
+      t.trackingUrl ? `Lacak: ${t.trackingUrl}` : "",
+      `Aset: ${g.members.map(m => m.name).join(", ")}`,
+    ].filter(Boolean);
+    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
+  };
+  const submitShipPod = async () => {
+    if (!shipView || !onGroupAdvance) return;
+    if (!podForm.conditionOnArrival) return setShipError("Pilih kondisi barang saat tiba.");
+    if (!podSig || podSig.length < 50) return setShipError("Tanda tangan penerima wajib diisi.");
+    const sh: any = shipView.members[0]?.stageDetails?.shipping || {};
+    const dest = Array.isArray(sh.destinations) ? sh.destinations[0] : null;
+    setShipBusy(true); setShipError(null);
+    const res = await onGroupAdvance({
+      batchId: shipView.batchId, fromStage: 5, toStage: 6, stageKey: "transit",
+      section: { podRecipient: dest?.picPenerima || "", podTime: podForm.podTime, conditionOnArrival: podForm.conditionOnArrival, podNote: podForm.podNote.trim(), signatureBase64: podSig },
+      meta: { logAction: `POD: ${shipView.batchId} diterima (${podForm.conditionOnArrival}) & ditandatangani ${dest?.picPenerima || "penerima"}`, operator: "Admin Origin (Surat Jalan)" },
+    });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal konfirmasi penerimaan.");
+    setShipView(null);
+  };
   const submitShipTransit = async () => {
     if (!shipView || !onGroupAdvance) return;
     if (!shipForm.courier) return setShipError("Pilih kurir/vendor dulu.");
@@ -2153,6 +2191,39 @@ export default function LifecycleManager({
                   <div className="space-y-1"><label className="font-bold text-slate-700">Estimasi Tiba (ETA) <span className="text-rose-500">*</span></label><input value={shipForm.eta} onChange={e => setShipForm(f => ({ ...f, eta: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: 2 hari" /></div>
                   {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
                   <button type="button" onClick={submitShipTransit} disabled={shipBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Compass className="h-4 w-4" />} Proses ke Transit (seluruh grup)</button>
+                </div>
+              ) : gStage === 5 && onGroupAdvance ? (
+                <div className="space-y-3">
+                  {(() => { const t: any = shipView.members[0]?.stageDetails?.transit || {}; return (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                      <p className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1.5"><Compass className="h-3.5 w-3.5 text-blue-600" /> Pelacakan Kiriman</p>
+                      <div className="flex flex-wrap gap-2 text-[11px]">
+                        {t.courier && <span className="rounded-full bg-white border border-slate-200 px-2 py-0.5 font-semibold text-slate-600">Kurir: {t.courier}</span>}
+                        {t.trackingNo && <span className="rounded-full bg-white border border-slate-200 px-2 py-0.5 font-semibold text-slate-600">Resi: {t.trackingNo}</span>}
+                        {t.eta && <span className="rounded-full bg-white border border-slate-200 px-2 py-0.5 font-semibold text-slate-600">ETA: {t.eta}</span>}
+                      </div>
+                      <div className="flex gap-2">
+                        {t.trackingUrl ? <a href={t.trackingUrl} target="_blank" rel="noreferrer" className="flex-1 text-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 text-[11px] inline-flex items-center justify-center gap-1.5"><MapPin className="h-3.5 w-3.5" /> Buka Tracking</a> : <span className="flex-1 text-center text-[10px] text-slate-400 py-1.5">Link tracking belum ada</span>}
+                        <button type="button" onClick={() => shareTrackingWA(shipView)} className="flex-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-3 py-1.5 text-[11px] inline-flex items-center justify-center gap-1.5"><UserCheck className="h-3.5 w-3.5" /> Share ke WA</button>
+                      </div>
+                    </div>
+                  ); })()}
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-3">
+                    <p className="text-[11px] font-extrabold text-emerald-800 flex items-center gap-1.5"><Check className="h-3.5 w-3.5" /> Surat Jalan Diterima & Ditandatangani (POD)</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1"><label className="font-bold text-slate-700">Diterima Oleh (PIC)</label><input value={dest?.picPenerima || "—"} readOnly className="w-full bg-slate-100 border border-slate-200 px-2.5 py-1.5 rounded-lg text-slate-600" /></div>
+                      <div className="space-y-1"><label className="font-bold text-slate-700">Tanggal Terima</label><input type="date" value={podForm.podTime} onChange={e => setPodForm(f => ({ ...f, podTime: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500" /></div>
+                    </div>
+                    <div className="space-y-1"><label className="font-bold text-slate-700">Kondisi Barang saat Tiba <span className="text-rose-500">*</span></label>
+                      <select value={podForm.conditionOnArrival} onChange={e => setPodForm(f => ({ ...f, conditionOnArrival: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer">
+                        {["Sempurna", "Bagus", "Ada Lecet", "Rusak Sebagian"].map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={podForm.podNote} onChange={e => setPodForm(f => ({ ...f, podNote: e.target.value }))} rows={2} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500" /></div>
+                    <div className="space-y-1"><label className="font-bold text-slate-700">Tanda Tangan Penerima <span className="text-rose-500">*</span></label><SignaturePad onChange={setPodSig} /></div>
+                    {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                    <button type="button" onClick={submitShipPod} disabled={shipBusy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Konfirmasi Diterima (seluruh grup)</button>
+                  </div>
                 </div>
               ) : (
                 <p className="text-[11px] text-slate-400 text-center py-2 border-t border-slate-100">Proses untuk fase ini menyusul.</p>

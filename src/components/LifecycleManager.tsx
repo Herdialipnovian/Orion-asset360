@@ -360,7 +360,7 @@ interface LifecycleManagerProps {
   onArriveVenue?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onShipReturn?: (assetId: string, p: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
   onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
-  onBatchShip?: (p: { items: { id: string; qty: number }[]; deployMode?: string; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
+  onBatchShip?: (p: { items: { id: string; qty: number }[]; deployMode?: string; projectId?: number | null; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; perAsset?: Record<string, any>; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onGroupVenue?: (p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
@@ -526,7 +526,7 @@ export default function LifecycleManager({
   const [batchOpen, setBatchOpen] = React.useState(false);
   const [batchFlash, setBatchFlash] = React.useState<{ sent: number; remained: number; count: number } | null>(null); // Gudang dispatch success animation
   const [batchQty, setBatchQty] = React.useState<Record<string, string>>({});
-  const [batchForm, setBatchForm] = React.useState({ suratJalanNo: "", deployMode: "", driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+  const [batchForm, setBatchForm] = React.useState({ suratJalanNo: "", deployMode: "", projectId: "", driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
   const [batchBusy, setBatchBusy] = React.useState(false);
   const [batchError, setBatchError] = React.useState<string | null>(null);
   const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; courier?: string; trackingNo?: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
@@ -938,11 +938,15 @@ export default function LifecycleManager({
   const canBatchShip = !user || user.role === "Admin" || user.role === "Logistik";
   const toggleBatchMode = () => { setBatchMode(m => !m); setBatchSel([]); };
   const toggleBatchSel = (id: string) => setBatchSel(s => (s.includes(id) ? s.filter(x => x !== id) : [...s, id]));
+  // From the Gudang cart, "Buat Surat Jalan" opens the Surat Jalan builder (it does NOT issue yet).
+  // Preserve the cart's Type + per-asset qty; only (re)generate the SJ number + reset the SJ-form fields.
   const openBatch = () => {
-    const q: Record<string, string> = {};
-    batchSel.forEach(id => { const a = assets.find(x => x.id === id); q[id] = String(a?.quantity ?? 1); });
+    if (!batchSel.length) return;
+    if (!batchForm.deployMode) { setBatchError("Pilih Type Kategori (Internal / Event / Distribusi) dulu."); return; }
+    const q: Record<string, string> = { ...batchQty };
+    batchSel.forEach(id => { const a = assets.find(x => x.id === id); if (!q[id]) q[id] = String(a?.quantity ?? 1); });
     setBatchQty(q);
-    setBatchForm({ suratJalanNo: genSuratJalan(), driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
+    setBatchForm(f => ({ ...f, suratJalanNo: f.suratJalanNo || genSuratJalan(), area: "", picPenerima: "", projectId: "" }));
     // PIC dropdown = the selected assets' client (a consolidated dispatch is normally one client).
     const cls = [...new Set(batchSel.map(id => assets.find(x => x.id === id)?.client).filter(Boolean))];
     void loadDirectory(cls.length === 1 ? cls[0] : null);
@@ -962,7 +966,8 @@ export default function LifecycleManager({
     }
     setBatchBusy(true); setBatchError(null);
     const res = await onBatchShip({
-      items, deployMode: batchForm.deployMode || undefined, suratJalanNo: batchForm.suratJalanNo || undefined, driverName: batchForm.driverName.trim(),
+      items, deployMode: batchForm.deployMode || undefined, projectId: batchForm.projectId ? Number(batchForm.projectId) : null,
+      suratJalanNo: batchForm.suratJalanNo || undefined, driverName: batchForm.driverName.trim(),
       vehiclePlate: batchForm.vehiclePlate.trim(), vendorShipping: batchForm.vendorShipping.trim(), departureTime: batchForm.departureTime.trim(),
       area: batchForm.area.trim(), picPenerima: batchForm.picPenerima.trim(),
       courier: batchForm.courier || undefined, trackingUrl: batchForm.trackingUrl.trim() || undefined, trackingNo: batchForm.trackingNo.trim() || undefined, eta: batchForm.eta.trim() || undefined,
@@ -995,6 +1000,12 @@ export default function LifecycleManager({
   // Register-eligible assets (all filters EXCEPT the flow filter) — used both for the flow legend
   // counts and, after applying the flow filter, for the rendered grid.
   const assetById = React.useMemo(() => new Map(assets.map(a => [a.id, a])), [assets]);
+  // Projects offered in the Surat Jalan builder — scoped to the selected assets' client (one SJ = one client).
+  const batchProjects = React.useMemo(() => {
+    const cls = [...new Set(batchSel.map(id => assetById.get(id)?.client).filter(Boolean))];
+    const cl = cls.length === 1 ? cls[0] : null;
+    return projects.filter(p => !cl || !p.client || p.client === cl);
+  }, [batchSel, projects, assetById]);
   const baseAssetsList = React.useMemo(() => {
     return assets.filter(asset => {
       const q = searchQuery.toLowerCase();
@@ -1978,10 +1989,10 @@ export default function LifecycleManager({
                       })}
                     </div>
                     {batchError && <p className="text-[10px] font-semibold text-rose-600">{batchError}</p>}
-                    <button type="button" onClick={e => submitBatch(e as any)} disabled={batchBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">
-                      {batchBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />} Terbitkan Surat Jalan
+                    <button type="button" onClick={openBatch} disabled={batchBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">
+                      <Truck className="h-4 w-4" /> Buat Surat Jalan
                     </button>
-                    <p className="text-[9px] text-slate-400 text-center">Qty dipakai berangkat bersama (satu Surat Jalan); sisanya tetap tercatat di Gudang.</p>
+                    <p className="text-[9px] text-slate-400 text-center">Lanjut isi Surat Jalan (proyek, area, PIC). Qty dipakai berangkat bersama; sisanya tetap di Gudang.</p>
                   </div>
                 )}
               </div>
@@ -3190,81 +3201,69 @@ export default function LifecycleManager({
       {batchOpen && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
-              <div>
-                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block">Pengiriman · Kirim Bersama</span>
-                <h3 className="text-base font-bold text-slate-950">Satu Surat Jalan untuk {batchSel.length} Aset</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">Satu kendaraan/driver menuju satu tujuan.</p>
+            {/* HEADER — judul + Tanggal (read-only) + No. Surat Jalan (auto-generate) */}
+            <div className="p-5 border-b border-slate-100">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block">Pembuatan Dokumen</span>
+                  <h3 className="text-base font-bold text-slate-950">Buat Surat Jalan</h3>
+                </div>
+                <button onClick={() => setBatchOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
               </div>
-              <button onClick={() => setBatchOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Tanggal</span>
+                  <span className="text-xs font-bold text-slate-700 tabular-nums">{new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" })}</span>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">No. Surat Jalan</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="font-mono text-[11px] font-bold text-slate-700 truncate">{batchForm.suratJalanNo}</span>
+                    <button type="button" onClick={() => setBatchForm(f => ({ ...f, suratJalanNo: genSuratJalan() }))} title="Generate ulang nomor" className="shrink-0 text-slate-400 hover:text-blue-600"><RefreshCw className="h-3 w-3" /></button>
+                  </span>
+                </div>
+              </div>
             </div>
             <form onSubmit={submitBatch} className="p-5 space-y-4 text-xs">
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Aset &amp; Qty Kirim</label>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {batchSel.map(id => { const a = assets.find(x => x.id === id); const max = a?.quantity || 1; return (
-                    <div key={id} className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                <label className="font-bold text-slate-700">Nama Proyek</label>
+                <select value={batchForm.projectId} onChange={e => setBatchForm(f => ({ ...f, projectId: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
+                  <option value="">— tanpa proyek —</option>
+                  {batchProjects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">Area / Tujuan</label>
+                <select value={batchForm.area} onChange={e => setBatchForm(f => ({ ...f, area: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
+                  <option value="">— pilih area —</option>
+                  {(batchForm.area && !areaOptions.includes(batchForm.area) ? [batchForm.area, ...areaOptions] : areaOptions).map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+                {areaOptions.length === 0 && <p className="text-[10px] text-amber-600">Belum ada area. Tambahkan di menu Organisasi.</p>}
+              </div>
+              <div className="space-y-1.5"><label className="font-bold text-slate-700">PIC Penerima</label>
+                <select value={batchForm.picPenerima} onChange={e => setBatchForm(f => ({ ...f, picPenerima: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
+                  <option value="">— pilih PIC —</option>
+                  {(batchForm.picPenerima && !picOptions.includes(batchForm.picPenerima) ? [batchForm.picPenerima, ...picOptions] : picOptions).map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+                {picOptions.length === 0 && <p className="text-[10px] text-amber-600">Belum ada PIC untuk client ini — tambahkan di menu User Management.</p>}
+              </div>
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700">Detail Aset yang Dikirim <span className="font-normal text-slate-400">({batchSel.length} aset · {batchSel.reduce((s, id) => s + (Math.floor(Number(batchQty[id])) || 0), 0)} unit)</span></label>
+                <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+                  {batchSel.map(id => { const a = assetById.get(id); const use = Math.floor(Number(batchQty[id])) || 0; const stok = a?.quantity || 0; return (
+                    <div key={id} className="flex items-center gap-2 px-3 py-2">
                       <span className="min-w-0 flex-1">
                         <span className="block text-[11px] font-bold text-slate-800 truncate">{a?.name || id}</span>
-                        <span className="block text-[9px] text-slate-400 font-mono">{id} · stok {max}</span>
+                        <span className="block text-[9px] text-slate-400 font-mono">{id}</span>
                       </span>
-                      <input type="number" min={1} max={max} value={batchQty[id] ?? ""} onChange={e => setBatchQty(q => ({ ...q, [id]: e.target.value }))} className="w-16 bg-white border border-slate-200 px-2 py-1 rounded-md text-xs text-right outline-none focus:ring-1 focus:ring-blue-500" />
-                      <button type="button" onClick={() => { toggleBatchSel(id); setBatchQty(q => { const n = { ...q }; delete n[id]; return n; }); }} className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"><X className="h-3.5 w-3.5" /></button>
+                      <span className="text-right shrink-0"><span className="text-xs font-extrabold text-slate-700 tabular-nums">{use}</span><span className="text-[9px] text-slate-400"> / {stok} unit</span></span>
                     </div>
                   ); })}
                 </div>
               </div>
-              <div className="space-y-1.5"><label className="font-bold text-slate-700">Nomor Surat Jalan</label>
-                <div className="flex gap-2">
-                  <input value={batchForm.suratJalanNo} readOnly className="flex-1 bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg font-mono text-slate-700 text-xs" />
-                  <button type="button" onClick={() => setBatchForm(f => ({ ...f, suratJalanNo: genSuratJalan() }))} className="px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" /></button>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Nama Driver <span className="text-rose-500">*</span></label><input value={batchForm.driverName} onChange={e => setBatchForm(f => ({ ...f, driverName: e.target.value }))} className={BATCH_INP} placeholder="contoh: Budi" /></div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Plat Kendaraan</label><input value={batchForm.vehiclePlate} onChange={e => setBatchForm(f => ({ ...f, vehiclePlate: e.target.value }))} className={BATCH_INP} placeholder="B 1234 XYZ" /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Vendor Logistik</label>
-                  <select value={batchForm.vendorShipping} onChange={e => setBatchForm(f => ({ ...f, vendorShipping: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
-                    <option value="">— pilih vendor —</option>
-                    {(batchForm.vendorShipping && !COURIERS.includes(batchForm.vendorShipping) ? [batchForm.vendorShipping, ...COURIERS] : COURIERS).map(v => <option key={v} value={v}>{v}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Waktu Berangkat</label><input type="time" value={batchForm.departureTime} onChange={e => setBatchForm(f => ({ ...f, departureTime: e.target.value }))} className={BATCH_INP} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Tujuan (Area) <span className="text-rose-500">*</span></label>
-                  <select value={batchForm.area} onChange={e => setBatchForm(f => ({ ...f, area: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
-                    <option value="">— pilih area —</option>
-                    {(batchForm.area && !areaOptions.includes(batchForm.area) ? [batchForm.area, ...areaOptions] : areaOptions).map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                  {areaOptions.length === 0 && <p className="text-[10px] text-amber-600">Belum ada area. Tambahkan di menu Organisasi.</p>}
-                </div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">PIC Penerima</label>
-                  <select value={batchForm.picPenerima} onChange={e => setBatchForm(f => ({ ...f, picPenerima: e.target.value }))} className={`${BATCH_INP} cursor-pointer`}>
-                    <option value="">— pilih PIC —</option>
-                    {(batchForm.picPenerima && !picOptions.includes(batchForm.picPenerima) ? [batchForm.picPenerima, ...picOptions] : picOptions).map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                  {picOptions.length === 0 && <p className="text-[10px] text-amber-600">Belum ada PIC untuk client ini — tambahkan di menu User Management.</p>}
-                </div>
-              </div>
-              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 space-y-2.5">
-                <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Tracking (opsional)</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5"><label className="font-bold text-slate-700">Kurir / Vendor</label>
-                    <select value={batchForm.courier} onChange={e => setBatchForm(f => ({ ...f, courier: e.target.value }))} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
-                      <option value="">— pilih kurir —</option>{COURIERS.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5"><label className="font-bold text-slate-700">ETA</label><input value={batchForm.eta} onChange={e => setBatchForm(f => ({ ...f, eta: e.target.value }))} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: 2 hari" /></div>
-                </div>
-                <div className="space-y-1.5"><label className="font-bold text-slate-700">Link Tracking</label><input value={batchForm.trackingUrl} onChange={e => setBatchForm(f => ({ ...f, trackingUrl: e.target.value }))} className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://…" /></div>
-              </div>
               {batchError && <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4 shrink-0" /><span>{batchError}</span></div>}
               <div className="pt-2 border-t border-slate-100 flex justify-end gap-3">
                 <button type="button" onClick={() => setBatchOpen(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg">Batal</button>
-                <button type="submit" disabled={batchBusy || batchSel.length === 0} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg flex items-center gap-1.5">{batchBusy && <Loader2 className="h-4 w-4 animate-spin" />}Terbitkan Surat Jalan</button>
+                <button type="submit" disabled={batchBusy || batchSel.length === 0} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg flex items-center gap-1.5">{batchBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}Terbitkan Surat Jalan</button>
               </div>
             </form>
           </div>

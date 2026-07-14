@@ -749,7 +749,6 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
   // Deployment TYPE chosen at Gudang dispatch (not pre-assigned to the asset) — stamped onto the
   // shipped record so the downstream flow (Event venue / Distribusi toko / Internal) follows the choice.
   const deployMode: string | null = ["Internal", "Event", "Distribusi"].includes(String(b.deployMode || "")) ? String(b.deployMode) : null;
-  const depOf = (a: any) => deployMode ? { deployment: { ...((a.stageDetails as any)?.deployment || {}), mode: deployMode } } : {};
   const vehiclePlate = String(b.vehiclePlate || "").trim();
   // Tujuan/Area & driver are no longer captured at Gudang dispatch (dropped from the cart) — they are
   // filled in the next phase (Surat Jalan). So they're optional here; the Surat Jalan is issued with
@@ -780,6 +779,20 @@ app.post("/api/assets/batch-ship", requireAuth, wrap(async (req: AuthedReq, res)
   const batchClients = [...new Set(plan.map(p => p.asset.client || ""))];
   if (batchClients.length > 1) return res.status(400).json({ error: "Satu Surat Jalan tidak boleh mencampur aset dari lebih dari satu client." });
   if (req.user!.role === "PIC" && (batchClients[0] || null) !== (req.user!.client || null)) return res.status(403).json({ error: "Aset di luar client Anda." });
+
+  // "Nama Proyek" picked in the Surat Jalan builder — validated to belong to the batch client, then
+  // recorded on each shipped record's deployment (JSONB) alongside the Type. Invalid/foreign → dropped.
+  let projectId: number | null = b.projectId != null && Number.isFinite(Number(b.projectId)) ? Number(b.projectId) : null;
+  let projectName = "";
+  if (projectId != null) {
+    const pr = (await q(`select name, client from projects where id=$1`, [projectId])).rows;
+    if (pr.length && (pr[0].client || "") === (batchClients[0] || "")) projectName = pr[0].name || "";
+    else projectId = null;
+  }
+  // Stamp Type (deployMode) + project onto the deployment slice, preserving any existing deployment data.
+  const depOf = (a: any) => (deployMode || projectId != null)
+    ? { deployment: { ...((a.stageDetails as any)?.deployment || {}), ...(deployMode ? { mode: deployMode } : {}), ...(projectId != null ? { projectId, projectName } : {}) } }
+    : {};
 
   // The batchId (= Surat Jalan number) drives lockstep group movement, so it must be UNIQUE — otherwise
   // two dispatches sharing a number would advance together. Reject a duplicate operator-supplied number;

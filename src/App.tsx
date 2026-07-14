@@ -67,7 +67,8 @@ import { api, getToken, type AuthUser } from "./api";
 // Fase 1 (Request/WO) & 2 (Produksi) removed — assets are added in Master Data (born in Gudang/Fase 3).
 const PHASE_NAV: { stage: number; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { stage: 3, label: "Gudang", Icon: Home },
-  { stage: 4, label: "Surat Jalan", Icon: Truck },
+  // Fase 2 "Surat Jalan" has no sidebar shortcut — the SJ is created from the Gudang cart flow.
+  // Assets still land at Fase 2; view them via Asset Register. (Udin 2026-07-14)
   { stage: 5, label: "Transit", Icon: Compass },
   { stage: 6, label: "Terpasang", Icon: MapPin },
   { stage: 7, label: "Audit", Icon: ShieldCheck },
@@ -301,7 +302,7 @@ export default function App() {
   };
   // Consolidated dispatch: many assets → one Surat Jalan / driver / destination.
   const handleBatchShip = async (
-    p: { items: { id: string; qty: number }[]; deployMode?: string; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
+    p: { items: { id: string; qty: number }[]; deployMode?: string; projectId?: number | null; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
   ): Promise<{ ok: boolean; error?: string; suratJalanNo?: string }> => {
     try { const r = await api.batchShip(p); await refresh(); return { ok: true, suratJalanNo: r.suratJalanNo }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal mengirim bersama." }; }

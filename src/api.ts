@@ -171,7 +171,7 @@ export const api = {
   },
   // Consolidated dispatch: many assets → one Surat Jalan / driver / destination (qty per asset).
   batchShip(p: {
-    items: { id: string; qty: number }[]; deployMode?: string;
+    items: { id: string; qty: number }[]; deployMode?: string; projectId?: number | null;
     suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string;
     area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string;
   }): Promise<{ ok: boolean; suratJalanNo: string; count: number; assets: Asset[] }> {

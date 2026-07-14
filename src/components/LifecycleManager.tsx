@@ -1865,16 +1865,25 @@ export default function LifecycleManager({
             {/* LEFT: specs / QR / financials */}
             <div className="p-6 md:w-5/12 space-y-5 flex-shrink-0 bg-slate-50/50">
               <div className="flex justify-between items-start gap-2">
-                <span className="font-mono text-xs bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded border border-blue-200">{detailAsset.id}</span>
+                <span className="font-mono text-xs bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded border border-blue-200">{hasGroup ? `${groupSameStage.length} ASET` : detailAsset.id}</span>
                 <button onClick={() => setDetailAssetId(null)} className="md:hidden text-slate-400 hover:text-slate-600">
                   <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="space-y-1">
-                <h3 className="font-bold text-slate-950 text-base leading-snug">{detailAsset.name}</h3>
-                <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">{detailAsset.category}</p>
-              </div>
+              {/* Grouped shipment → present the whole SHIPMENT as the subject (not one asset). */}
+              {hasGroup ? (
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-widest text-blue-600 font-bold">Pengiriman Bersama</p>
+                  <h3 className="font-bold text-slate-950 text-base leading-snug">{groupSameStage.length} aset · satu Surat Jalan</h3>
+                  {detailBatchId && <p className="text-slate-400 text-xs font-mono">{detailBatchId}</p>}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <h3 className="font-bold text-slate-950 text-base leading-snug">{detailAsset.name}</h3>
+                  <p className="text-slate-400 text-xs uppercase tracking-wider font-semibold">{detailAsset.category}</p>
+                </div>
+              )}
 
               {(() => {
                 // Identity + live status card (replaces the old non-functional QR placeholder block).
@@ -1941,7 +1950,7 @@ export default function LifecycleManager({
               )}
 
               {/* Spesifikasi — only rows that are actually filled (no "—" clutter); whole block hides if empty. */}
-              {(() => {
+              {!hasGroup && (() => {
                 const s: any = detailAsset.specs || {};
                 const rows: { label: string; val?: string; mono?: boolean }[] = [
                   { label: "Merk / Brand", val: s.brand },
@@ -1965,7 +1974,7 @@ export default function LifecycleManager({
               })()}
 
               {/* Keuangan — only non-zero rows; whole block hides when the asset has no book value. */}
-              {(() => {
+              {!hasGroup && (() => {
                 const f: any = detailAsset.financials || {};
                 const rows: { label: string; val: number; accent?: boolean }[] = [
                   { label: "Harga Pengadaan", val: Number(f.purchaseCost) || 0 },

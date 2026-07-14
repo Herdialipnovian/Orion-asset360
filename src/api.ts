@@ -311,6 +311,10 @@ export const api = {
   completeInstall(id: string, p: { merchandiserId: number; doneQty?: number; note?: string }): Promise<{ asset: Asset; installedQty: number; fullyInstalled: boolean }> {
     return req(`/assets/${encodeURIComponent(id)}/install/complete`, { method: "POST", body: JSON.stringify(p) });
   },
+  // Apply a location-chain action to a WHOLE shipment group at once (one Surat Jalan).
+  groupVenue(p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }): Promise<{ ok: boolean; count: number; skipped: number; suratJalanNo?: string; assets: Asset[] }> {
+    return req(`/assets/group-venue`, { method: "POST", body: JSON.stringify(p) });
+  },
   auditSample(id: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }): Promise<{ asset: Asset; coverage: any }> {
     return req(`/assets/${encodeURIComponent(id)}/audit-sample`, { method: "POST", body: JSON.stringify({ samples, ...(meta || {}) }) });
   },

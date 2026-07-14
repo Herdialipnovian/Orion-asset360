@@ -362,6 +362,7 @@ interface LifecycleManagerProps {
   onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onBatchShip?: (p: { items: { id: string; qty: number }[]; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
+  onGroupVenue?: (p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
   onCompleteInstall?: (assetId: string, p: { merchandiserId: number; doneQty?: number; note?: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -460,6 +461,7 @@ export default function LifecycleManager({
   onArriveWarehouse,
   onBatchShip,
   onGroupAdvance,
+  onGroupVenue,
   onDistribute,
   onPlaceToko,
   onCompleteInstall,
@@ -692,9 +694,18 @@ export default function LifecycleManager({
     [assets, detailBatchId]
   );
   const groupSameStage = detailAsset ? groupMembers.filter(a => a.currentStage === detailAsset.currentStage) : [];
-  // Can the CURRENT gate transition be applied to the whole group? (movement stages only, ≥2 members)
+  // A group of ≥2 members at the same stage can be processed together — for ANY action.
+  const hasGroup = !!(detailBatchId && groupSameStage.length >= 2);
+  // Master toggle (action panel): apply venue/location actions to the whole group. Default ON for a group.
+  const [groupActs, setGroupActs] = React.useState(true);
+  // Re-arm the default only when the SHIPMENT GROUP changes — switching between members of the same
+  // group preserves a deliberate OFF choice (don't silently re-enable on every asset switch).
+  React.useEffect(() => { setGroupActs(true); }, [detailBatchId]);
+  const useGroupVenue = !!(onGroupVenue && hasGroup && groupActs);
+  // Can the CURRENT gate transition be applied to the whole group? Any LEGAL ladder step (audit/
+  // maintenance/penarikan/POD/…), ≥2 same-stage members.
   const groupable = !!(onGroupAdvance && detailAsset && transitionTarget != null &&
-    GROUP_NEXT[detailAsset.currentStage] === transitionTarget && detailBatchId && groupSameStage.length >= 2);
+    (TRANSITIONS[detailAsset.currentStage] || []).includes(transitionTarget) && detailBatchId && groupSameStage.length >= 2);
 
   const openHandover = () => {
     setHandoverForm({ custodianId: "", handoverDate: new Date().toISOString().slice(0, 10), signature: "", note: "" });
@@ -734,21 +745,34 @@ export default function LifecycleManager({
     if (venueForm.trackingUrl && !/^https?:\/\//i.test(venueForm.trackingUrl.trim())) return setVenueError("Link tracking harus diawali http:// atau https://.");
     setVenueBusy(true);
     setVenueError(null);
-    const res = await onDeployVenue(detailAsset.id, {
-      locationId: Number(venueForm.locationId),
-      pic: venueForm.pic || undefined,
-      setupDate: venueForm.setupDate || undefined,
-      note: venueForm.note || undefined,
-      signatureBase64: venueForm.signature || undefined,
-      projectId: detailAsset.projectId ?? undefined,
-      suratJalanNo: venueForm.suratJalanNo || undefined,
-      courier: venueForm.courier || undefined,
-      trackingUrl: venueForm.trackingUrl.trim() || undefined,
-      trackingNo: venueForm.trackingNo.trim() || undefined,
-      eta: venueForm.eta.trim() || undefined
-    });
+    const res = useGroupVenue
+      ? await onGroupVenue!({
+          batchId: detailBatchId!, op: "deploy",
+          locationId: Number(venueForm.locationId),
+          pic: venueForm.pic || undefined,
+          setupDate: venueForm.setupDate || undefined,
+          suratJalanNo: venueForm.suratJalanNo || undefined,
+          courier: venueForm.courier || undefined,
+          trackingUrl: venueForm.trackingUrl.trim() || undefined,
+          trackingNo: venueForm.trackingNo.trim() || undefined,
+          eta: venueForm.eta.trim() || undefined
+        })
+      : await onDeployVenue!(detailAsset.id, {
+          locationId: Number(venueForm.locationId),
+          pic: venueForm.pic || undefined,
+          setupDate: venueForm.setupDate || undefined,
+          note: venueForm.note || undefined,
+          signatureBase64: venueForm.signature || undefined,
+          projectId: detailAsset.projectId ?? undefined,
+          suratJalanNo: venueForm.suratJalanNo || undefined,
+          courier: venueForm.courier || undefined,
+          trackingUrl: venueForm.trackingUrl.trim() || undefined,
+          trackingNo: venueForm.trackingNo.trim() || undefined,
+          eta: venueForm.eta.trim() || undefined
+        });
     setVenueBusy(false);
-    if (!res.ok) return setVenueError(res.error || "Gagal mengirim aset ke venue.");
+    if (!res.ok) return setVenueError(res.error || "Gagal mengirim aset ke lokasi.");
+    if ((res as any).skipped) return setVenueError(`${(res as any).count} aset dikirim · ${(res as any).skipped} dilewati (status tidak sesuai).`);
     setVenueOpen(false);
   };
   const openReturn = () => {
@@ -763,30 +787,42 @@ export default function LifecycleManager({
     if (returnForm.trackingUrl && !/^https?:\/\//i.test(returnForm.trackingUrl.trim())) return setReturnError("Link tracking harus diawali http:// atau https://.");
     setReturnBusy(true);
     setReturnError(null);
-    const res = await onShipReturn(detailAsset.id, {
-      suratJalanNo: returnForm.suratJalanNo || undefined,
-      courier: returnForm.courier || undefined,
-      trackingUrl: returnForm.trackingUrl.trim() || undefined,
-      trackingNo: returnForm.trackingNo.trim() || undefined,
-      eta: returnForm.eta.trim() || undefined
-    });
+    const res = useGroupVenue
+      ? await onGroupVenue!({
+          batchId: detailBatchId!, op: "ship-return",
+          suratJalanNo: returnForm.suratJalanNo || undefined,
+          courier: returnForm.courier || undefined,
+          trackingUrl: returnForm.trackingUrl.trim() || undefined,
+          trackingNo: returnForm.trackingNo.trim() || undefined,
+          eta: returnForm.eta.trim() || undefined
+        })
+      : await onShipReturn!(detailAsset.id, {
+          suratJalanNo: returnForm.suratJalanNo || undefined,
+          courier: returnForm.courier || undefined,
+          trackingUrl: returnForm.trackingUrl.trim() || undefined,
+          trackingNo: returnForm.trackingNo.trim() || undefined,
+          eta: returnForm.eta.trim() || undefined
+        });
     setReturnBusy(false);
     if (!res.ok) return setReturnError(res.error || "Gagal mengirim aset kembali ke gudang.");
+    if ((res as any).skipped) return setReturnError(`${(res as any).count} aset dikirim balik · ${(res as any).skipped} dilewati (status tidak sesuai).`);
     setReturnOpen(false);
   };
   const doArriveVenue = async () => {
-    if (!detailAsset || !onArriveVenue || arriveBusy) return;
+    if (!detailAsset || arriveBusy) return;
     setArriveBusy(true); setArriveError(null);
-    const res = await onArriveVenue(detailAsset.id);
+    const res = useGroupVenue ? await onGroupVenue!({ batchId: detailBatchId!, op: "arrive-venue" }) : await onArriveVenue!(detailAsset.id);
     setArriveBusy(false);
-    if (!res.ok) setArriveError(res.error || "Gagal mengonfirmasi kedatangan di venue.");
+    if (!res.ok) setArriveError(res.error || "Gagal mengonfirmasi kedatangan di lokasi.");
+    else if ((res as any).skipped) setArriveError(`${(res as any).count} aset dikonfirmasi tiba · ${(res as any).skipped} dilewati.`);
   };
   const doArriveWarehouse = async () => {
-    if (!detailAsset || !onArriveWarehouse || arriveBusy) return;
+    if (!detailAsset || arriveBusy) return;
     setArriveBusy(true); setArriveError(null);
-    const res = await onArriveWarehouse(detailAsset.id);
+    const res = useGroupVenue ? await onGroupVenue!({ batchId: detailBatchId!, op: "arrive-warehouse" }) : await onArriveWarehouse!(detailAsset.id);
     setArriveBusy(false);
     if (!res.ok) setArriveError(res.error || "Gagal mengonfirmasi kedatangan di gudang.");
+    else if ((res as any).skipped) setArriveError(`${(res as any).count} aset tiba di gudang · ${(res as any).skipped} dilewati.`);
   };
 
   // ── Confirm pemasangan FROM THE CMS (no mobile) — Admin/PIC for Event assignments, Admin for
@@ -814,6 +850,25 @@ export default function LifecycleManager({
     const res = await onPlaceToko(detailAsset.id, { locationId });
     setConfirmBusy(null);
     if (!res.ok) setConfirmError(res.error || "Gagal konfirmasi pemasangan.");
+  };
+  // Confirm the install portion of EVERY group member at once (each member's own Merchandiser portion).
+  const doConfirmInstallGroup = async () => {
+    if (!onCompleteInstall || confirmBusy) return;
+    const tasks: { id: string; mid: number }[] = [];
+    for (const m of groupSameStage) {
+      const asg: any[] = (m.stageDetails as any)?.deployment?.assignments || [];
+      for (const a of asg) {
+        const dq = a.doneQty != null ? Number(a.doneQty) : a.status === "done" ? Number(a.qty) : 0;
+        if (a.merchandiserId != null && dq < Number(a.qty)) tasks.push({ id: m.id, mid: Number(a.merchandiserId) });
+      }
+    }
+    if (!tasks.length) return;
+    if (!window.confirm(`Tandai pemasangan TERPASANG untuk ${tasks.length} porsi di ${groupSameStage.length} aset grup?`)) return;
+    setConfirmBusy("group"); setConfirmError(null);
+    let fail = 0;
+    for (const t of tasks) { const r = await onCompleteInstall(t.id, { merchandiserId: t.mid }); if (!r.ok) fail++; }
+    setConfirmBusy(null);
+    if (fail) setConfirmError(`${fail} dari ${tasks.length} porsi gagal dikonfirmasi.`);
   };
 
   // ── Consolidated dispatch ("Kirim Bersama") — many Gudang assets → one Surat Jalan ──
@@ -1094,7 +1149,7 @@ export default function LifecycleManager({
     // Default the "process whole group" toggle ON when this is a groupable movement transition.
     const bId = batchIdOf(detailAsset);
     const sameStage = bId ? assets.filter(a => batchIdOf(a) === bId && a.currentStage === detailAsset.currentStage).length : 0;
-    setGroupMode(!!onGroupAdvance && GROUP_NEXT[detailAsset.currentStage] === target && !!bId && sameStage >= 2);
+    setGroupMode(!!onGroupAdvance && groupActs && (TRANSITIONS[detailAsset.currentStage] || []).includes(target) && !!bId && sameStage >= 2);
     const cfg = gateFor(target, detailAsset.currentStage, detailAsset);
     const existing = (detailAsset.stageDetails as any)[cfg.stageKey] || {};
     const init: Record<string, any> = {};
@@ -1291,7 +1346,7 @@ export default function LifecycleManager({
     }
 
     // Group movement: apply this gate to the WHOLE shipment group (same batchId, same stage) at once.
-    if (groupMode && onGroupAdvance && GROUP_NEXT[fromStage] === transitionTarget && batchIdOf(detailAsset)) {
+    if (groupMode && onGroupAdvance && (TRANSITIONS[fromStage] || []).includes(transitionTarget) && batchIdOf(detailAsset)) {
       const gres = await onGroupAdvance({ batchId: batchIdOf(detailAsset)!, fromStage, toStage: transitionTarget, stageKey: cfg.stageKey, section, meta: { logAction: meta.logAction, operator: meta.operator } });
       if (!gres.ok) { setGateError(gres.error || "Gagal memproses grup pengiriman."); return; }
       closeGate();
@@ -2024,6 +2079,12 @@ export default function LifecycleManager({
                       {canConfirmInstall && onCompleteInstall && !full && (
                         <p className="text-[9px] text-slate-500 leading-snug">Merchandiser melapor dari aplikasi mobile. Sebagai {user?.role}, kamu bisa <strong>Konfirmasi</strong> pemasangan di sini (foto lapangan tidak wajib untuk konfirmasi kantor).</p>
                       )}
+                      {hasGroup && groupActs && canConfirmInstall && onCompleteInstall && !full && (
+                        <button onClick={doConfirmInstallGroup} disabled={confirmBusy === "group"}
+                          className="w-full flex items-center justify-center gap-1.5 text-[10px] font-extrabold px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-50">
+                          <MapPin className="h-3.5 w-3.5" />{confirmBusy === "group" ? "Memproses…" : `Konfirmasi Pemasangan Seluruh Grup (${groupSameStage.length} aset)`}
+                        </button>
+                      )}
                       {confirmError && <p className="text-[10px] font-semibold text-rose-600">{confirmError}</p>}
                       {Array.isArray(d.verifiedItems) && d.verifiedItems.length > 0 && (
                         <div className="flex flex-wrap gap-1">
@@ -2269,12 +2330,17 @@ export default function LifecycleManager({
                     </div>
                   </div>
 
-                  {/* Shipment group banner — this asset was dispatched together with others (Kirim Bersama). */}
-                  {detailBatchId && groupMembers.length >= 2 && detailAsset.currentStage >= 4 && detailAsset.currentStage <= 9 && (
-                    <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 text-[11px] text-blue-800">
-                      <Truck className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                      <span><strong>Grup {detailBatchId}</strong> · {groupMembers.length} aset{GROUP_NEXT[detailAsset.currentStage] ? " · bisa dipindah sekaligus (centang di form)" : ""}</span>
-                    </div>
+                  {/* Shipment group — dispatched together (Kirim Bersama). One toggle makes EVERY action
+                      (pindah lokasi / balik gudang / konfirmasi tiba / audit / maintenance / penarikan)
+                      apply to all members at this stage at once, sharing one Surat Jalan. */}
+                  {hasGroup && detailAsset.currentStage >= 4 && detailAsset.currentStage <= 9 && (
+                    <label className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2.5 text-[11px] text-blue-800 cursor-pointer">
+                      <input type="checkbox" checked={groupActs} onChange={e => setGroupActs(e.target.checked)} className="mt-0.5 h-4 w-4 rounded accent-blue-600 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block font-bold flex items-center gap-1.5"><Truck className="h-3.5 w-3.5 shrink-0" /> Proses untuk seluruh grup ({groupSameStage.length} aset)</span>
+                        <span className="block text-[10px] text-blue-600/90 leading-snug">Grup {detailBatchId} — semua aset yang berangkat bersama &amp; masih di fase ini ikut pindah sekaligus (satu Surat Jalan). Matikan untuk memproses aset ini saja.</span>
+                      </span>
+                    </label>
                   )}
 
                   {/* Internal custodian handover moved to the dedicated "Aset Internal" menu. */}

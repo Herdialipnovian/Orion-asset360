@@ -870,7 +870,9 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
   const stageKey = String(b.stageKey || "").trim();
   const section = (b.section && typeof b.section === "object" && !Array.isArray(b.section)) ? b.section : {};
   if (!batchId) return res.status(400).json({ error: "Grup pengiriman (batchId) wajib." });
-  if (GROUP_NEXT[fromStage] !== toStage) return res.status(422).json({ error: `Perpindahan grup Fase ${fromStage} → ${toStage} tidak diizinkan.` });
+  // Any LEGAL ladder transition may be applied to the whole group (audit 6→7, maintenance 6→8,
+  // penarikan 6→9, redeploy, POD 5→6, …) — not just a single hard-coded next step.
+  if (!isLegalTransition(fromStage, toStage)) return res.status(422).json({ error: `Perpindahan grup Fase ${fromStage} → ${toStage} tidak sah.` });
   const allowed = STAGE_ROLE[toStage] || [];
   if (req.user!.role !== "Admin" && !allowed.includes(req.user!.role)) return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang untuk perpindahan ini.` });
   const now = new Date().toISOString();
@@ -880,7 +882,7 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
   try {
     await tx(async c => {
       const { rows } = await c.query(
-        `select id, client, current_location, stage_details from assets
+        `select id, client, current_location, stage_details, audit_score, maintenance_status from assets
          where stage_details->'shipping'->>'batchId' = $1 and current_stage = $2 for update`,
         [batchId, fromStage]
       );
@@ -891,10 +893,36 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
         throw Object.assign(new Error("Grup ini memuat aset di luar client Anda."), { http: 403 });
       }
       for (const r of rows) {
-        const sd = r.stage_details || {};
-        const merged = stageKey ? { ...sd, [stageKey]: { ...(sd[stageKey] || {}), ...section } } : sd;
-        const loc = computeLocation(toStage, undefined, r.client, r.current_location);
-        await c.query(`update assets set current_stage=$2, current_location=$3, stage_details=$4::jsonb, updated_at=now() where id=$1`, [r.id, toStage, loc, JSON.stringify(merged)]);
+        const sd: any = r.stage_details || {};
+        let details: any = stageKey ? { ...sd, [stageKey]: { ...(sd[stageKey] || {}), ...section } } : { ...sd };
+        // ── Replicate the per-asset /stage side-effects for EACH member (group must not diverge) ──
+        // Entering Fase 6 (redeploy 7/8/9→6 or POD 5→6) starts a FRESH install cycle.
+        if (toStage === 6 && fromStage !== 6) {
+          const dep: any = { ...(details.deployment || {}) };
+          delete dep.assignments; delete dep.installedQty; delete dep.fullyInstalled;
+          details.deployment = dep;
+        }
+        // Returning to Gudang (Fase 3) clears the deployment operational state (keep the project link).
+        if (toStage === 3 && fromStage !== 3) {
+          const dep: any = details.deployment || {};
+          details = { ...details, deployment: { projectId: dep.projectId, projectName: dep.projectName } };
+        }
+        // Maintenance ticket must be UNIQUE per asset (a shared section would clone one id onto all).
+        if (toStage === 8 && details.maintenance?.activeTicketId) {
+          details.maintenance = { ...details.maintenance, activeTicketId: `${details.maintenance.activeTicketId}-${r.id}` };
+        }
+        // Denormalized columns (drive dashboard alerts/KPIs) — mirror the single-asset path.
+        let maintenanceStatus = r.maintenance_status;
+        if (toStage === 8) maintenanceStatus = "REPAIRING";
+        else if (fromStage === 8) maintenanceStatus = "RESOLVED";
+        else if (toStage === 9 || toStage === 10) maintenanceStatus = "NONE";
+        if (b.meta?.maintenanceStatus) maintenanceStatus = b.meta.maintenanceStatus;
+        const auditScore = toStage === 7 ? (details.audit?.scoring ?? r.audit_score) : r.audit_score;
+        const loc = computeLocation(toStage, details?.inventory?.warehouseName, r.client, r.current_location);
+        await c.query(
+          `update assets set current_stage=$2, current_location=$3, stage_details=$4::jsonb, audit_score=$5, maintenance_status=$6, updated_at=now() where id=$1`,
+          [r.id, toStage, loc, JSON.stringify(details), auditScore, maintenanceStatus]
+        );
         affected.push(r.id);
       }
     });
@@ -919,6 +947,107 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
     surfaceIds = [...surfaced];
   }
   res.json({ ok: true, count: affected.length, assets: (await Promise.all(surfaceIds.map(id => getAsset(id)))).filter(Boolean) });
+}));
+
+// ── Group venue ops: apply a location-chain action to EVERY member of a shipment group (same batchId,
+//    Fase 6) at once, sharing ONE Surat Jalan. Mirrors the per-asset deploy-venue / arrive-venue /
+//    ship-return / arrive-warehouse. Members not in the right sub-state are skipped (reported), never errored.
+app.post("/api/assets/group-venue", requireAuth, wrap(async (req: AuthedReq, res) => {
+  const b = req.body || {};
+  const batchId = String(b.batchId || "").trim();
+  const op = String(b.op || "").trim();
+  if (!batchId) return res.status(400).json({ error: "Grup pengiriman (batchId) wajib." });
+  if (!["deploy", "arrive-venue", "ship-return", "arrive-warehouse"].includes(op)) return res.status(400).json({ error: "Operasi grup tidak dikenal." });
+  // Role gate mirrors the per-asset endpoints: arrive-at-Gudang = Logistik/Admin; deploy / arrive-venue /
+  // ship-return = Logistik/PIC/Admin (per-asset ship-return also allows PIC).
+  const roleOk = req.user!.role === "Admin" || (op === "arrive-warehouse" ? req.user!.role === "Logistik" : ["Logistik", "PIC"].includes(req.user!.role));
+  if (!roleOk) return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang untuk operasi grup ini.` });
+
+  const now = new Date().toISOString().slice(0, 10);
+  const sharedSJ = String(b.suratJalanNo || "").trim() || `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
+  const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
+  if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
+  const shipMeta: any = { courier: b.courier ? String(b.courier).trim() : undefined, trackingUrl: trackingUrl || undefined, trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined, eta: b.eta ? String(b.eta).trim() : undefined };
+
+  let loc: any = null;
+  if (op === "deploy") {
+    const locId = Number(b.locationId);
+    if (!locId) return res.status(400).json({ error: "Venue/lokasi wajib dipilih." });
+    const { rows: lr } = await q(`select id, name, area from locations where id=$1`, [locId]);
+    if (!lr[0]) return res.status(400).json({ error: "Venue/lokasi tidak ditemukan." });
+    loc = lr[0];
+  }
+
+  const affected: string[] = []; const skipped: string[] = [];
+  try {
+    await tx(async c => {
+      const { rows } = await c.query(
+        `select id, client, stage_details from assets
+         where stage_details->'shipping'->>'batchId' = $1 and current_stage = 6 for update`,
+        [batchId]
+      );
+      if (!rows.length) throw Object.assign(new Error("Tidak ada anggota grup di Fase 6."), { http: 422 });
+      if (req.user!.role === "PIC" && rows.some(r => (r.client || null) !== (req.user!.client || null))) {
+        throw Object.assign(new Error("Grup ini memuat aset di luar client Anda."), { http: 403 });
+      }
+      for (const r of rows) {
+        const sd: any = r.stage_details || {};
+        const dep: any = { ...(sd.deployment || {}) };
+        const legs: any[] = Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : [];
+        const transitLeg = legs.find(l => l.status === "transit");
+        const retTransit = dep.returnShipment?.status === "transit";
+        if (op === "deploy") {
+          // Distribusi fan-out assets keep their own toko flow; can't be venue-relocated.
+          if (transitLeg || retTransit || dep.mode === "Distribusi" || (Array.isArray(dep.placements) && dep.placements.length)) { skipped.push(r.id); continue; }
+          for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
+          const seq = legs.reduce((m, l) => Math.max(m, l.seq || 0), 0) + 1;
+          legs.push({ locationId: loc.id, venue: loc.name, area: loc.area || undefined, pic: b.pic ? String(b.pic).trim() : undefined, seq, status: "transit", setupDate: b.setupDate || undefined, shipping: { suratJalanNo: sharedSJ, ...shipMeta, shippedAt: now } });
+          dep.legs = legs; dep.currentLegSeq = seq; dep.mode = "Event";
+          await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, `Dalam pengiriman → Venue: ${loc.name}${loc.area ? ` (${loc.area})` : ""}`, JSON.stringify({ ...sd, deployment: dep })]);
+          affected.push(r.id);
+        } else if (op === "arrive-venue") {
+          if (!transitLeg) { skipped.push(r.id); continue; }
+          transitLeg.status = "active"; transitLeg.arrivedAt = now; if (!transitLeg.setupDate) transitLeg.setupDate = now;
+          dep.legs = legs; dep.currentLegSeq = transitLeg.seq;
+          await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, `Venue: ${transitLeg.venue}${transitLeg.area ? ` (${transitLeg.area})` : ""}`, JSON.stringify({ ...sd, deployment: dep })]);
+          affected.push(r.id);
+        } else if (op === "ship-return") {
+          // Only Event/venue members return this way. A Distribusi (toko fan-out) member sharing the
+          // batch keeps its own flow — never sweep it into an Event return (would wipe its placements).
+          if (transitLeg || retTransit || dep.mode === "Distribusi" || (Array.isArray(dep.placements) && dep.placements.length)) { skipped.push(r.id); continue; }
+          for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
+          dep.legs = legs;
+          dep.returnShipment = { suratJalanNo: sharedSJ, ...shipMeta, shippedAt: now, status: "transit" };
+          await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, `Dalam pengiriman → Gudang`, JSON.stringify({ ...sd, deployment: dep })]);
+          affected.push(r.id);
+        } else { // arrive-warehouse
+          if (!retTransit) { skipped.push(r.id); continue; }
+          const ret = { ...(dep.returnShipment || {}), status: "done", arrivedAt: now };
+          const cleared: any = { projectId: dep.projectId, projectName: dep.projectName, returnShipment: ret };
+          await c.query(`update assets set current_stage=3, current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, "Gudang Utama Origin", JSON.stringify({ ...sd, deployment: cleared })]);
+          affected.push(r.id);
+        }
+      }
+    });
+  } catch (e: any) {
+    if (e && e.http) return res.status(e.http).json({ error: e.message });
+    throw e;
+  }
+
+  const LOGV: any = { deploy: `Kirim grup ke venue ${loc?.name}`, "arrive-venue": "Tiba & aktif di venue (grup)", "ship-return": "Kirim grup kembali ke gudang", "arrive-warehouse": "Tiba di gudang (grup) — perjalanan selesai" };
+  const stageLog = op === "arrive-warehouse" ? 3 : 6;
+  for (const id of affected) {
+    const a = await getAsset(id);
+    await insertLog({ id: `LOG-GRPV-${Date.now()}-${id}`, timestamp: new Date().toISOString(), assetId: id, assetName: a?.name || id, stage: stageLog, action: `${LOGV[op]} (grup ${batchId}${op === "deploy" || op === "ship-return" ? `, SJ ${sharedSJ}` : ""})`, operator: req.user!.name, type: op === "arrive-venue" || op === "arrive-warehouse" ? "success" : "info" });
+    assetChanged(id);
+  }
+  let surfaceIds = affected;
+  if (op === "arrive-warehouse") {
+    const surfaced = new Set<string>();
+    for (const id of affected) { const a = await getAsset(id); if (!a) continue; surfaced.add((await foldBackOnReturn(a, req.user!.name)).surfaceId); }
+    surfaceIds = [...surfaced];
+  }
+  res.json({ ok: true, count: affected.length, skipped: skipped.length, suratJalanNo: (op === "deploy" || op === "ship-return") ? sharedSJ : undefined, assets: (await Promise.all(surfaceIds.map(id => getAsset(id)))).filter(Boolean) });
 }));
 
 // --- PIC assigns / re-assigns install portions (Fase 6, in-place) ---

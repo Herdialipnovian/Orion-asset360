@@ -336,6 +336,12 @@ export default function App() {
     try { await api.completeInstall(assetId, p); await refresh(); return { ok: true }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal konfirmasi pemasangan." }; }
   };
+  const handleGroupVenue = async (
+    p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }
+  ): Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }> => {
+    try { const r = await api.groupVenue(p); await refresh(); return { ok: true, count: r.count, skipped: r.skipped }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses grup." }; }
+  };
   const handleAuditSample = async (
     assetId: string,
     samples: { locationId: number; compliant: boolean }[],
@@ -878,6 +884,7 @@ export default function App() {
                   onArriveWarehouse={handleArriveWarehouse}
                   onBatchShip={handleBatchShip}
                   onGroupAdvance={handleGroupAdvance}
+                  onGroupVenue={handleGroupVenue}
                   onDistribute={handleDistribute}
                   onPlaceToko={handlePlaceToko}
                   onCompleteInstall={handleCompleteInstall}

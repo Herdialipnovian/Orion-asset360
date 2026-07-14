@@ -832,6 +832,9 @@ export default function LifecycleManager({
   };
   const openReturn = () => {
     if (!detailAsset) return;
+    // Guard: returning to Gudang ends the roadshow — never let a stray tap start it.
+    const n = useGroupVenue ? groupSameStage.length : 1;
+    if (!window.confirm(`Kirim ${n > 1 ? `${n} aset grup ini` : "aset ini"} kembali ke gudang? Roadshow di lokasi ini ditutup.`)) return;
     setReturnForm({ suratJalanNo: genSuratJalan(), courier: "", trackingUrl: "", trackingNo: "", eta: "" });
     setReturnError(null);
     setReturnOpen(true);
@@ -873,6 +876,8 @@ export default function LifecycleManager({
   };
   const doArriveWarehouse = async () => {
     if (!detailAsset || arriveBusy) return;
+    // Guard: this drops the asset back to Gudang (Fase 1) and ends the journey — confirm first.
+    if (!window.confirm(`Konfirmasi ${useGroupVenue ? `${groupSameStage.length} aset` : "aset"} sudah TIBA di gudang? Kembali ke Gudang (Fase 1), perjalanan selesai.`)) return;
     setArriveBusy(true); setArriveError(null);
     const res = useGroupVenue ? await onGroupVenue!({ batchId: detailBatchId!, op: "arrive-warehouse" }) : await onArriveWarehouse!(detailAsset.id);
     setArriveBusy(false);
@@ -2529,13 +2534,9 @@ export default function LifecycleManager({
                           </span>
                         </button>
                         {onShipReturn && gudangRole && (
-                          <button onClick={openReturn}
-                            className="w-full flex items-center gap-2 text-left bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg px-3 py-2.5 transition shadow-sm">
-                            <Home className="h-4 w-4 shrink-0" />
-                            <span className="min-w-0">
-                              <span className="block text-[11px] font-bold leading-tight">Kirim Kembali ke Gudang</span>
-                              <span className="block text-[9px] text-slate-500 leading-tight">Tidak ada tujuan lagi — kirim aset + Surat Jalan &amp; tracking balik ke gudang</span>
-                            </span>
+                          <button onClick={openReturn} title="Tidak ada tujuan lagi — kirim aset + Surat Jalan balik ke gudang (perlu konfirmasi)"
+                            className="w-full flex items-center justify-center gap-1.5 text-[10px] font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 transition">
+                            <Home className="h-3.5 w-3.5 shrink-0" /> Kirim Kembali ke Gudang
                           </button>
                         )}
                       </>
@@ -2623,7 +2624,7 @@ export default function LifecycleManager({
                             return (
                               <button
                                 key={t}
-                                onClick={() => openGate(t)}
+                                onClick={() => { if ((t === 9 || t === 10) && !window.confirm(`${verbFor(t, detailAsset.currentStage, detailAsset)} untuk ${groupMode && groupSameStage.length >= 2 ? `${groupSameStage.length} aset grup` : "aset"} ini?`)) return; openGate(t); }}
                                 title={installPartial ? `Pemasangan baru ${installed}/${detailAsset.quantity} terpasang — Audit tetap boleh, progres sisanya tercatat.` : ""}
                                 className={`flex items-center gap-2 text-left border rounded-lg px-3 py-2 transition shadow-xs ${cls}`}
                               >

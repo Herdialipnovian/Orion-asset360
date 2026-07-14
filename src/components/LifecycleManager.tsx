@@ -720,6 +720,8 @@ export default function LifecycleManager({
   React.useEffect(() => {
     if (initialStageFilter !== undefined) setFilterStage(initialStageFilter);
   }, [initialStageFilter]);
+  // Reset any batch selection when the phase view changes (Gudang cart vs card views share batchSel).
+  React.useEffect(() => { setBatchSel([]); setBatchQty({}); setBatchMode(false); setBatchError(null); }, [filterStage]);
 
   const detailAsset = React.useMemo(
     () => assets.find(a => a.id === detailAssetId) || null,
@@ -1789,7 +1791,8 @@ export default function LifecycleManager({
           </div>
 
           {/* Aset ditambah di menu Master Data (lahir di Gudang/Fase 3) — bukan lagi lewat wizard di sini. */}
-          {canBatchShip && (
+          {/* Old toggle hidden in the Gudang view — that view has its own list + selection cart. */}
+          {canBatchShip && Number(filterStage) !== 3 && (
             <button
               onClick={toggleBatchMode}
               className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg border transition ${batchMode ? "bg-slate-800 text-white border-slate-800 hover:bg-slate-900" : "bg-white text-blue-700 border-blue-300 hover:bg-blue-50"}`}
@@ -1838,7 +1841,102 @@ export default function LifecycleManager({
         </span>
       </div>
 
-      {/* Asset grid */}
+      {/* Gudang (Fase 1) = dense LIST + a selection cart (scales to thousands of assets); pick 1 or many,
+          set the qty to use per asset (the remainder stays in Gudang), then issue one Surat Jalan. */}
+      {Number(filterStage) === 3 ? (() => {
+        const list = filteredAssetsList.filter(a => !(isInternalDeploy(a) || a.peruntukan === "Internal"));
+        const totalUse = batchSel.reduce((s, id) => s + (Math.floor(Number(batchQty[id])) || 0), 0);
+        const pickRow = (a: Asset) => {
+          if (batchSel.includes(a.id)) toggleBatchSel(a.id);
+          else { toggleBatchSel(a.id); setBatchQty(q => ({ ...q, [a.id]: q[a.id] || String(a.quantity || 1) })); }
+        };
+        return (
+          <div className="flex flex-col lg:flex-row gap-4 items-start">
+            {/* LEFT — dense selectable list */}
+            <div className="flex-1 min-w-0 w-full bg-white rounded-xl border border-slate-100 overflow-hidden">
+              <div className="hidden sm:grid grid-cols-[24px_1fr_72px] gap-3 px-4 py-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <span>✓</span><span>Aset di Gudang</span><span className="text-right">Stok</span>
+              </div>
+              <div className="divide-y divide-slate-100 max-h-[68vh] overflow-y-auto">
+                {list.length === 0 ? (
+                  <div className="p-10 text-center text-slate-400 text-sm">Tidak ada aset di Gudang untuk kriteria ini.</div>
+                ) : list.map(a => {
+                  const picked = batchSel.includes(a.id);
+                  return (
+                    <label key={a.id} className={`grid grid-cols-[24px_1fr_72px] items-center gap-3 px-4 py-2.5 cursor-pointer transition ${picked ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                      <input type="checkbox" checked={picked} onChange={() => pickRow(a)} className="h-4 w-4 rounded accent-blue-600" />
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-2">
+                          <span className="font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">{a.id}</span>
+                          <span className="text-[13px] font-bold text-slate-800 truncate">{a.name}</span>
+                        </span>
+                        <span className="block text-[10px] text-slate-400 truncate">{a.category}{a.client ? ` · ${a.client}` : ""}{(a as any).projectName ? ` · ${(a as any).projectName}` : ""}</span>
+                      </span>
+                      <span className="text-right"><span className="text-sm font-extrabold text-slate-700 tabular-nums">{a.quantity}</span><span className="block text-[9px] text-slate-400">unit</span></span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            {/* RIGHT — selection cart: qty-to-use per asset + remainder + one Surat Jalan */}
+            <div className="w-full lg:w-80 shrink-0">
+              <div className="lg:sticky lg:top-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 text-white flex items-center gap-2">
+                  <Truck className="h-4 w-4 shrink-0" /><span className="font-bold text-sm">Kirim Bersama</span>
+                  <span className="ml-auto text-[11px] font-semibold bg-white/15 px-2 py-0.5 rounded-full">{batchSel.length} aset · {totalUse} unit</span>
+                </div>
+                {batchSel.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400 text-xs leading-relaxed">Centang aset di daftar untuk mulai.<br />Bisa pilih <strong>1 atau beberapa</strong>; atur <strong>qty yang dipakai</strong> di sini — sisanya tetap di gudang.</div>
+                ) : (
+                  <div className="p-3 space-y-2.5">
+                    <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+                      {batchSel.map(id => {
+                        const a = assets.find(x => x.id === id); if (!a) return null;
+                        const q = Math.floor(Number(batchQty[id])) || 0;
+                        const sisa = (a.quantity || 0) - q;
+                        return (
+                          <div key={id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5 animate-[fadeIn_0.2s_ease]">
+                            <div className="flex items-center gap-2">
+                              <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{a.name}</span><span className="font-mono text-[9px] text-slate-400">{a.id}</span></span>
+                              <button type="button" onClick={() => toggleBatchSel(id)} className="text-slate-300 hover:text-rose-500 shrink-0"><X className="h-4 w-4" /></button>
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <span className="text-[10px] text-slate-500">Dipakai</span>
+                              <input type="number" min={1} max={a.quantity} value={batchQty[id] ?? ""} onChange={e => setBatchQty(qq => ({ ...qq, [id]: e.target.value }))} className="w-16 bg-white border border-slate-200 px-2 py-1 rounded text-xs text-center outline-none focus:ring-1 focus:ring-blue-500" />
+                              <span className="text-[10px] text-slate-400">/ {a.quantity}</span>
+                              {sisa > 0 ? <span className="ml-auto text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">sisa {sisa} tetap di gudang</span>
+                                       : sisa === 0 ? <span className="ml-auto text-[9px] font-bold text-emerald-600">semua dikirim</span>
+                                       : <span className="ml-auto text-[9px] font-bold text-rose-600">melebihi stok</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-600">Tujuan / Area <span className="text-rose-500">*</span></label>
+                        <select value={batchForm.area} onChange={e => setBatchForm(f => ({ ...f, area: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                          <option value="">— pilih area —</option>
+                          {(batchForm.area && !areaOptions.includes(batchForm.area) ? [batchForm.area, ...areaOptions] : areaOptions).map(ar => <option key={ar} value={ar}>{ar}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-600">Nama Driver <span className="text-rose-500">*</span></label>
+                        <input value={batchForm.driverName} onChange={e => setBatchForm(f => ({ ...f, driverName: e.target.value }))} placeholder="nama driver" className="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs outline-none focus:bg-white focus:ring-1 focus:ring-blue-500" />
+                      </div>
+                    </div>
+                    {batchError && <p className="text-[10px] font-semibold text-rose-600">{batchError}</p>}
+                    <button type="button" onClick={e => submitBatch(e as any)} disabled={batchBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">
+                      {batchBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />} Terbitkan Surat Jalan
+                    </button>
+                    <p className="text-[9px] text-slate-400 text-center">Qty dipakai berangkat bersama (satu Surat Jalan); sisanya tetap tercatat di Gudang.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })() : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredAssetsList.length === 0 ? (
           <div className="col-span-full bg-white p-12 text-center rounded-xl border border-slate-100 text-slate-400">
@@ -1894,6 +1992,7 @@ export default function LifecycleManager({
           </>
         )}
       </div>
+      )}
 
       {/* MODAL 2: LIFECYCLE DETAIL + TRANSITION CONTROL */}
       {detailAsset && (

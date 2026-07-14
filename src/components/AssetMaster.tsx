@@ -7,23 +7,10 @@
  */
 import React from "react";
 import {
-  Database, Plus, Pencil, Trash2, X, AlertTriangle, CheckCircle, Loader2, Upload, Download, FileSpreadsheet, Search
+  Database, Plus, Trash2, X, AlertTriangle, CheckCircle, Loader2, Upload, Download, FileSpreadsheet, Search
 } from "lucide-react";
 import { api, type AuthUser } from "../api";
 import { Asset } from "../types";
-import { faseNo } from "../faseDisplay";
-
-const STAGE_SHORT: { [k: number]: string } = {
-  1: "Request", 2: "Produksi", 3: "Gudang", 4: "Kirim", 5: "Transit",
-  6: "Terpasang", 7: "Audit", 8: "Maintenance", 9: "Penarikan", 10: "Disposal"
-};
-const stageBadge = (s: number) =>
-  s === 3 ? "bg-green-50 text-green-700 border-green-200"
-    : s >= 6 && s <= 7 ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-    : s === 8 ? "bg-rose-50 text-rose-700 border-rose-200"
-    : s === 10 ? "bg-slate-100 text-slate-600 border-slate-300"
-    : "bg-amber-50 text-amber-700 border-amber-200";
-
 const rupiah = (v: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(v || 0);
 const emptyForm = () => ({ client: "", category: "", name: "", warna: "", merk: "Custom", type: "", serialNumber: "", fisik: "Baru", tglBeli: "", harga: "0", qty: "1", owner: "Origin", usageType: "Reusable", peruntukan: "Deployment", peruntukanTouched: false, projectId: "" });
 // Mirror of the server heuristic — Client assets are always Deployment; Origin ops categories → Internal.
@@ -42,9 +29,6 @@ interface Props {
 export default function AssetMaster({ assets, categoryOptions, clientOptions, user, onChanged }: Props) {
   const canEdit = user.role === "Admin" || user.role === "Logistik";
   const canDelete = user.role === "Admin";
-  // Editing the phase from Master Data is a manual OVERRIDE of the lifecycle graph — it needs the
-  // server's Admin force path, so only Admin gets the inline dropdown.
-  const canSetPhase = user.role === "Admin";
 
   const [search, setSearch] = React.useState("");
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -57,7 +41,6 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
   const [confirmDel, setConfirmDel] = React.useState<Asset | null>(null);
   const [pending, setPending] = React.useState<{ rows: any[] } | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [phaseBusy, setPhaseBusy] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
   // Proyek options (bind asset → project; project mode drives the deployment flow).
   const [projects, setProjects] = React.useState<{ id: number; name: string; mode: string; client: string | null; status: string }[]>([]);
@@ -129,32 +112,6 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
       setFormErr(e?.message || "Gagal menyimpan aset.");
     } finally {
       setSaving(false);
-    }
-  };
-
-  // Manual phase override from the FASE column. Uses the server's Admin force path so any phase is
-  // reachable, keeps the asset's existing stageDetails, and (via onChanged → global refetch + SSE)
-  // syncs the new phase to every view/process.
-  const changePhase = async (a: Asset, ns: number) => {
-    if (ns === a.currentStage || phaseBusy === a.id) return; // per-asset guard (other rows stay usable)
-    const isSplitChild = /-SJ\d+$/.test(a.id) || !!(a.specs as any)?.splitFrom;
-    // Spell out the destructive consequence of specific jumps so this isn't mistaken for a harmless relabel.
-    const warn =
-      ns === 6 && a.currentStage !== 6 ? "\n\n⚠ Masuk Fase 4 me-RESET progres pemasangan (assignment) siklus ini."
-      : ns === 3 && a.currentStage !== 3 && isSplitChild ? "\n\n⚠ Kartu split ini akan DIGABUNG ke aset induk bila induk ada di Gudang (baris ini bisa hilang)."
-      : ns === 3 && a.currentStage !== 3 ? "\n\n⚠ Data deployment (venue/toko/custodian) dikosongkan karena aset kembali ke Gudang."
-      : "";
-    if (!window.confirm(`Ubah fase ${a.id} dari ${faseNo(a.currentStage)}·${STAGE_SHORT[a.currentStage]} → ${faseNo(ns)}·${STAGE_SHORT[ns]} secara manual?\n\nOverride alur normal (tanpa mengisi data gate), langsung tersinkron ke semua proses.${warn}`)) return;
-    setPhaseBusy(a.id); setErr(null); setNotice(null);
-    try {
-      const r: any = await api.updateStage(a.id, ns, a.stageDetails, { force: true, logAction: `Fase di-set manual ke ${faseNo(ns)}·${STAGE_SHORT[ns]} dari Master Data`, operator: user.name });
-      if (r?.merged && r?.mergedInto) setNotice(`${a.id} kembali ke Gudang & digabung ke kartu asal ${r.mergedInto} — tersinkron ke semua proses.`);
-      else setNotice(`Fase ${a.id} diubah ke ${faseNo(ns)}·${STAGE_SHORT[ns]} — tersinkron ke semua proses.`);
-      onChanged();
-    } catch (e: any) {
-      setErr(e?.message || "Gagal mengubah fase.");
-    } finally {
-      setPhaseBusy(null);
     }
   };
 
@@ -303,21 +260,19 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
           <table className="w-full text-xs whitespace-nowrap">
             <thead>
               <tr className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-wider">
-                {["Asset ID", "Client", "Kategori", "Nama Asset", "Warna", "Merk", "Type", "Serial No.", "Fisik", "Owner", "Sifat", "Peruntukan", "Tgl Beli", "Harga", "Qty", "Fase"].map(h => (
+                {["Asset ID", "Client", "Nama Asset", "Warna", "Merk", "Type", "Serial No.", "Fisik", "Owner", "Sifat", "Tgl Beli", "Masuk Gudang", "Harga", "Qty"].map(h => (
                   <th key={h} className="text-left font-extrabold px-3 py-3">{h}</th>
                 ))}
-                <th className="text-right font-extrabold px-3 py-3">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.length === 0 ? (
-                <tr><td colSpan={17} className="px-4 py-10 text-center text-slate-400">Belum ada aset. Klik "Tambah Aset" atau "Import".</td></tr>
+                <tr><td colSpan={14} className="px-4 py-10 text-center text-slate-400">Belum ada aset. Klik "Tambah Aset" atau "Import".</td></tr>
               ) : (
                 rows.map(a => (
-                  <tr key={a.id} className="hover:bg-slate-50/60 transition">
+                  <tr key={a.id} onClick={canEdit ? () => openEdit(a) : undefined} title={canEdit ? "Klik untuk edit" : undefined} className={`hover:bg-slate-50/60 transition ${canEdit ? "cursor-pointer" : ""}`}>
                     <td className="px-3 py-2.5 font-mono font-bold text-blue-600">{a.id}</td>
                     <td className="px-3 py-2.5 text-slate-700">{a.client}</td>
-                    <td className="px-3 py-2.5 text-slate-600">{a.category}</td>
                     <td className="px-3 py-2.5 font-semibold text-slate-800">{a.name}</td>
                     <td className="px-3 py-2.5 text-slate-600">{a.warna || "—"}</td>
                     <td className="px-3 py-2.5 text-slate-600">{a.specs?.brand || "—"}</td>
@@ -326,39 +281,10 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${a.fisik === "Second" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>{a.fisik || "—"}</span></td>
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${(a.owner || "Origin") === "Client" ? "bg-violet-50 text-violet-700" : "bg-slate-100 text-slate-600"}`}>{a.owner || "Origin"}</span></td>
                     <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${(a.usageType || "Reusable") === "Consumable" ? "bg-orange-50 text-orange-700" : "bg-teal-50 text-teal-700"}`}>{a.usageType === "Consumable" ? "Consumable" : "Reusable"}</span></td>
-                    <td className="px-3 py-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${(a.peruntukan || "Deployment") === "Internal" ? "bg-slate-800 text-white" : "bg-blue-50 text-blue-700"}`}>{a.peruntukan === "Internal" ? "Internal" : "Deployment"}</span></td>
                     <td className="px-3 py-2.5 text-slate-500">{a.tglBeli || "—"}</td>
+                    <td className="px-3 py-2.5 text-slate-500 tabular-nums">{fmtDate(a.createdAt) || "—"}</td>
                     <td className="px-3 py-2.5 text-slate-700 font-semibold">{rupiah(a.financials?.purchaseCost || 0)}</td>
                     <td className="px-3 py-2.5 text-slate-800 font-bold">{a.quantity}</td>
-                    <td className="px-3 py-2.5">
-                      {canSetPhase ? (
-                        <select
-                          value={a.currentStage}
-                          disabled={phaseBusy === a.id}
-                          onChange={e => changePhase(a, Number(e.target.value))}
-                          title="Ubah fase (override manual — sinkron ke semua proses)"
-                          className={`text-[10px] font-bold pl-1.5 pr-4 py-0.5 rounded-full border outline-none cursor-pointer appearance-none bg-[length:0.7rem] bg-[right_0.25rem_center] bg-no-repeat disabled:opacity-50 ${stageBadge(a.currentStage)}`}
-                          style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23475569'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E\")" }}
-                        >
-                          {Object.keys(STAGE_SHORT).map(Number).filter(s => s >= 3).map(s => (
-                            <option key={s} value={s}>{faseNo(s)}·{STAGE_SHORT[s]}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${stageBadge(a.currentStage)}`}>{faseNo(a.currentStage)}·{STAGE_SHORT[a.currentStage]}</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center justify-end gap-1">
-                        {canEdit && (
-                          <button onClick={() => openEdit(a)} title="Edit" className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition"><Pencil className="h-3.5 w-3.5" /></button>
-                        )}
-                        {canDelete && (
-                          <button onClick={() => setConfirmDel(a)} title="Hapus" className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition"><Trash2 className="h-3.5 w-3.5" /></button>
-                        )}
-                        {!canEdit && !canDelete && <span className="text-[10px] text-slate-400">—</span>}
-                      </div>
-                    </td>
                   </tr>
                 ))
               )}
@@ -445,7 +371,10 @@ export default function AssetMaster({ assets, categoryOptions, clientOptions, us
 
               {formErr && <div className="col-span-2 flex items-center gap-2 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 font-semibold"><AlertTriangle className="h-4 w-4 flex-shrink-0" /> {formErr}</div>}
 
-              <div className="col-span-2 pt-3 border-t border-slate-100 flex justify-end gap-3">
+              <div className="col-span-2 pt-3 border-t border-slate-100 flex items-center justify-end gap-3">
+                {editing !== "new" && canDelete && (
+                  <button type="button" onClick={() => { const a = editing as Asset; setEditing(null); setConfirmDel(a); }} title="Hapus aset" className="mr-auto flex items-center gap-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 font-bold px-3 py-2 rounded-lg transition"><Trash2 className="h-4 w-4" /> Hapus</button>
+                )}
                 <button type="button" onClick={() => setEditing(null)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg transition">Batal</button>
                 <button type="submit" disabled={saving} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-5 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5">
                   {saving && <Loader2 className="h-4 w-4 animate-spin" />}{editing === "new" ? "Simpan Aset" : "Simpan Perubahan"}

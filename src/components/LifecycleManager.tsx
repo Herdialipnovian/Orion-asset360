@@ -1884,7 +1884,7 @@ export default function LifecycleManager({
                           <span className="font-mono text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">{a.id}</span>
                           <span className="text-[13px] font-bold text-slate-800 truncate">{a.name}</span>
                         </span>
-                        <span className="block text-[10px] text-slate-400 truncate">{a.category}{a.client ? ` · ${a.client}` : ""}{(a as any).projectName ? ` · ${(a as any).projectName}` : ""}</span>
+                        <span className="block text-[10px] text-slate-400 truncate">{a.client || "—"}{(a as any).projectName ? ` · ${(a as any).projectName}` : ""}</span>
                       </span>
                       <span className="text-right"><span className="text-sm font-extrabold text-slate-700 tabular-nums">{a.quantity}</span><span className="block text-[9px] text-slate-400">unit</span></span>
                     </label>

@@ -1911,6 +1911,35 @@ export default function LifecycleManager({
                 );
               })()}
 
+              {/* Assets travelling TOGETHER in this shipment — the detail renders one, so list all
+                  members here; click a row to open that member's detail. */}
+              {hasGroup && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50/40 overflow-hidden">
+                  <div className="flex items-center gap-2 bg-blue-600 px-3 py-2 text-white">
+                    <Truck className="h-3.5 w-3.5 shrink-0" />
+                    <span className="text-[11px] font-bold">Berangkat bersama · {groupSameStage.length} aset</span>
+                    {detailBatchId && <span className="ml-auto font-mono text-[9px] rounded bg-white/15 px-1.5 py-0.5 ring-1 ring-white/20">{detailBatchId}</span>}
+                  </div>
+                  <div className="space-y-1 p-2">
+                    {groupSameStage.map(mm => {
+                      const open = mm.id === detailAsset.id;
+                      return (
+                        <button
+                          key={mm.id}
+                          type="button"
+                          onClick={() => setDetailAssetId(mm.id)}
+                          className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition ${open ? "bg-blue-600 text-white" : "bg-white text-slate-700 border border-blue-100 hover:bg-blue-50"}`}
+                        >
+                          <span className={`font-mono text-[10px] shrink-0 ${open ? "text-blue-100" : "text-blue-600"}`}>{mm.id}</span>
+                          <span className="min-w-0 flex-1 truncate text-[11px] font-bold">{mm.name}</span>
+                          <span className={`shrink-0 text-[9px] ${open ? "text-blue-100" : "text-slate-400"}`}>{mm.quantity} unit{open ? " · dibuka" : ""}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Spesifikasi — only rows that are actually filled (no "—" clutter); whole block hides if empty. */}
               {(() => {
                 const s: any = detailAsset.specs || {};
@@ -2360,14 +2389,6 @@ export default function LifecycleManager({
                       <span className="min-w-0">
                         <span className="block font-bold flex items-center gap-1.5"><Truck className="h-3.5 w-3.5 shrink-0" /> Proses untuk seluruh grup ({groupSameStage.length} aset)</span>
                         <span className="block text-[10px] text-blue-600/90 leading-snug">Grup {detailBatchId} — semua aset yang berangkat bersama &amp; masih di fase ini ikut pindah sekaligus (satu Surat Jalan). Matikan untuk memproses aset ini saja.</span>
-                        {/* Show WHICH assets are covered — the detail only renders one member, so list the rest. */}
-                        <span className="mt-1.5 flex flex-wrap gap-1">
-                          {groupSameStage.map(mm => (
-                            <span key={mm.id} className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold ${mm.id === detailAsset.id ? "bg-blue-600 text-white" : "bg-white text-blue-700 border border-blue-200"}`}>
-                              <span className="font-mono">{mm.id}</span> {mm.name}
-                            </span>
-                          ))}
-                        </span>
                       </span>
                     </label>
                   )}

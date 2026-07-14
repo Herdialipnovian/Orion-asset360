@@ -34,7 +34,7 @@ import {
   Camera
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
-import { api, type AuthUser } from "../api";
+import { api, evidenceThumb, type AuthUser, type EvidenceView } from "../api";
 import { installedOf } from "../installProgress";
 import { AUDIT_ITEMS, QTY_ITEM_KEY, computeAudit, defaultAuditMap } from "../auditChecklist";
 import { faseNo, TOTAL_FASE } from "../faseDisplay";
@@ -365,6 +365,7 @@ interface LifecycleManagerProps {
   onBatchShip?: (p: { items: { id: string; qty: number }[]; deployMode?: string; projectId?: number | null; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; perAsset?: Record<string, any>; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onGroupVenue?: (p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
+  onGroupAudit?: (p: { batchId: string; auditedBy?: string }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
   onCompleteInstall?: (assetId: string, p: { merchandiserId: number; doneQty?: number; note?: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -502,6 +503,7 @@ export default function LifecycleManager({
   onBatchShip,
   onGroupAdvance,
   onGroupVenue,
+  onGroupAudit,
   onDistribute,
   onPlaceToko,
   onCompleteInstall,
@@ -548,9 +550,12 @@ export default function LifecycleManager({
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
     setPodSig(""); setShipMd(""); setShipVenue(String((g.members[0]?.stageDetails as any)?.deployment?.venue?.locationId || ""));
     setInstallChk({}); setInstallPhoto({}); setInstallPrev({});
+    setAuditChk({}); setAuditPhoto({}); setAuditPrev({}); setShipEvidence({});
     const chk: Record<string, boolean> = {}; g.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
     void loadDirectory(g.members[0]?.client); // MD/PIC directory for this shipment's client (assignment dropdown)
     void loadVenues(g.members[0]?.client);    // Venue locations for the install-location dropdown
+    const st = g.members[0]?.currentStage;
+    if (st === 7 || st === 8) void loadShipEvidence(g.members); // MD install photos for the Terpasang/Audit views
     setShipError(null); setShipView(g);
   };
   // MD confirms installation (Proses Pemasangan 6 → Asset Terpasang 7): checklist installed + a photo
@@ -577,6 +582,43 @@ export default function LifecycleManager({
     });
     setShipBusy(false);
     if (!res.ok) return setShipError(res.error || "Gagal konfirmasi pemasangan.");
+    setShipView(null);
+  };
+  // Asset Terpasang (7) → Audit (8): PIC audits/validates. MD install photos (evidence) shown per asset;
+  // PIC checklists + attaches a validation photo per asset; date/time auto. Records via onGroupAudit.
+  const [shipEvidence, setShipEvidence] = React.useState<Record<string, EvidenceView[]>>({});
+  const [auditChk, setAuditChk] = React.useState<Record<string, boolean>>({});
+  const [auditPhoto, setAuditPhoto] = React.useState<Record<string, File>>({});
+  const [auditPrev, setAuditPrev] = React.useState<Record<string, string>>({});
+  const setAuditFile = (id: string, f: File | null) => {
+    setAuditPhoto(p => { const n = { ...p }; if (f) n[id] = f; else delete n[id]; return n; });
+    setAuditPrev(p => { const n = { ...p }; if (f) n[id] = URL.createObjectURL(f); else delete n[id]; return n; });
+  };
+  const loadShipEvidence = async (members: Asset[]) => {
+    try {
+      const pairs = await Promise.all(members.map(async m => [m.id, await api.getEvidence(m.id)] as const));
+      setShipEvidence(Object.fromEntries(pairs));
+    } catch { setShipEvidence({}); }
+  };
+  const sendToAudit = async () => {
+    if (!shipView || !onGroupAdvance) return;
+    setShipBusy(true); setShipError(null);
+    const res = await onGroupAdvance({ batchId: shipView.batchId, fromStage: 7, toStage: 8, stageKey: "audit", meta: { logAction: `Dikirim ke Audit (${shipView.members.length} aset)`, operator: "Admin Origin (Asset Terpasang)" } });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal mengirim ke Audit.");
+    setShipView(null);
+  };
+  const submitAudit = async () => {
+    if (!shipView || !onGroupAudit) return;
+    if (!shipView.members.every(m => auditChk[m.id])) return setShipError("Ceklist (validasi) semua aset dulu.");
+    if (!shipView.members.every(m => auditPhoto[m.id])) return setShipError("Foto validasi wajib untuk setiap aset.");
+    setShipBusy(true); setShipError(null);
+    try {
+      for (const m of shipView.members) await api.uploadEvidence(m.id, "audit_validation", 8, [auditPhoto[m.id]], "Foto validasi audit (PIC)");
+    } catch (e: any) { setShipBusy(false); return setShipError(e?.message || "Gagal mengunggah foto validasi."); }
+    const res = await onGroupAudit({ batchId: shipView.batchId });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal menyimpan audit.");
     setShipView(null);
   };
   // Terpasang (Fase 4/stage 6): PIC assigns a Merchandiser (MD) to install the whole shipment.
@@ -2341,7 +2383,39 @@ export default function LifecycleManager({
                   {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
                   <button type="button" onClick={submitAssignMD} disabled={shipBusy} className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />} Tugaskan Pemasangan ke MD</button>
                 </div>
-              )) : (
+              )) : gStage === 7 && onGroupAdvance ? (
+                <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-3 space-y-3">
+                  <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Check className="h-3.5 w-3.5" /> Aset Terpasang — Ringkasan Pemasangan</p>
+                  {shipView.members.map(m => { const dep: any = (m.stageDetails as any)?.deployment || {}; const ph = (shipEvidence[m.id] || []).filter(e => e.stage === 6); return (
+                    <div key={m.id} className="rounded-lg border border-slate-200 bg-white p-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between"><span className="text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="text-[9px] text-slate-400 font-mono shrink-0">{m.id}</span></div>
+                      <p className="text-[10px] text-slate-500">Dipasang: {dep.installedAt ? new Date(dep.installedAt).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}{(dep.assignments || []).length ? ` · MD: ${(dep.assignments || []).map((a: any) => a.merchandiser).join(", ")}` : ""}</p>
+                      {ph.length ? <div className="flex gap-1.5 flex-wrap">{ph.map(e => <img key={e.id} src={evidenceThumb(e.id)} alt="" className="h-12 w-12 rounded object-cover border border-slate-200" />)}</div> : <p className="text-[9px] text-slate-400">Belum ada foto pemasangan.</p>}
+                    </div>
+                  ); })}
+                  {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                  <button type="button" onClick={sendToAudit} disabled={shipBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Kirim ke Audit (seluruh grup)</button>
+                </div>
+              ) : gStage === 8 && onGroupAudit ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3 space-y-3">
+                  <p className="text-[11px] font-extrabold text-amber-800 flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" /> Audit oleh PIC</p>
+                  <div className="bg-white border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Tanggal &amp; Waktu Audit</span><span className="text-[11px] font-bold text-slate-700 tabular-nums">{new Date().toLocaleString("id-ID", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })} <span className="text-[9px] font-normal text-slate-400">· otomatis</span></span></div>
+                  {shipView.members.map(m => { const dep: any = (m.stageDetails as any)?.deployment || {}; const ph = (shipEvidence[m.id] || []).filter(e => e.stage === 6); return (
+                    <div key={m.id} className={`rounded-lg border p-2.5 space-y-2 ${auditChk[m.id] ? "border-amber-300 bg-amber-50/60" : "border-slate-200 bg-white"}`}>
+                      <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={!!auditChk[m.id]} onChange={() => setAuditChk(c => ({ ...c, [m.id]: !c[m.id] }))} className="h-4 w-4 rounded accent-amber-600 shrink-0" /><span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span><span className="text-[9px] font-bold text-slate-400">Validasi</span></label>
+                      <p className="text-[9px] text-slate-500">MD: {(dep.assignments || []).map((a: any) => a.merchandiser).join(", ") || "—"} · Dipasang {dep.installedAt ? new Date(dep.installedAt).toLocaleDateString("id-ID") : "—"}</p>
+                      <div><span className="block text-[9px] font-bold text-slate-400 mb-1">Foto MD:</span>{ph.length ? <div className="flex gap-1 flex-wrap">{ph.map(e => <img key={e.id} src={evidenceThumb(e.id)} alt="" className="h-10 w-10 rounded object-cover border border-slate-200" />)}</div> : <span className="text-[9px] text-slate-400">—</span>}</div>
+                      <div className="flex items-center gap-2">
+                        {auditPrev[m.id] ? <img src={auditPrev[m.id]} alt="" className="h-10 w-10 rounded object-cover border border-amber-300" /> : <div className="h-10 w-10 rounded border border-dashed border-slate-300 grid place-items-center text-slate-300"><Camera className="h-4 w-4" /></div>}
+                        <label className="flex-1 cursor-pointer text-[10px] font-bold text-amber-700 bg-white border border-amber-200 rounded-lg px-3 py-2 text-center hover:bg-amber-50">{auditPhoto[m.id] ? "Ganti Foto Validasi" : "Foto Validasi"} <span className="text-rose-500">*</span><input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => setAuditFile(m.id, e.target.files?.[0] || null)} /></label>
+                      </div>
+                    </div>
+                  ); })}
+                  <p className="text-[10px] text-slate-500">PIC cek tiap aset, review foto MD, &amp; lampirkan foto validasi. Semua aset wajib divalidasi.</p>
+                  {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                  <button type="button" onClick={submitAudit} disabled={shipBusy} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Konfirmasi Audit (seluruh grup)</button>
+                </div>
+              ) : (
                 <p className="text-[11px] text-slate-400 text-center py-2 border-t border-slate-100">Proses untuk fase ini menyusul.</p>
               )}
             </div>

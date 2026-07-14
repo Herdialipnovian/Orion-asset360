@@ -345,6 +345,10 @@ export default function App() {
     try { const r = await api.groupVenue(p); await refresh(); return { ok: true, count: r.count, skipped: r.skipped }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses grup." }; }
   };
+  const handleGroupAudit = async (p: { batchId: string; auditedBy?: string }): Promise<{ ok: boolean; error?: string; count?: number }> => {
+    try { const r = await api.groupAudit(p); await refresh(); return { ok: true, count: r.count }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal menyimpan audit." }; }
+  };
   const handleAuditSample = async (
     assetId: string,
     samples: { locationId: number; compliant: boolean }[],
@@ -888,6 +892,7 @@ export default function App() {
                   onBatchShip={handleBatchShip}
                   onGroupAdvance={handleGroupAdvance}
                   onGroupVenue={handleGroupVenue}
+                  onGroupAudit={handleGroupAudit}
                   onDistribute={handleDistribute}
                   onPlaceToko={handlePlaceToko}
                   onCompleteInstall={handleCompleteInstall}

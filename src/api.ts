@@ -315,6 +315,10 @@ export const api = {
   groupVenue(p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }): Promise<{ ok: boolean; count: number; skipped: number; suratJalanNo?: string; assets: Asset[] }> {
     return req(`/assets/group-venue`, { method: "POST", body: JSON.stringify(p) });
   },
+  // PIC records the audit validation on a shipment group at Audit (stage 8) — no stage change.
+  groupAudit(p: { batchId: string; auditedBy?: string }): Promise<{ ok: boolean; count: number; assets: Asset[] }> {
+    return req(`/assets/group-audit`, { method: "POST", body: JSON.stringify(p) });
+  },
   auditSample(id: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }): Promise<{ asset: Asset; coverage: any }> {
     return req(`/assets/${encodeURIComponent(id)}/audit-sample`, { method: "POST", body: JSON.stringify({ samples, ...(meta || {}) }) });
   },

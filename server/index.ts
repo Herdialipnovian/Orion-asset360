@@ -975,6 +975,34 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
   res.json({ ok: true, count: affected.length, assets: (await Promise.all(surfaceIds.map(id => getAsset(id)))).filter(Boolean) });
 }));
 
+// ── PIC audit validation for a shipment group at Audit (Fase 6 display / stage 8): records the audit
+//    (validated + auditedAt + auditedBy) on each member's deployment WITHOUT changing stage. The PIC's
+//    per-asset validation photos are uploaded separately as evidence. PIC (client-scoped) or Admin. ──
+app.post("/api/assets/group-audit", requireAuth, wrap(async (req: AuthedReq, res) => {
+  const b = req.body || {};
+  const batchId = String(b.batchId || "").trim();
+  if (!batchId) return res.status(400).json({ error: "Grup pengiriman (batchId) wajib." });
+  if (req.user!.role !== "Admin" && req.user!.role !== "PIC") return res.status(403).json({ error: "Hanya PIC atau Admin yang boleh mengaudit." });
+  const now = new Date().toISOString();
+  const auditedBy = String(b.auditedBy || req.user!.name);
+  const affected: string[] = [];
+  try {
+    await tx(async c => {
+      const { rows } = await c.query(`select id, client, stage_details from assets where stage_details->'shipping'->>'batchId'=$1 and current_stage=8 for update`, [batchId]);
+      if (!rows.length) throw Object.assign(new Error("Tidak ada anggota grup di fase Audit."), { http: 422 });
+      if (req.user!.role === "PIC" && rows.some(r => (r.client || null) !== (req.user!.client || null))) throw Object.assign(new Error("Grup ini memuat aset di luar client Anda."), { http: 403 });
+      for (const r of rows) {
+        const sd: any = r.stage_details || {};
+        const dep: any = { ...(sd.deployment || {}), audit: { auditedAt: now, auditedBy, validated: true } };
+        await c.query(`update assets set stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, deployment: dep })]);
+        affected.push(r.id);
+      }
+    });
+  } catch (e: any) { if (e && e.http) return res.status(e.http).json({ error: e.message }); throw e; }
+  for (const id of affected) { const a = await getAsset(id); await insertLog({ id: `LOG-AUDIT-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 8, action: `Pemasangan divalidasi (audit) oleh PIC ${auditedBy}.`, operator: auditedBy, type: "success" }); assetChanged(id); }
+  res.json({ ok: true, count: affected.length, assets: (await Promise.all(affected.map(id => getAsset(id)))).filter(Boolean) });
+}));
+
 // ── Group venue ops: apply a location-chain action to EVERY member of a shipment group (same batchId,
 //    Fase 6) at once, sharing ONE Surat Jalan. Mirrors the per-asset deploy-venue / arrive-venue /
 //    ship-return / arrive-warehouse. Members not in the right sub-state are skipped (reported), never errored.

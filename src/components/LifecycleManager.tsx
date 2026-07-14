@@ -540,12 +540,29 @@ export default function LifecycleManager({
   const [podForm, setPodForm] = React.useState({ podTime: "", conditionOnArrival: "Sempurna", podNote: "" });
   const [podSig, setPodSig] = React.useState("");
   const [podChecklist, setPodChecklist] = React.useState<Record<string, boolean>>({}); // per-asset "diterima" checklist (Transit)
+  const [shipMd, setShipMd] = React.useState(""); // Terpasang: MD assigned for installation
   const openShipView = (g: { batchId: string; members: Asset[] }) => {
     setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
-    setPodSig("");
+    setPodSig(""); setShipMd("");
     const chk: Record<string, boolean> = {}; g.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
+    void loadDirectory(g.members[0]?.client); // MD/PIC directory for this shipment's client (assignment dropdown)
     setShipError(null); setShipView(g);
+  };
+  // Terpasang (Fase 4/stage 6): PIC assigns a Merchandiser (MD) to install the whole shipment.
+  const submitAssignMD = async () => {
+    if (!shipView) return;
+    if (!shipMd) return setShipError("Pilih Merchandiser (MD) dulu.");
+    setShipBusy(true); setShipError(null);
+    const mid = Number(shipMd);
+    let failed = "";
+    for (const m of shipView.members) {
+      const r = await onAssignInstall(m.id, [{ merchandiserId: mid, qty: m.quantity }], m.updatedAt);
+      if (!r.ok) { failed = `${m.name}: ${r.error || "gagal ditugaskan"}`; break; }
+    }
+    setShipBusy(false);
+    if (failed) return setShipError(failed);
+    setShipView(null);
   };
   // Share the shipment's tracking (courier/resi/link/ETA) to the recipient PIC via WhatsApp.
   const shareTrackingWA = (g: { batchId: string; members: Asset[] }) => {
@@ -2238,6 +2255,21 @@ export default function LifecycleManager({
                     {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
                     <button type="button" onClick={submitShipPod} disabled={shipBusy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Konfirmasi Diterima (seluruh grup)</button>
                   </div>
+                </div>
+              ) : gStage === 6 && onAssignInstall ? (
+                <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 space-y-3">
+                  <p className="text-[11px] font-extrabold text-violet-800 flex items-center gap-1.5"><UserCheck className="h-3.5 w-3.5" /> Penunjukan MD untuk Pemasangan</p>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">Merchandiser (MD) <span className="text-rose-500">*</span></label>
+                    <select value={shipMd} onChange={e => setShipMd(e.target.value)} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer">
+                      <option value="">— pilih MD —</option>
+                      {merchDir.map(md => <option key={md.id} value={String(md.id)}>{md.name}{md.area ? ` · ${md.area}` : ""}</option>)}
+                    </select>
+                    {merchDir.length === 0 && <p className="text-[10px] text-amber-600">Belum ada MD untuk client ini — tambahkan di menu User Management.</p>}
+                  </div>
+                  <p className="text-[10px] text-slate-500">MD ini ditugaskan memasang seluruh {shipView.members.length} aset di pengiriman ini. MD lalu konfirmasi pemasangan (foto before/after) dari aplikasi lapangan.</p>
+                  {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                  <button type="button" onClick={submitAssignMD} disabled={shipBusy} className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />} Tugaskan Pemasangan ke MD</button>
                 </div>
               ) : (
                 <p className="text-[11px] text-slate-400 text-center py-2 border-t border-slate-100">Proses untuk fase ini menyusul.</p>

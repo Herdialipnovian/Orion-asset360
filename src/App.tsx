@@ -71,7 +71,7 @@ const PHASE_NAV: { stage: number; label: string; Icon: React.ComponentType<{ cla
   // this menu VIEWs assets that already have a Surat Jalan (awaiting transit). (Udin 2026-07-14)
   { stage: 4, label: "Surat Jalan", Icon: Truck },
   { stage: 5, label: "Transit", Icon: Compass },
-  { stage: 6, label: "Terpasang", Icon: MapPin },
+  { stage: 6, label: "Proses Pemasangan", Icon: MapPin },
   { stage: 7, label: "Audit", Icon: ShieldCheck },
   { stage: 8, label: "Pemeliharaan", Icon: Wrench },
   { stage: 9, label: "Penarikan", Icon: CornerUpLeft },

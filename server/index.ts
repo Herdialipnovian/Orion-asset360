@@ -869,6 +869,7 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
   const fromStage = Number(b.fromStage), toStage = Number(b.toStage);
   const stageKey = String(b.stageKey || "").trim();
   const section = (b.section && typeof b.section === "object" && !Array.isArray(b.section)) ? b.section : {};
+  const perAsset = (b.perAsset && typeof b.perAsset === "object" && !Array.isArray(b.perAsset)) ? b.perAsset : {};
   if (!batchId) return res.status(400).json({ error: "Grup pengiriman (batchId) wajib." });
   // Any LEGAL ladder transition may be applied to the whole group (audit 6→7, maintenance 6→8,
   // penarikan 6→9, redeploy, POD 5→6, …) — not just a single hard-coded next step.
@@ -894,7 +895,9 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
       }
       for (const r of rows) {
         const sd: any = r.stage_details || {};
-        let details: any = stageKey ? { ...sd, [stageKey]: { ...(sd[stageKey] || {}), ...section } } : { ...sd };
+        // Per-asset section (e.g. grouped audit → each item its own checklist) or the shared one.
+        const sec = (perAsset as any)[r.id] || section;
+        let details: any = stageKey ? { ...sd, [stageKey]: { ...(sd[stageKey] || {}), ...sec } } : { ...sd };
         // ── Replicate the per-asset /stage side-effects for EACH member (group must not diverge) ──
         // Entering Fase 6 (redeploy 7/8/9→6 or POD 5→6) starts a FRESH install cycle.
         if (toStage === 6 && fromStage !== 6) {

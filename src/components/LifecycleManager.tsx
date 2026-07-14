@@ -361,7 +361,7 @@ interface LifecycleManagerProps {
   onShipReturn?: (assetId: string, p: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string }>;
   onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onBatchShip?: (p: { items: { id: string; qty: number }[]; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
-  onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
+  onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; perAsset?: Record<string, any>; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onGroupVenue?: (p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -438,6 +438,44 @@ function SignaturePad({ onChange }: { value?: string; onChange: (v: string) => v
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-slate-400">Minta penerima tanda tangan di kotak di atas.</span>
         <button type="button" onClick={clear} className="text-[11px] font-bold text-rose-500 hover:text-rose-600">Hapus</button>
+      </div>
+    </div>
+  );
+}
+
+// Per-asset audit checklist (8 items + qty + auto score). Reused by the single-asset gate AND by the
+// grouped audit (one block per member) so a shipment is audited PER ITEM in one form, not once-for-all.
+function AuditChecklist({ map, onChange }: { map: Record<string, any>; onChange: (m: Record<string, any>) => void }) {
+  const m = map && typeof map === "object" ? map : {};
+  const qty = m[QTY_ITEM_KEY] === "" ? "" : Number(m[QTY_ITEM_KEY]) || 0;
+  const passed = AUDIT_ITEMS.filter(it => m[it.key] !== false).length;
+  const score = AUDIT_ITEMS.length ? Math.round((passed / AUDIT_ITEMS.length) * 100) : 0;
+  const status = score >= 90 ? "PATUH" : score >= 70 ? "PERLU PERBAIKAN" : "TIDAK PATUH";
+  const badge = score >= 90 ? "bg-emerald-100 text-emerald-700" : score >= 70 ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700";
+  const pick = (k: string, good: boolean) => onChange({ ...m, [k]: good });
+  return (
+    <div className="space-y-1.5">
+      {AUDIT_ITEMS.map(it => {
+        const good = m[it.key] !== false;
+        return (
+          <div key={it.key} className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+            <span className="text-xs text-slate-700 flex-1 min-w-0">{it.label}</span>
+            {it.qty && (
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[10px] text-slate-500">Qty</span>
+                <input type="number" min={0} value={qty} onChange={e => onChange({ ...m, [QTY_ITEM_KEY]: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) })} className="w-14 bg-white border border-slate-200 px-2 py-1 rounded text-xs text-center outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+            )}
+            <div className="flex rounded-md overflow-hidden border border-slate-200 shrink-0">
+              <button type="button" onClick={() => pick(it.key, true)} className={`text-[10px] font-bold px-2.5 py-1 transition ${good ? "bg-emerald-500 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}>{it.good}</button>
+              <button type="button" onClick={() => pick(it.key, false)} className={`text-[10px] font-bold px-2.5 py-1 transition ${!good ? "bg-rose-500 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}>{it.bad}</button>
+            </div>
+          </div>
+        );
+      })}
+      <div className="flex items-center justify-between pt-1">
+        <span className="text-[11px] text-slate-500">Skor otomatis: <strong className="text-slate-800">{score}</strong> ({passed}/{AUDIT_ITEMS.length})</span>
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}`}>{status}</span>
       </div>
     </div>
   );
@@ -698,6 +736,8 @@ export default function LifecycleManager({
   const hasGroup = !!(detailBatchId && groupSameStage.length >= 2);
   // Master toggle (action panel): apply venue/location actions to the whole group. Default ON for a group.
   const [groupActs, setGroupActs] = React.useState(true);
+  // Grouped audit: ONE form, a SEPARATE checklist per member (each item audited on its own condition).
+  const [groupAuditMaps, setGroupAuditMaps] = React.useState<Record<string, Record<string, any>>>({});
   // Re-arm the default only when the SHIPMENT GROUP changes — switching between members of the same
   // group preserves a deliberate OFF choice (don't silently re-enable on every asset switch).
   React.useEffect(() => { setGroupActs(true); }, [detailBatchId]);
@@ -1164,7 +1204,18 @@ export default function LifecycleManager({
     // Default the "process whole group" toggle ON when this is a groupable movement transition.
     const bId = batchIdOf(detailAsset);
     const sameStage = bId ? assets.filter(a => batchIdOf(a) === bId && a.currentStage === detailAsset.currentStage).length : 0;
-    setGroupMode(!!onGroupAdvance && groupActs && (TRANSITIONS[detailAsset.currentStage] || []).includes(target) && !!bId && sameStage >= 2);
+    const willGroup = !!onGroupAdvance && groupActs && (TRANSITIONS[detailAsset.currentStage] || []).includes(target) && !!bId && sameStage >= 2;
+    setGroupMode(willGroup);
+    // Grouped AUDIT (→7): seed a SEPARATE checklist per member (each item audited on its own condition).
+    if (target === 7 && willGroup) {
+      const members = assets.filter(a => batchIdOf(a) === bId && a.currentStage === detailAsset.currentStage);
+      const maps: Record<string, Record<string, any>> = {};
+      for (const mm of members) {
+        const prev = (mm.stageDetails as any)?.audit?.checklist;
+        maps[mm.id] = defaultAuditMap(mm.quantity, prev && typeof prev === "object" ? prev : null);
+      }
+      setGroupAuditMaps(maps);
+    }
     const cfg = gateFor(target, detailAsset.currentStage, detailAsset);
     const existing = (detailAsset.stageDetails as any)[cfg.stageKey] || {};
     const init: Record<string, any> = {};
@@ -1254,6 +1305,27 @@ export default function LifecycleManager({
         .map((r: any) => ({ merchandiserId: Number(r.merchandiserId), qty: Number(r.qty) || 0 }));
       const res = await onAssignInstall(detailAsset.id, rows, detailAsset.updatedAt);
       if (!res.ok) return setGateError(res.error || "Gagal menugaskan pemasangan.");
+      closeGate();
+      return;
+    }
+
+    // Grouped AUDIT (→7): each member gets its OWN per-item checklist result, applied in ONE action.
+    if (transitionTarget === 7 && groupMode && onGroupAdvance && groupSameStage.length >= 2 && batchIdOf(detailAsset)) {
+      if (!String(gateForm.auditorName || "").trim()) return setGateError('Kolom "Nama Auditor" wajib diisi.');
+      if (!String(gateForm.lastAuditDate || "").trim()) return setGateError('Kolom "Tanggal Audit" wajib diisi.');
+      const perAsset: Record<string, any> = {};
+      for (const mm of groupSameStage) {
+        const res = computeAudit(groupAuditMaps[mm.id] || {});
+        perAsset[mm.id] = {
+          ...((mm.stageDetails as any)?.audit || {}),
+          auditorName: gateForm.auditorName, lastAuditDate: gateForm.lastAuditDate,
+          recommendation: gateForm.recommendation || undefined,
+          checklist: res.checklist, kelengkapanQty: res.kelengkapanQty, scoring: res.scoring,
+          findings: res.findings, complianceStatus: res.complianceStatus
+        };
+      }
+      const gres = await onGroupAdvance({ batchId: batchIdOf(detailAsset)!, fromStage: detailAsset.currentStage, toStage: 7, stageKey: "audit", perAsset, meta: { logAction: `Audit grup (${groupSameStage.length} aset) — kondisi per-item`, operator: "Admin Origin (Lifecycle Manager)" } });
+      if (!gres.ok) return setGateError(gres.error || "Gagal memproses audit grup.");
       closeGate();
       return;
     }
@@ -1632,47 +1704,7 @@ export default function LifecycleManager({
         </div>
       );
     } else if (f.type === "auditstatus") {
-      const map: any = val && typeof val === "object" ? val : {};
-      const qty = map[QTY_ITEM_KEY] === "" ? "" : Number(map[QTY_ITEM_KEY]) || 0;
-      const passed = AUDIT_ITEMS.filter(it => map[it.key] !== false).length;
-      const score = AUDIT_ITEMS.length ? Math.round((passed / AUDIT_ITEMS.length) * 100) : 0;
-      const status = score >= 90 ? "PATUH" : score >= 70 ? "PERLU PERBAIKAN" : "TIDAK PATUH";
-      const badge = score >= 90 ? "bg-emerald-100 text-emerald-700" : score >= 70 ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700";
-      const pick = (k: string, good: boolean) => set({ ...map, [k]: good });
-      control = (
-        <div className="space-y-1.5">
-          {AUDIT_ITEMS.map(it => {
-            const good = map[it.key] !== false;
-            return (
-              <div key={it.key} className="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                <span className="text-xs text-slate-700 flex-1 min-w-0">{it.label}</span>
-                {it.qty && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-[10px] text-slate-500">Qty</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={qty}
-                      onChange={e => set({ ...map, [QTY_ITEM_KEY]: e.target.value === "" ? "" : Math.max(0, Number(e.target.value)) })}
-                      className="w-14 bg-white border border-slate-200 px-2 py-1 rounded text-xs text-center outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                )}
-                <div className="flex rounded-md overflow-hidden border border-slate-200 shrink-0">
-                  <button type="button" onClick={() => pick(it.key, true)} className={`text-[10px] font-bold px-2.5 py-1 transition ${good ? "bg-emerald-500 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}>{it.good}</button>
-                  <button type="button" onClick={() => pick(it.key, false)} className={`text-[10px] font-bold px-2.5 py-1 transition ${!good ? "bg-rose-500 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}>{it.bad}</button>
-                </div>
-              </div>
-            );
-          })}
-          <div className="flex items-center justify-between pt-1">
-            <span className="text-[11px] text-slate-500">
-              Skor otomatis: <strong className="text-slate-800">{score}</strong> ({passed}/{AUDIT_ITEMS.length})
-            </span>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge}`}>{status}</span>
-          </div>
-        </div>
-      );
+      control = <AuditChecklist map={val && typeof val === "object" ? val : {}} onChange={set} />;
     } else {
       control = (
         <input
@@ -2774,7 +2806,34 @@ export default function LifecycleManager({
                   </span>
                 </label>
               )}
-              <div className="grid grid-cols-2 gap-4">{gateFor(transitionTarget, detailAsset.currentStage, detailAsset).fields.map(renderField)}</div>
+              {(() => {
+                const cfg = gateFor(transitionTarget!, detailAsset.currentStage, detailAsset);
+                // Grouped AUDIT → one shared header (auditor/date/note) + a checklist PER member.
+                const groupAudit = transitionTarget === 7 && groupMode && groupSameStage.length >= 2;
+                if (groupAudit) {
+                  return (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">{cfg.fields.filter(f => f.type !== "auditstatus").map(renderField)}</div>
+                      <div className="space-y-2.5">
+                        <p className="text-xs font-bold text-slate-700">Checklist Audit per Aset ({groupSameStage.length}) — isi kondisi tiap barang</p>
+                        {groupSameStage.map(mm => (
+                          <div key={mm.id} className="rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="flex items-center gap-2 bg-slate-100 px-3 py-2">
+                              <span className="font-mono text-[10px] text-blue-700">{mm.id}</span>
+                              <span className="text-[11px] font-bold text-slate-800 truncate">{mm.name}</span>
+                              <span className="ml-auto text-[9px] text-slate-400 shrink-0">{mm.quantity} unit</span>
+                            </div>
+                            <div className="p-3">
+                              <AuditChecklist map={groupAuditMaps[mm.id] || defaultAuditMap(mm.quantity)} onChange={mp => setGroupAuditMaps(prev => ({ ...prev, [mm.id]: mp }))} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
+                return <div className="grid grid-cols-2 gap-4">{cfg.fields.map(renderField)}</div>;
+              })()}
 
               {gateError && (
                 <div className="p-3 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center gap-2 text-xs font-semibold">

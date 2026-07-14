@@ -529,7 +529,7 @@ export default function LifecycleManager({
   const [batchForm, setBatchForm] = React.useState({ suratJalanNo: "", deployMode: "", projectId: "", driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
   const [batchBusy, setBatchBusy] = React.useState(false);
   const [batchError, setBatchError] = React.useState<string | null>(null);
-  const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; courier?: string; trackingNo?: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
+  const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; tanggal: string; projectName?: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; courier?: string; trackingNo?: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
 
   // Transition gate state
   const [transitionTarget, setTransitionTarget] = React.useState<number | null>(null);
@@ -980,7 +980,7 @@ export default function LifecycleManager({
     setBatchFlash({ sent: flashSent, remained: flashRemained, count: items.length });
     setTimeout(() => setBatchFlash(null), 4200);
     const rows = items.map(it => ({ id: it.id, name: assets.find(x => x.id === it.id)?.name || it.id, qty: it.qty }));
-    setBatchPrint({ suratJalanNo: res.suratJalanNo || batchForm.suratJalanNo, area: batchForm.area.trim(), picPenerima: batchForm.picPenerima.trim(), driverName: batchForm.driverName.trim(), vehiclePlate: batchForm.vehiclePlate.trim(), rows });
+    setBatchPrint({ suratJalanNo: res.suratJalanNo || batchForm.suratJalanNo, tanggal: new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }), projectName: batchProjects.find(p => String(p.id) === batchForm.projectId)?.name || "", area: batchForm.area.trim(), picPenerima: batchForm.picPenerima.trim(), driverName: batchForm.driverName.trim(), vehiclePlate: batchForm.vehiclePlate.trim(), rows });
     setBatchOpen(false); setBatchMode(false); setBatchSel([]); setBatchQty({}); setBatchForm(f => ({ ...f, deployMode: "" }));
   };
 
@@ -3284,10 +3284,10 @@ export default function LifecycleManager({
             <div id="printable-doc" className="p-8 text-slate-800">
               <div className="flex justify-between items-start border-b-2 border-slate-800 pb-3 mb-4">
                 <div><h1 className="text-lg font-extrabold">{settings?.company_name || "PT Origin Connect"}</h1><p className="text-[11px] text-slate-500">{settings?.company_address || ""}</p></div>
-                <div className="text-right"><h2 className="text-base font-extrabold tracking-widest">SURAT JALAN</h2><p className="text-[11px] font-mono">{batchPrint.suratJalanNo}</p></div>
+                <div className="text-right"><h2 className="text-base font-extrabold tracking-widest">SURAT JALAN</h2><p className="text-[11px] font-mono">{batchPrint.suratJalanNo}</p><p className="text-[11px] text-slate-500">Tanggal: <strong className="text-slate-700">{batchPrint.tanggal}</strong></p></div>
               </div>
               <div className="grid grid-cols-2 gap-3 text-[11px] mb-4">
-                <div>Tujuan: <strong>{batchPrint.area}</strong>{batchPrint.picPenerima ? <> · PIC: <strong>{batchPrint.picPenerima}</strong></> : null}</div>
+                <div>{batchPrint.projectName ? <>Proyek: <strong>{batchPrint.projectName}</strong><br /></> : null}Tujuan: <strong>{batchPrint.area || "—"}</strong>{batchPrint.picPenerima ? <> · PIC: <strong>{batchPrint.picPenerima}</strong></> : null}</div>
                 <div className="text-right">{batchPrint.driverName ? <>Driver: <strong>{batchPrint.driverName}</strong>{batchPrint.vehiclePlate ? <> · {batchPrint.vehiclePlate}</> : null}</> : batchPrint.courier ? <>Kurir: <strong>{batchPrint.courier}</strong>{batchPrint.trackingNo ? <> · Resi {batchPrint.trackingNo}</> : null}</> : null}</div>
               </div>
               <table className="w-full text-[11px] border-collapse">

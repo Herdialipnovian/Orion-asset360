@@ -512,7 +512,7 @@ export default function LifecycleManager({
   const deprPct = Number(settings?.depreciation_pct) || 15;
   const defaultWeeks = Number(settings?.default_timeline_weeks) || 4;
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [filterCategory, setFilterCategory] = React.useState("ALL");
+  const [filterType, setFilterType] = React.useState("ALL");
   const [filterStage, setFilterStage] = React.useState<number | string>(initialStageFilter);
   const [flowFilter, setFlowFilter] = React.useState<"ALL" | "Belum" | "Standard" | "Event" | "Distribusi">("ALL");
 
@@ -990,7 +990,7 @@ export default function LifecycleManager({
     vendorName: "PT Global Tech Integrasi"
   });
 
-  const categories = React.useMemo(() => Array.from(new Set(assets.map(a => a.category))), [assets]);
+  const types = React.useMemo(() => Array.from(new Set(assets.map(a => (a.type || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [assets]);
 
   // Register-eligible assets (all filters EXCEPT the flow filter) — used both for the flow legend
   // counts and, after applying the flow filter, for the rendered grid.
@@ -1003,13 +1003,13 @@ export default function LifecycleManager({
         (asset.id || "").toLowerCase().includes(q) ||
         (asset.projectCode || "").toLowerCase().includes(q);
       const matchClient = selectedClient === "ALL" || asset.client === selectedClient;
-      const matchCategory = filterCategory === "ALL" || asset.category === filterCategory;
+      const matchType = filterType === "ALL" || (asset.type || "") === filterType;
       const matchStage = filterStage === "ALL" || asset.currentStage === Number(filterStage);
       // Deployment lifecycle only — Internal (custodian) assets live in the "Aset Internal" menu.
       const isDeployment = asset.peruntukan !== "Internal";
-      return isDeployment && matchSearch && matchClient && matchCategory && matchStage;
+      return isDeployment && matchSearch && matchClient && matchType && matchStage;
     });
-  }, [assets, searchQuery, selectedClient, filterCategory, filterStage]);
+  }, [assets, searchQuery, selectedClient, filterType, filterStage]);
   const flowCounts = React.useMemo(() => {
     const c: Record<string, number> = { Belum: 0, Standard: 0, Event: 0, Distribusi: 0 };
     baseAssetsList.forEach(a => { c[flowKeyOf(projectModeOf(a))] = (c[flowKeyOf(projectModeOf(a))] || 0) + 1; });
@@ -1766,38 +1766,23 @@ export default function LifecycleManager({
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-1.5">
             <span className="text-[10px] text-slate-500 font-bold px-1 uppercase tracking-wider flex items-center gap-1">
-              <Filter className="h-3 w-3" /> Kategori:
+              <Filter className="h-3 w-3" /> Type:
             </span>
             <select
-              value={filterCategory}
-              onChange={e => setFilterCategory(e.target.value)}
+              value={filterType}
+              onChange={e => setFilterType(e.target.value)}
               className="bg-transparent border-0 text-slate-700 font-bold text-xs select-none cursor-pointer pr-4 focus:ring-0 outline-none"
             >
               <option value="ALL">Semua</option>
-              {categories.map(cat => (
-                <option key={cat} value={cat}>
-                  {cat}
+              {types.map(t => (
+                <option key={t} value={t}>
+                  {t}
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-1.5">
-            <span className="text-[10px] text-slate-500 font-bold px-1 uppercase tracking-wider">Fase:</span>
-            <select
-              value={filterStage}
-              onChange={e => setFilterStage(e.target.value)}
-              className="bg-transparent border-0 text-slate-700 font-bold text-xs select-none cursor-pointer pr-4 focus:ring-0 outline-none"
-            >
-              <option value="ALL">Semua Alur (1 s/d 8)</option>
-              {[3, 4, 5, 6, 7, 8, 9, 10].map(s => (
-                <option key={s} value={s}>
-                  Fase {faseNo(s)} - {cleanLabel(s)}
-                </option>
-              ))}
-            </select>
-          </div>
-
+          {/* Fase filter dropdown removed — the sidebar phase nav (PHASE_NAV) drives which phase is shown. */}
           {/* Aset ditambah di menu Master Data (lahir di Gudang/Fase 3) — bukan lagi lewat wizard di sini. */}
           {/* Consolidated dispatch now happens ONLY from the Gudang view (list + selection cart);
               the old card-checkbox "Kirim Bersama" toggle/modal is retired. */}

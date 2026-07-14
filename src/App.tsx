@@ -67,8 +67,9 @@ import { api, getToken, type AuthUser } from "./api";
 // Fase 1 (Request/WO) & 2 (Produksi) removed — assets are added in Master Data (born in Gudang/Fase 3).
 const PHASE_NAV: { stage: number; label: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { stage: 3, label: "Gudang", Icon: Home },
-  // Fase 2 "Surat Jalan" has no sidebar shortcut — the SJ is created from the Gudang cart flow.
-  // Assets still land at Fase 2; view them via Asset Register. (Udin 2026-07-14)
+  // Surat Jalan (Fase 2) = the phase right after Gudang; the SJ is CREATED via the Gudang builder,
+  // this menu VIEWs assets that already have a Surat Jalan (awaiting transit). (Udin 2026-07-14)
+  { stage: 4, label: "Surat Jalan", Icon: Truck },
   { stage: 5, label: "Transit", Icon: Compass },
   { stage: 6, label: "Terpasang", Icon: MapPin },
   { stage: 7, label: "Audit", Icon: ShieldCheck },

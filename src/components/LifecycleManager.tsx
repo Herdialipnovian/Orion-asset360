@@ -701,6 +701,21 @@ export default function LifecycleManager({
   // Re-arm the default only when the SHIPMENT GROUP changes — switching between members of the same
   // group preserves a deliberate OFF choice (don't silently re-enable on every asset switch).
   React.useEffect(() => { setGroupActs(true); }, [detailBatchId]);
+  // "Proses Grup" from the list opens a member's detail and (for a single forward step) auto-opens
+  // that step's gate in group mode, so the operator processes the whole shipment from one entry point.
+  const [pendingGroupGate, setPendingGroupGate] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    if (pendingGroupGate == null || !detailAsset) return;
+    const t = pendingGroupGate; setPendingGroupGate(null);
+    if ((TRANSITIONS[detailAsset.currentStage] || []).includes(t)) openGate(t);
+  }, [pendingGroupGate, detailAsset]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openGroupProcess = (g: { batchId: string; members: Asset[] }) => {
+    const first = g.members[0]; if (!first) return;
+    setGroupActs(true);
+    setDetailAssetId(first.id);
+    const nx = TRANSITIONS[first.currentStage] || [];
+    if (nx.length === 1) setPendingGroupGate(nx[0]); // single obvious next step → jump straight to its gate
+  };
   const useGroupVenue = !!(onGroupVenue && hasGroup && groupActs);
   // Can the CURRENT gate transition be applied to the whole group? Any LEGAL ladder step (audit/
   // maintenance/penarikan/POD/…), ≥2 same-stage members.
@@ -1820,7 +1835,13 @@ export default function LifecycleManager({
                           {dest?.area && <span className={chip}><MapPin className="h-3 w-3" /> {dest.area}</span>}
                         </div>
                       </div>
-                      <span className="ml-auto hidden shrink-0 items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[10px] font-extrabold text-blue-700 shadow-sm sm:inline-flex"><Truck className="h-3 w-3" /> berangkat bersama</span>
+                      <button
+                        onClick={() => openGroupProcess(g)}
+                        title="Proses seluruh aset dalam pengiriman ini sekaligus"
+                        className="ml-auto shrink-0 inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[11px] font-extrabold text-blue-700 shadow-sm hover:bg-blue-50 transition"
+                      >
+                        <Truck className="h-3.5 w-3.5" /> Proses Grup ({g.members.length}) →
+                      </button>
                     </div>
                   </div>
                   {/* Member cards tray */}

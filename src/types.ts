@@ -180,6 +180,11 @@ export interface Asset {
         seq: number; // order in the roadshow (1,2,3…)
         // transit = shipped to this venue, not yet arrived · active = arrived & set up · done = relocated away
         status: "planned" | "transit" | "active" | "done";
+        // Fine-grained cycle for a NEW venue hop (Venue Berikutnya): transit→pemasangan→terpasang→audit→active.
+        // The coarse `status` above stays "transit" while a hop is mid-cycle, flips to "active" once audited.
+        subStatus?: "transit" | "pemasangan" | "terpasang" | "audit" | "active";
+        install?: { merchandiserId?: number; merchandiser?: string; installedAt?: string }; // per-venue MD install
+        audit?: { auditedBy?: string; auditedAt?: string; validated?: boolean }; // per-venue PIC audit
         setupDate?: string;
         teardownDate?: string;
         signature?: string;

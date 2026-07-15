@@ -312,7 +312,7 @@ export const api = {
     return req(`/assets/${encodeURIComponent(id)}/install/complete`, { method: "POST", body: JSON.stringify(p) });
   },
   // Apply a location-chain action to a WHOLE shipment group at once (one Surat Jalan).
-  groupVenue(p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }): Promise<{ ok: boolean; count: number; skipped: number; suratJalanNo?: string; assets: Asset[] }> {
+  groupVenue(p: { batchId: string; assetIds?: string[]; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse" | "leg-arrive" | "leg-install" | "leg-audit"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string; merchandiserId?: number; auditedBy?: string }): Promise<{ ok: boolean; count: number; skipped: number; suratJalanNo?: string; assets: Asset[] }> {
     return req(`/assets/group-venue`, { method: "POST", body: JSON.stringify(p) });
   },
   // PIC records the audit validation on a shipment group at Audit (stage 8) — no stage change.

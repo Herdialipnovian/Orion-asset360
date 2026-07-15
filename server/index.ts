@@ -975,9 +975,10 @@ app.post("/api/assets/group-advance", requireAuth, wrap(async (req: AuthedReq, r
   res.json({ ok: true, count: affected.length, assets: (await Promise.all(surfaceIds.map(id => getAsset(id)))).filter(Boolean) });
 }));
 
-// ── PIC audit validation for a shipment group at Audit (Fase 6 display / stage 8): records the audit
-//    (validated + auditedAt + auditedBy) on each member's deployment WITHOUT changing stage. The PIC's
-//    per-asset validation photos are uploaded separately as evidence. PIC (client-scoped) or Admin. ──
+// ── PIC audit validation for a shipment group at Audit (stage 8): records the audit (validated +
+//    auditedAt + auditedBy), materializes the install venue as roadshow leg #1, and ADVANCES the group
+//    into the Venue menu (Fase 9) — one action per Udin's flow ("setelah konfirmasi audit masuk ke Venue").
+//    The PIC's per-asset validation photos upload separately as evidence. PIC (client-scoped) or Admin. ──
 app.post("/api/assets/group-audit", requireAuth, wrap(async (req: AuthedReq, res) => {
   const b = req.body || {};
   const batchId = String(b.batchId || "").trim();
@@ -985,37 +986,84 @@ app.post("/api/assets/group-audit", requireAuth, wrap(async (req: AuthedReq, res
   if (req.user!.role !== "Admin" && req.user!.role !== "PIC") return res.status(403).json({ error: "Hanya PIC atau Admin yang boleh mengaudit." });
   const now = new Date().toISOString();
   const auditedBy = String(b.auditedBy || req.user!.name);
-  const affected: string[] = [];
+  const affected: string[] = []; const skipped: string[] = [];
   try {
     await tx(async c => {
-      const { rows } = await c.query(`select id, client, stage_details from assets where stage_details->'shipping'->>'batchId'=$1 and current_stage=8 for update`, [batchId]);
+      const { rows } = await c.query(`select id, client, current_location, stage_details from assets where stage_details->'shipping'->>'batchId'=$1 and current_stage=8 for update`, [batchId]);
       if (!rows.length) throw Object.assign(new Error("Tidak ada anggota grup di fase Audit."), { http: 422 });
       if (req.user!.role === "PIC" && rows.some(r => (r.client || null) !== (req.user!.client || null))) throw Object.assign(new Error("Grup ini memuat aset di luar client Anda."), { http: 403 });
       for (const r of rows) {
         const sd: any = r.stage_details || {};
         const dep: any = { ...(sd.deployment || {}), audit: { auditedAt: now, auditedBy, validated: true } };
-        await c.query(`update assets set stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, deployment: dep })]);
+        // Venue (roadshow) = Event/unbound; Distribusi (toko fan-out) does NOT belong in the Venue menu
+        // and would be stranded there (all venue ops skip it), so it stays at Audit (stage 8) — validated only.
+        const isVenue = dep.mode !== "Distribusi" && !(Array.isArray(dep.placements) && dep.placements.length);
+        if (!isVenue) {
+          await c.query(`update assets set stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, deployment: dep })]);
+          skipped.push(r.id);
+          continue;
+        }
+        // Materialize the install venue as roadshow leg #1 so the Venue menu opens with a real timeline
+        // (first stop = where the asset was installed & audited). Later hops append legs via group-venue.
+        const legs: any[] = Array.isArray(dep.legs) ? dep.legs.map((l: any) => ({ ...l })) : [];
+        const v: any = dep.venue;
+        if (!legs.length && v && v.locationId) {
+          const dests: any[] = Array.isArray(sd.shipping?.destinations) ? sd.shipping.destinations : [];
+          const installedAt = dep.installedAt ? String(dep.installedAt) : now;
+          legs.push({
+            locationId: v.locationId, venue: v.name || v.venue, area: v.area || undefined,
+            pic: dests[0]?.picPenerima || undefined, seq: 1, status: "active", subStatus: "active",
+            setupDate: installedAt.slice(0, 10), arrivedAt: installedAt,
+            install: { merchandiser: (dep.assignments || []).map((a: any) => a.merchandiser).filter(Boolean).join(", ") || undefined, installedAt },
+            audit: { auditedBy, auditedAt: now, validated: true },
+            shipping: { suratJalanNo: batchId }
+          });
+          dep.legs = legs; dep.currentLegSeq = 1;
+        }
+        dep.mode = dep.mode || "Event";
+        // Move into the Venue menu (Fase 9). Location = the active venue (not the legacy "retur"). Clear the
+        // maintenance flag: the 7→8 "Kirim ke Audit" step stamps REPAIRING (stage-8 engine = maintenance),
+        // and Venue (active at a location) must not keep showing as "Perlu Perhatian".
+        const last = legs[legs.length - 1];
+        const loc = last ? `Venue: ${last.venue}${last.area ? ` (${last.area})` : ""}` : computeLocation(9, undefined, r.client, r.current_location || "");
+        await c.query(`update assets set current_stage=9, current_location=$3, stage_details=$2::jsonb, maintenance_status='NONE', updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, deployment: dep }), loc]);
         affected.push(r.id);
       }
     });
   } catch (e: any) { if (e && e.http) return res.status(e.http).json({ error: e.message }); throw e; }
-  for (const id of affected) { const a = await getAsset(id); await insertLog({ id: `LOG-AUDIT-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 8, action: `Pemasangan divalidasi (audit) oleh PIC ${auditedBy}.`, operator: auditedBy, type: "success" }); assetChanged(id); }
-  res.json({ ok: true, count: affected.length, assets: (await Promise.all(affected.map(id => getAsset(id)))).filter(Boolean) });
+  for (const id of affected) { const a = await getAsset(id); await insertLog({ id: `LOG-AUDIT-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 9, action: `Audit divalidasi PIC ${auditedBy} — aset masuk ke Venue (roadshow).`, operator: auditedBy, type: "success" }); assetChanged(id); }
+  for (const id of skipped) { const a = await getAsset(id); await insertLog({ id: `LOG-AUDIT-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 8, action: `Audit divalidasi PIC ${auditedBy} (aset Distribusi — tetap di Audit).`, operator: auditedBy, type: "success" }); assetChanged(id); }
+  res.json({ ok: true, count: affected.length, skipped: skipped.length, assets: (await Promise.all([...affected, ...skipped].map(id => getAsset(id)))).filter(Boolean) });
 }));
 
-// ── Group venue ops: apply a location-chain action to EVERY member of a shipment group (same batchId,
-//    Fase 6) at once, sharing ONE Surat Jalan. Mirrors the per-asset deploy-venue / arrive-venue /
-//    ship-return / arrive-warehouse. Members not in the right sub-state are skipped (reported), never errored.
+// ── Group venue ops: apply a roadshow action to EVERY member of a shipment group (same batchId) at the
+//    Venue menu (Fase 9) at once, sharing ONE Surat Jalan. deploy = kirim ke venue berikutnya (append leg),
+//    ship-return + arrive-warehouse = balik ke Gudang (Fase 3) + merge-back. Members not in the right
+//    sub-state are skipped (reported), never errored.
 app.post("/api/assets/group-venue", requireAuth, wrap(async (req: AuthedReq, res) => {
   const b = req.body || {};
   const batchId = String(b.batchId || "").trim();
   const op = String(b.op || "").trim();
+  // Scope to the exact assets the operator saw/acted on (the panel sends its member ids). Prevents a leg op
+  // from sweeping co-batch Fase-9 siblings hidden by a search filter (whose evidence was never uploaded).
+  const assetIds: string[] | null = Array.isArray(b.assetIds) && b.assetIds.length ? b.assetIds.map((x: any) => String(x)) : null;
   if (!batchId) return res.status(400).json({ error: "Grup pengiriman (batchId) wajib." });
-  if (!["deploy", "arrive-venue", "ship-return", "arrive-warehouse"].includes(op)) return res.status(400).json({ error: "Operasi grup tidak dikenal." });
-  // Role gate mirrors the per-asset endpoints: arrive-at-Gudang = Logistik/Admin; deploy / arrive-venue /
-  // ship-return = Logistik/PIC/Admin (per-asset ship-return also allows PIC).
+  if (!["deploy", "arrive-venue", "ship-return", "arrive-warehouse", "leg-arrive", "leg-install", "leg-audit"].includes(op)) return res.status(400).json({ error: "Operasi grup tidak dikenal." });
+  // Role gate mirrors the per-asset endpoints: arrive-at-Gudang = Logistik/Admin; every other venue op
+  // (deploy / arrive-venue / ship-return / leg-arrive / leg-install / leg-audit) = Logistik/PIC/Admin.
   const roleOk = req.user!.role === "Admin" || (op === "arrive-warehouse" ? req.user!.role === "Logistik" : ["Logistik", "PIC"].includes(req.user!.role));
   if (!roleOk) return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang untuk operasi grup ini.` });
+
+  // "Venue Berikutnya" hop sub-steps (leg-install needs an MD; leg-audit records the auditor).
+  let mdId = 0, mdName = "";
+  if (op === "leg-install") {
+    mdId = Number(b.merchandiserId);
+    if (!mdId) return res.status(400).json({ error: "Merchandiser (MD) wajib dipilih." });
+    const { rows: mr } = await q(`select name from users where id=$1 and role='Merchandiser'`, [mdId]);
+    if (!mr[0]) return res.status(400).json({ error: "Merchandiser tidak valid." });
+    mdName = mr[0].name;
+  }
+  const auditedBy2 = String(b.auditedBy || req.user!.name);
 
   const now = new Date().toISOString().slice(0, 10);
   const sharedSJ = String(b.suratJalanNo || "").trim() || `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
@@ -1037,10 +1085,11 @@ app.post("/api/assets/group-venue", requireAuth, wrap(async (req: AuthedReq, res
     await tx(async c => {
       const { rows } = await c.query(
         `select id, client, stage_details from assets
-         where stage_details->'shipping'->>'batchId' = $1 and current_stage = 6 for update`,
-        [batchId]
+         where stage_details->'shipping'->>'batchId' = $1 and current_stage = 9
+           and ($2::text[] is null or id = any($2)) for update`,
+        [batchId, assetIds]
       );
-      if (!rows.length) throw Object.assign(new Error("Tidak ada anggota grup di Fase 6."), { http: 422 });
+      if (!rows.length) throw Object.assign(new Error("Tidak ada anggota grup di Venue (Fase 9)."), { http: 422 });
       if (req.user!.role === "PIC" && rows.some(r => (r.client || null) !== (req.user!.client || null))) {
         throw Object.assign(new Error("Grup ini memuat aset di luar client Anda."), { http: 403 });
       }
@@ -1055,7 +1104,7 @@ app.post("/api/assets/group-venue", requireAuth, wrap(async (req: AuthedReq, res
           if (transitLeg || retTransit || dep.mode === "Distribusi" || (Array.isArray(dep.placements) && dep.placements.length)) { skipped.push(r.id); continue; }
           for (const lg of legs) if (lg.status === "active") { lg.status = "done"; lg.teardownDate = lg.teardownDate || now; }
           const seq = legs.reduce((m, l) => Math.max(m, l.seq || 0), 0) + 1;
-          legs.push({ locationId: loc.id, venue: loc.name, area: loc.area || undefined, pic: b.pic ? String(b.pic).trim() : undefined, seq, status: "transit", setupDate: b.setupDate || undefined, shipping: { suratJalanNo: sharedSJ, ...shipMeta, shippedAt: now } });
+          legs.push({ locationId: loc.id, venue: loc.name, area: loc.area || undefined, pic: b.pic ? String(b.pic).trim() : undefined, seq, status: "transit", subStatus: "transit", setupDate: b.setupDate || undefined, shipping: { suratJalanNo: sharedSJ, ...shipMeta, shippedAt: now } });
           dep.legs = legs; dep.currentLegSeq = seq; dep.mode = "Event";
           await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, `Dalam pengiriman → Venue: ${loc.name}${loc.area ? ` (${loc.area})` : ""}`, JSON.stringify({ ...sd, deployment: dep })]);
           affected.push(r.id);
@@ -1074,6 +1123,30 @@ app.post("/api/assets/group-venue", requireAuth, wrap(async (req: AuthedReq, res
           dep.returnShipment = { suratJalanNo: sharedSJ, ...shipMeta, shippedAt: now, status: "transit" };
           await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, `Dalam pengiriman → Gudang`, JSON.stringify({ ...sd, deployment: dep })]);
           affected.push(r.id);
+        } else if (op === "leg-arrive") {
+          // Venue Berikutnya: shipment arrived at the new venue → start the install cycle (subStatus pemasangan).
+          const lg = legs.find(l => l.status === "transit" && (l.subStatus === "transit" || !l.subStatus));
+          if (!lg) { skipped.push(r.id); continue; }
+          lg.subStatus = "pemasangan"; lg.arrivedAt = now; if (!lg.setupDate) lg.setupDate = now;
+          dep.legs = legs; dep.currentLegSeq = lg.seq;
+          await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, `Venue: ${lg.venue}${lg.area ? ` (${lg.area})` : ""} — pemasangan`, JSON.stringify({ ...sd, deployment: dep })]);
+          affected.push(r.id);
+        } else if (op === "leg-install") {
+          // MD confirmed installation at the new venue → ready for audit (subStatus audit).
+          const lg = legs.find(l => l.subStatus === "pemasangan");
+          if (!lg) { skipped.push(r.id); continue; }
+          lg.subStatus = "audit"; lg.install = { merchandiserId: mdId || undefined, merchandiser: mdName || undefined, installedAt: new Date().toISOString() };
+          dep.legs = legs; dep.currentLegSeq = lg.seq;
+          await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, `Venue: ${lg.venue}${lg.area ? ` (${lg.area})` : ""} — audit`, JSON.stringify({ ...sd, deployment: dep })]);
+          affected.push(r.id);
+        } else if (op === "leg-audit") {
+          // PIC validated the new venue → leg is fully live (subStatus + status active).
+          const lg = legs.find(l => l.subStatus === "audit");
+          if (!lg) { skipped.push(r.id); continue; }
+          lg.subStatus = "active"; lg.status = "active"; lg.audit = { auditedBy: auditedBy2, auditedAt: new Date().toISOString(), validated: true };
+          dep.legs = legs; dep.currentLegSeq = lg.seq;
+          await c.query(`update assets set current_location=$2, stage_details=$3::jsonb, updated_at=now() where id=$1`, [r.id, `Venue: ${lg.venue}${lg.area ? ` (${lg.area})` : ""}`, JSON.stringify({ ...sd, deployment: dep })]);
+          affected.push(r.id);
         } else { // arrive-warehouse
           if (!retTransit) { skipped.push(r.id); continue; }
           const ret = { ...(dep.returnShipment || {}), status: "done", arrivedAt: now };
@@ -1088,11 +1161,11 @@ app.post("/api/assets/group-venue", requireAuth, wrap(async (req: AuthedReq, res
     throw e;
   }
 
-  const LOGV: any = { deploy: `Kirim grup ke venue ${loc?.name}`, "arrive-venue": "Tiba & aktif di venue (grup)", "ship-return": "Kirim grup kembali ke gudang", "arrive-warehouse": "Tiba di gudang (grup) — perjalanan selesai" };
-  const stageLog = op === "arrive-warehouse" ? 3 : 6;
+  const LOGV: any = { deploy: `Kirim grup ke venue ${loc?.name}`, "arrive-venue": "Tiba & aktif di venue (grup)", "ship-return": "Kirim grup kembali ke gudang", "arrive-warehouse": "Tiba di gudang (grup) — perjalanan selesai", "leg-arrive": "Tiba di venue berikutnya (grup) — mulai pemasangan", "leg-install": `Pemasangan di venue berikutnya oleh ${mdName || "MD"} (grup)`, "leg-audit": "Audit venue berikutnya divalidasi PIC (grup) — leg aktif" };
+  const stageLog = op === "arrive-warehouse" ? 3 : 9;
   for (const id of affected) {
     const a = await getAsset(id);
-    await insertLog({ id: `LOG-GRPV-${Date.now()}-${id}`, timestamp: new Date().toISOString(), assetId: id, assetName: a?.name || id, stage: stageLog, action: `${LOGV[op]} (grup ${batchId}${op === "deploy" || op === "ship-return" ? `, SJ ${sharedSJ}` : ""})`, operator: req.user!.name, type: op === "arrive-venue" || op === "arrive-warehouse" ? "success" : "info" });
+    await insertLog({ id: `LOG-GRPV-${Date.now()}-${id}`, timestamp: new Date().toISOString(), assetId: id, assetName: a?.name || id, stage: stageLog, action: `${LOGV[op]} (grup ${batchId}${op === "deploy" || op === "ship-return" ? `, SJ ${sharedSJ}` : ""})`, operator: req.user!.name, type: op === "arrive-venue" || op === "arrive-warehouse" || op === "leg-audit" ? "success" : "info" });
     assetChanged(id);
   }
   let surfaceIds = affected;

@@ -51,7 +51,7 @@ const STAGE_META: { [k: number]: { label: string; hex: string; bar: string; icon
   6: { label: "Pasang", hex: "#4f46e5", bar: "bg-indigo-500", icon: Compass },
   7: { label: "Audit", hex: "#db2777", bar: "bg-pink-500", icon: ShieldCheck },
   8: { label: "Maint.", hex: "#e11d48", bar: "bg-rose-500", icon: Wrench },
-  9: { label: "Tarik", hex: "#0891b2", bar: "bg-cyan-500", icon: CornerUpLeft },
+  9: { label: "Venue", hex: "#0891b2", bar: "bg-cyan-500", icon: MapPin },
   10: { label: "Disposal", hex: "#475569", bar: "bg-slate-500", icon: Trash2 }
 };
 
@@ -117,11 +117,11 @@ export default function Dashboard({
 
     const totalUnits = units(list);
     const activeUnits = units(list.filter(a => a.currentStage !== 10));
-    const deployedUnits = uByStage[6] + uByStage[7];
+    const deployedUnits = uByStage[6] + uByStage[7] + uByStage[9]; // 9 = Venue (aktif di lokasi / roadshow)
     const warehouseUnits = uByStage[3];
     const maintenanceUnits = uByStage[8];
     const pipelineUnits = uByStage[1] + uByStage[2] + uByStage[4] + uByStage[5];
-    const retiredUnits = uByStage[9] + uByStage[10];
+    const retiredUnits = uByStage[10];
 
     const totalValue = list.reduce((s, a) => s + (a.financials?.purchaseCost || 0), 0);
     const scrapValue = list.reduce((s, a) => s + (a.financials?.disposalValue || 0), 0);
@@ -150,7 +150,7 @@ export default function Dashboard({
       { name: "Gudang / Idle", units: warehouseUnits, hex: "#3b82f6" },
       { name: "Dalam Proses", units: pipelineUnits, hex: "#f59e0b" },
       { name: "Maintenance", units: maintenanceUnits, hex: "#e11d48" },
-      { name: "Penarikan / Retired", units: retiredUnits, hex: "#64748b" }
+      { name: "Disposal", units: retiredUnits, hex: "#64748b" }
     ]
       .filter(b => b.units > 0)
       .map(b => ({ ...b, pct: Math.round((b.units / tBase) * 1000) / 10 }));

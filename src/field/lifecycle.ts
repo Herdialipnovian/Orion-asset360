@@ -99,7 +99,7 @@ export const STAGE_LABELS: { [k: number]: string } = {
   6: "Proses Pemasangan",
   7: "Asset Terpasang",
   8: "Audit",
-  9: "Penarikan",
+  9: "Venue",
   10: "Disposal"
 };
 
@@ -113,7 +113,7 @@ export const STAGE_FULL: { [k: number]: string } = {
   6: "Fase 4 — Proses Pemasangan",
   7: "Fase 5 — Asset Terpasang",
   8: "Fase 6 — Audit",
-  9: "Fase 7 — Penarikan",
+  9: "Fase 7 — Venue",
   10: "Fase 8 — Disposal"
 };
 
@@ -203,7 +203,9 @@ export const EVIDENCE_SLOTS: { [k: number]: EvidenceSlot[] } = {
 };
 
 // Stages the MOBILE app handles (Udin: all except 1 Request & 5 Transit).
-export const FIELD_STAGES = [2, 3, 4, 6, 7, 8, 9, 10];
+// Fase 9 (Venue) is entered from the CMS (group-audit materializes the roadshow leg), NOT the field app,
+// so it's not a field-initiated transition target. The mobile Venue flow is a separate follow-up.
+export const FIELD_STAGES = [2, 3, 4, 6, 7, 8, 10];
 
 export function canRoleDoStage(role: Role, target: number): boolean {
   if (role === "Admin") return true;

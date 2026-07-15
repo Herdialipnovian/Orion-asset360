@@ -21,7 +21,7 @@ export function computeLocation(nextStage: number, warehouseName: string | undef
     case 8:
       return "Gedung Cabang - Sedang Diperbaiki Teknisi Ahli";
     case 9:
-      return "Kantor Pusat / Gudang Retur Cikarang";
+      return "Venue / Roadshow (lokasi aktif)";
     case 10:
       return "Aset Non-Aktif (Telah di-Scrap & di-Retire Resmi)";
     default:
@@ -37,7 +37,7 @@ export const DEFAULT_LOG: { [k: number]: string } = {
   6: "Instalasi rampung. Berita Acara (BAST) ditandatangani.",
   7: "Pemeriksaan kepatuhan audit diselesaikan.",
   8: "Tiket perawatan dibuka setelah dilaporkan ada gangguan.",
-  9: "Aset ditarik untuk penilaian relokasi / retur.",
+  9: "Aset aktif di Venue (roadshow).",
   10: "Aset resmi di-disposal, nilai sisa diamankan."
 };
 
@@ -85,7 +85,7 @@ export const EVIDENCE_REQUIRED: { [k: number]: EvidenceSlot[] } = {
   ],
   7: [{ slot: "overview", label: "Foto kondisi aset keseluruhan (overview)" }],
   8: [{ slot: "damage_before", label: "Foto kerusakan (before)" }],
-  9: [{ slot: "condition_retrieval", label: "Foto kondisi aset saat ditarik" }],
+  9: [{ slot: "venue_condition", label: "Foto kondisi aset di venue" }],
   10: [
     { slot: "bap", label: "Foto Berita Acara Pemusnahan (BAP)" },
     { slot: "condition_before", label: "Foto kondisi aset sebelum disposal" }

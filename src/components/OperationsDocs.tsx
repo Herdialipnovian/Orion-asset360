@@ -68,7 +68,7 @@ const DOC_TITLES: { [k: number]: string } = {
   6: "BERITA ACARA & REKAP PEMASANGAN",
   7: "LEMBAR AUDIT RUTIN RESMI & INDEKS PENILAIAN",
   8: "TIKET PEMELIHARAAN AKTIF & INVOICE PERBAIKAN",
-  9: "FORMULIR PENARIKAN & PERSETUJUAN RELOKASI",
+  9: "BERITA ACARA VENUE / ROADSHOW",
   10: "BERITA ACARA PEMUSNAHAN ASET"
 };
 
@@ -82,7 +82,7 @@ const DOC_CODE: { [k: number]: string } = {
   6: "BAST",
   7: "AUD",
   8: "TKT",
-  9: "RTV",
+  9: "VNE",
   10: "DSP"
 };
 

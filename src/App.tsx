@@ -23,6 +23,7 @@ import {
   Compass,
   Wrench,
   CornerUpLeft,
+  Tent,
   Trash2,
   Menu,
   X,
@@ -74,7 +75,7 @@ const PHASE_NAV: { stage: number; label: string; Icon: React.ComponentType<{ cla
   { stage: 6, label: "Proses Pemasangan", Icon: MapPin },
   { stage: 7, label: "Asset Terpasang", Icon: CheckSquare },
   { stage: 8, label: "Audit", Icon: ShieldCheck },
-  { stage: 9, label: "Penarikan", Icon: CornerUpLeft },
+  { stage: 9, label: "Venue", Icon: Tent },
   { stage: 10, label: "Disposal", Icon: Trash2 }
 ];
 
@@ -340,7 +341,7 @@ export default function App() {
     catch (e: any) { return { ok: false, error: e?.message || "Gagal konfirmasi pemasangan." }; }
   };
   const handleGroupVenue = async (
-    p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }
+    p: { batchId: string; assetIds?: string[]; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse" | "leg-arrive" | "leg-install" | "leg-audit"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string; merchandiserId?: number; auditedBy?: string }
   ): Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }> => {
     try { const r = await api.groupVenue(p); await refresh(); return { ok: true, count: r.count, skipped: r.skipped }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses grup." }; }

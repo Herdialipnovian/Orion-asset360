@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Wrench,
   CornerUpLeft,
+  Tent,
   Trash2,
   ArrowRight,
   AlertTriangle,
@@ -51,7 +52,7 @@ const STAGE_ICONS: { [key: number]: any } = {
   6: Compass,
   7: ShieldCheck,
   8: Wrench,
-  9: CornerUpLeft,
+  9: Tent,
   10: Trash2
 };
 
@@ -64,7 +65,7 @@ const STAGE_LABELS: { [key: number]: string } = {
   6: "Proses Pemasangan",
   7: "Asset Terpasang",
   8: "Audit",
-  9: "Penarikan",
+  9: "Venue",
   10: "Disposal"
 };
 // One-line context under each phase name (identity card + timeline).
@@ -75,11 +76,20 @@ const STAGE_SUBTITLES: { [key: number]: string } = {
   6: "Aktif di lokasi / dipakai custodian",
   7: "Pengecekan fisik & kepatuhan",
   8: "Tiket perbaikan sedang berjalan",
-  9: "Ditarik / direlokasi dari lokasi",
+  9: "Aktif di lokasi — roadshow venue",
   10: "Dimusnahkan, nilai scrap dicatat"
 };
 
 const cleanLabel = (s: number) => (STAGE_LABELS[s] || "").replace(/&amp;/g, "&");
+
+// Fine-grained roadshow-leg sub-status → operator label (Venue menu timeline).
+const SUB_LABEL: { [k: string]: string } = {
+  transit: "Dalam pengiriman",
+  pemasangan: "Pemasangan",
+  terpasang: "Terpasang",
+  audit: "Audit",
+  active: "Aktif di venue"
+};
 
 // ===========================================================================
 // LIFECYCLE STATE MACHINE — which stage(s) an asset can move to from each stage
@@ -364,7 +374,7 @@ interface LifecycleManagerProps {
   onArriveWarehouse?: (assetId: string) => Promise<{ ok: boolean; error?: string }>;
   onBatchShip?: (p: { items: { id: string; qty: number }[]; deployMode?: string; projectId?: number | null; suratJalanNo?: string; driverName: string; vehiclePlate?: string; vendorShipping?: string; departureTime?: string; area: string; picPenerima?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; suratJalanNo?: string }>;
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; perAsset?: Record<string, any>; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
-  onGroupVenue?: (p: { batchId: string; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
+  onGroupVenue?: (p: { batchId: string; assetIds?: string[]; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse" | "leg-arrive" | "leg-install" | "leg-audit"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string; merchandiserId?: number; auditedBy?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onGroupAudit?: (p: { batchId: string; auditedBy?: string }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -545,18 +555,26 @@ export default function LifecycleManager({
   const [podChecklist, setPodChecklist] = React.useState<Record<string, boolean>>({}); // per-asset "diterima" checklist (Transit)
   const [shipMd, setShipMd] = React.useState(""); // Proses Pemasangan: MD assigned for installation
   const [shipVenue, setShipVenue] = React.useState(""); // Proses Pemasangan: venue location for the install
+  const [venueAction, setVenueAction] = React.useState<null | "return" | "next">(null); // Venue (Fase 9) sub-flow open
+  const [venueReturnSJ, setVenueReturnSJ] = React.useState(""); // Surat Jalan for the return / next-venue shipment
+  const [nextVenueId, setNextVenueId] = React.useState(""); // Venue Berikutnya: target venue location id
   const openShipView = (g: { batchId: string; members: Asset[] }) => {
+    const st = g.members[0]?.currentStage;
+    // Venue (Fase 9): act on the FULL batch (from the UNFILTERED asset list) so the checklist + per-asset
+    // photos cover every co-batch sibling the server op will touch — never a search-narrowed subset.
+    const full = (st === 9 && g.batchId) ? assets.filter(a => batchIdOf(a) === g.batchId && a.currentStage === 9) : [];
+    const gg = { batchId: g.batchId, members: full.length ? full : g.members };
     setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
-    setPodSig(""); setShipMd(""); setShipVenue(String((g.members[0]?.stageDetails as any)?.deployment?.venue?.locationId || ""));
+    setPodSig(""); setShipMd(""); setShipVenue(String((gg.members[0]?.stageDetails as any)?.deployment?.venue?.locationId || ""));
+    setVenueAction(null); setVenueReturnSJ(""); setNextVenueId("");
     setInstallChk({}); setInstallPhoto({}); setInstallPrev({});
     setAuditChk({}); setAuditPhoto({}); setAuditPrev({}); setShipEvidence({});
-    const chk: Record<string, boolean> = {}; g.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
-    void loadDirectory(g.members[0]?.client); // MD/PIC directory for this shipment's client (assignment dropdown)
-    void loadVenues(g.members[0]?.client);    // Venue locations for the install-location dropdown
-    const st = g.members[0]?.currentStage;
-    if (st === 7 || st === 8) void loadShipEvidence(g.members); // MD install photos for the Terpasang/Audit views
-    setShipError(null); setShipView(g);
+    const chk: Record<string, boolean> = {}; gg.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
+    void loadDirectory(gg.members[0]?.client); // MD/PIC directory for this shipment's client (assignment dropdown)
+    void loadVenues(gg.members[0]?.client);    // Venue locations for the install-location dropdown
+    if (st === 7 || st === 8 || st === 9) void loadShipEvidence(gg.members); // MD install / venue photos
+    setShipError(null); setArriveError(null); setShipView(gg);
   };
   // MD confirms installation (Proses Pemasangan 6 → Asset Terpasang 7): checklist installed + a photo
   // per asset; date/time is auto (read-only). Photos upload to /evidence, then the group advances.
@@ -683,6 +701,89 @@ export default function LifecycleManager({
     });
     setShipBusy(false);
     if (!res.ok) return setShipError(res.error || "Gagal memproses pengiriman.");
+    setShipView(null);
+  };
+
+  // ── Venue (Fase 9) — "Balik ke Gudang": PIC ceklis semua aset + Surat Jalan + tracking → ship-return
+  //    (aset "perjalanan pulang", TETAP Fase 9). Lalu "Konfirmasi Tiba di Gudang" → arrive-warehouse
+  //    (→ Gudang Fase 3 + stok split auto-gabung). Semua via onGroupVenue (grup ATAU aset tunggal by batchId).
+  // Each Venue sub-flow starts with a FRESH unchecked list so the operator re-confirms for THIS action.
+  const resetVenueChecklist = () => { const chk: Record<string, boolean> = {}; (shipView?.members || []).forEach(m => { chk[m.id] = false; }); setPodChecklist(chk); };
+  const venueIds = () => (shipView?.members || []).map(m => m.id);
+  const openVenueReturn = () => { setShipError(null); setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" }); setVenueReturnSJ(genSuratJalan()); resetVenueChecklist(); setVenueAction("return"); };
+  const submitVenueReturn = async () => {
+    if (!shipView || !onGroupVenue) return;
+    if (!shipView.members.every(m => podChecklist[m.id])) return setShipError("Ceklis semua aset yang ditarik dulu.");
+    if (!shipForm.courier) return setShipError("Pilih kurir/vendor dulu.");
+    if (!/^https?:\/\//i.test(shipForm.trackingUrl.trim())) return setShipError("Link tracking harus diawali http:// atau https://.");
+    if (!shipForm.eta.trim()) return setShipError("Estimasi tiba (ETA) wajib diisi.");
+    setShipBusy(true); setShipError(null);
+    const res = await onGroupVenue({ batchId: shipView.batchId, assetIds: venueIds(), op: "ship-return", suratJalanNo: venueReturnSJ || undefined, courier: shipForm.courier, trackingUrl: shipForm.trackingUrl.trim(), trackingNo: shipForm.trackingNo.trim() || undefined, eta: shipForm.eta.trim() });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal mengirim aset kembali ke gudang.");
+    if ((res as any).skipped) return setShipError(`${(res as any).count} aset dikirim balik · ${(res as any).skipped} dilewati (status tidak sesuai).`);
+    setShipView(null);
+  };
+  const confirmVenueArriveWarehouse = async () => {
+    if (!shipView || !onGroupVenue || arriveBusy) return;
+    if (!window.confirm(`Konfirmasi ${shipView.members.length > 1 ? `${shipView.members.length} aset` : "aset"} sudah TIBA di gudang? Roadshow selesai & stok digabung kembali.`)) return;
+    setArriveBusy(true); setArriveError(null);
+    const res = await onGroupVenue({ batchId: shipView.batchId, assetIds: venueIds(), op: "arrive-warehouse" });
+    setArriveBusy(false);
+    if (!res.ok) return setArriveError(res.error || "Gagal mengonfirmasi kedatangan di gudang.");
+    setShipView(null);
+  };
+
+  // ── Venue (Fase 9) — "Venue Berikutnya": relokasi ke venue baru sebagai LEG baru, aset TETAP Fase 9.
+  //    Siklus: kirim (ceklis + SJ + tracking = deploy) → tiba (leg-arrive) → pemasangan (tunjuk MD + foto
+  //    = leg-install) → audit (validasi + foto = leg-audit) → leg aktif. Tiap sub-step tutup panel; buka
+  //    lagi "Lihat & Proses" untuk lanjut langkah berikutnya (konsisten dgn ladder fase lain).
+  const openVenueNext = () => { setShipError(null); setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" }); setVenueReturnSJ(genSuratJalan()); setNextVenueId(""); resetVenueChecklist(); setVenueAction("next"); };
+  const submitVenueNext = async () => {
+    if (!shipView || !onGroupVenue) return;
+    if (!nextVenueId) return setShipError("Pilih venue tujuan berikutnya dulu.");
+    if (!shipView.members.every(m => podChecklist[m.id])) return setShipError("Ceklis semua aset yang dikirim dulu.");
+    if (!shipForm.courier) return setShipError("Pilih kurir/vendor dulu.");
+    if (!/^https?:\/\//i.test(shipForm.trackingUrl.trim())) return setShipError("Link tracking harus diawali http:// atau https://.");
+    if (!shipForm.eta.trim()) return setShipError("Estimasi tiba (ETA) wajib diisi.");
+    setShipBusy(true); setShipError(null);
+    const res = await onGroupVenue({ batchId: shipView.batchId, assetIds: venueIds(), op: "deploy", locationId: Number(nextVenueId), suratJalanNo: venueReturnSJ || undefined, courier: shipForm.courier, trackingUrl: shipForm.trackingUrl.trim(), trackingNo: shipForm.trackingNo.trim() || undefined, eta: shipForm.eta.trim() });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal mengirim ke venue berikutnya.");
+    if ((res as any).skipped) return setShipError(`${(res as any).count} aset dikirim · ${(res as any).skipped} dilewati (status tidak sesuai).`);
+    setShipView(null);
+  };
+  const doLegArrive = async () => {
+    if (!shipView || !onGroupVenue || shipBusy) return;
+    setShipBusy(true); setShipError(null);
+    const res = await onGroupVenue({ batchId: shipView.batchId, assetIds: venueIds(), op: "leg-arrive" });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal konfirmasi kedatangan di venue.");
+    setShipView(null);
+  };
+  const submitLegInstall = async () => {
+    if (!shipView || !onGroupVenue) return;
+    if (!shipMd) return setShipError("Pilih Merchandiser (MD) dulu.");
+    if (!shipView.members.every(m => installChk[m.id])) return setShipError("Ceklis semua aset yang terpasang dulu.");
+    if (!shipView.members.every(m => installPhoto[m.id])) return setShipError("Foto wajib untuk setiap aset yang dipasang.");
+    setShipBusy(true); setShipError(null);
+    try { for (const m of shipView.members) await api.uploadEvidence(m.id, "venue_install", 9, [installPhoto[m.id]], "Foto pemasangan di venue berikutnya"); }
+    catch (e: any) { setShipBusy(false); return setShipError(e?.message || "Gagal mengunggah foto."); }
+    const res = await onGroupVenue({ batchId: shipView.batchId, assetIds: venueIds(), op: "leg-install", merchandiserId: Number(shipMd) });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal konfirmasi pemasangan.");
+    setShipView(null);
+  };
+  const submitLegAudit = async () => {
+    if (!shipView || !onGroupVenue) return;
+    if (!shipView.members.every(m => auditChk[m.id])) return setShipError("Ceklis (validasi) semua aset dulu.");
+    if (!shipView.members.every(m => auditPhoto[m.id])) return setShipError("Foto validasi wajib untuk setiap aset.");
+    setShipBusy(true); setShipError(null);
+    try { for (const m of shipView.members) await api.uploadEvidence(m.id, "venue_audit", 9, [auditPhoto[m.id]], "Foto validasi audit venue berikutnya"); }
+    catch (e: any) { setShipBusy(false); return setShipError(e?.message || "Gagal mengunggah foto validasi."); }
+    const res = await onGroupVenue({ batchId: shipView.batchId, assetIds: venueIds(), op: "leg-audit" });
+    setShipBusy(false);
+    if (!res.ok) return setShipError(res.error || "Gagal menyimpan audit.");
     setShipView(null);
   };
 
@@ -1277,10 +1378,16 @@ export default function LifecycleManager({
             <IconComp className="h-3.5 w-3.5" />
             <span>Fase {faseNo(asset.currentStage)}: {cleanLabel(asset.currentStage)}</span>
           </div>
-          <div className="flex items-center text-slate-400 group hover:text-blue-600 text-xs font-semibold gap-0.5">
-            <span>Detail</span>
-            <ChevronRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
-          </div>
+          {asset.currentStage === 9 ? (
+            <button type="button" onClick={() => openShipView({ batchId: batchIdOf(asset) || asset.id, members: [asset] })} className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-extrabold text-white transition hover:bg-blue-700">
+              <Eye className="h-3 w-3" /> Lihat &amp; Proses
+            </button>
+          ) : (
+            <div className="flex items-center text-slate-400 group hover:text-blue-600 text-xs font-semibold gap-0.5">
+              <span>Detail</span>
+              <ChevronRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+            </div>
+          )}
         </div>
       </div>
     );
@@ -2415,7 +2522,202 @@ export default function LifecycleManager({
                   {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
                   <button type="button" onClick={submitAudit} disabled={shipBusy} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Konfirmasi Audit (seluruh grup)</button>
                 </div>
-              ) : (
+              ) : gStage === 9 ? (() => {
+                const dep: any = (shipView.members[0]?.stageDetails as any)?.deployment || {};
+                const legs: any[] = Array.isArray(dep.legs) ? [...dep.legs].sort((a, b) => (a.seq || 0) - (b.seq || 0)) : [];
+                const ret: any = dep.returnShipment;
+                const returning = ret?.status === "transit";
+                const returnedChecked = shipView.members.filter(m => podChecklist[m.id]).length;
+                const cur: any = legs[legs.length - 1];
+                const hop: string | null = cur && cur.subStatus && cur.subStatus !== "active" ? cur.subStatus : null; // in-progress next-venue step
+                const installedChecked = shipView.members.filter(m => installChk[m.id]).length;
+                const validatedChecked = shipView.members.filter(m => auditChk[m.id]).length;
+                return (
+                  <div className="space-y-4">
+                    {/* Roadshow timeline (deployment.legs) */}
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+                      <p className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1.5"><Tent className="h-3.5 w-3.5 text-blue-600" /> Timeline Roadshow Venue</p>
+                      {legs.length === 0 ? (
+                        <p className="text-[10px] text-slate-400">Belum ada venue tercatat.</p>
+                      ) : (
+                        <ol className="relative ml-1.5 space-y-3 border-l-2 border-slate-200">
+                          {legs.map(lg => {
+                            const dot = lg.status === "active" ? "bg-emerald-500" : lg.status === "transit" ? "bg-amber-500" : lg.status === "done" ? "bg-slate-300" : "bg-slate-400";
+                            const badge = lg.status === "active" ? "bg-emerald-50 text-emerald-700" : lg.status === "transit" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500";
+                            const label = lg.subStatus ? (SUB_LABEL[lg.subStatus] || lg.subStatus) : (lg.status === "active" ? "Aktif di venue" : lg.status === "transit" ? "Dalam pengiriman" : lg.status === "done" ? "Selesai (relokasi)" : "Direncanakan");
+                            return (
+                              <li key={lg.seq} className="ml-4">
+                                <span className={`absolute -left-[7px] h-3 w-3 rounded-full ring-2 ring-white ${dot}`} />
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] font-bold text-slate-800">Venue {lg.seq}: {lg.venue}{lg.area ? ` · ${lg.area}` : ""}</span>
+                                  <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${badge}`}>{label}</span>
+                                </div>
+                                <div className="mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-slate-400">
+                                  {lg.pic && <span>PIC: {lg.pic}</span>}
+                                  {lg.shipping?.suratJalanNo && <span>SJ: {lg.shipping.suratJalanNo}</span>}
+                                  {lg.arrivedAt && <span>Tiba: {new Date(lg.arrivedAt).toLocaleDateString("id-ID")}</span>}
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      )}
+                      {ret && (
+                        <div className={`mt-1 rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold ${returning ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                          {returning ? `Dalam perjalanan kembali ke Gudang · SJ ${ret.suratJalanNo || "—"}` : "Sudah kembali ke Gudang"}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions: Balik ke Gudang · Venue Berikutnya */}
+                    {returning ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+                        <p className="text-[11px] font-extrabold text-emerald-800 flex items-center gap-1.5"><Home className="h-3.5 w-3.5" /> Konfirmasi Tiba di Gudang</p>
+                        <p className="text-[10px] text-slate-500">Aset dalam perjalanan pulang. Konfirmasi setibanya di gudang — stok otomatis digabung kembali.</p>
+                        {arriveError && <p className="text-[10px] font-semibold text-rose-600">{arriveError}</p>}
+                        <button type="button" onClick={confirmVenueArriveWarehouse} disabled={arriveBusy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{arriveBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Home className="h-4 w-4" />} Konfirmasi Tiba di Gudang</button>
+                      </div>
+                    ) : hop === "transit" ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2">
+                        <p className="text-[11px] font-extrabold text-amber-800 flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Menuju {cur?.venue}{cur?.area ? ` · ${cur.area}` : ""}</p>
+                        <p className="text-[10px] text-slate-500">Kiriman ke venue berikutnya dalam perjalanan. Konfirmasi setibanya di venue untuk mulai pemasangan.</p>
+                        {cur?.shipping?.trackingUrl && <a href={cur.shipping.trackingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline"><MapPin className="h-3 w-3" /> Buka tracking</a>}
+                        {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                        <button type="button" onClick={doLegArrive} disabled={shipBusy} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />} Konfirmasi Tiba di Venue</button>
+                      </div>
+                    ) : hop === "pemasangan" ? (
+                      <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3 space-y-3">
+                        <p className="text-[11px] font-extrabold text-violet-800 flex items-center gap-1.5"><UserCheck className="h-3.5 w-3.5" /> Pemasangan di {cur?.venue} — Tunjuk MD &amp; Foto</p>
+                        <div className="space-y-1">
+                          <label className="font-bold text-slate-700">Merchandiser (MD) <span className="text-rose-500">*</span></label>
+                          <select value={shipMd} onChange={e => setShipMd(e.target.value)} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-violet-500 cursor-pointer">
+                            <option value="">— pilih MD —</option>
+                            {merchDir.map(md => <option key={md.id} value={String(md.id)}>{md.name}{md.area ? ` · ${md.area}` : ""}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          {shipView.members.map(m => (
+                            <div key={m.id} className={`rounded-lg border p-2.5 space-y-2 ${installChk[m.id] ? "border-violet-300 bg-violet-50/40" : "border-slate-200"}`}>
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={!!installChk[m.id]} onChange={() => setInstallChk(c => ({ ...c, [m.id]: !c[m.id] }))} className="h-4 w-4 rounded accent-violet-600 shrink-0" />
+                                <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span>
+                                <span className="text-[9px] font-bold text-slate-400">Terpasang</span>
+                              </label>
+                              <div className="flex items-center gap-2">
+                                {installPrev[m.id] ? <img src={installPrev[m.id]} alt="" className="h-12 w-12 rounded-lg object-cover border border-slate-200" /> : <div className="h-12 w-12 rounded-lg border border-dashed border-slate-300 grid place-items-center text-slate-300"><Camera className="h-5 w-5" /></div>}
+                                <label className="flex-1 cursor-pointer text-[10px] font-bold text-violet-700 bg-white border border-violet-200 rounded-lg px-3 py-2 text-center hover:bg-violet-50">{installPhoto[m.id] ? "Ganti Foto" : "Ambil / Pilih Foto"} <span className="text-rose-500">*</span><input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => setInstallFile(m.id, e.target.files?.[0] || null)} /></label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                        <button type="button" onClick={submitLegInstall} disabled={shipBusy} className="w-full bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />} Konfirmasi Pemasangan (seluruh grup)</button>
+                      </div>
+                    ) : hop === "audit" ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-3 space-y-3">
+                        <p className="text-[11px] font-extrabold text-amber-800 flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" /> Audit di {cur?.venue} — Validasi PIC</p>
+                        <div className="flex items-center justify-between"><span className="text-[10px] font-bold text-slate-600">Validasi Aset</span><span className={`text-[10px] font-bold ${validatedChecked === shipView.members.length ? "text-emerald-600" : "text-slate-400"}`}>{validatedChecked}/{shipView.members.length}</span></div>
+                        <div className="space-y-2">
+                          {shipView.members.map(m => (
+                            <div key={m.id} className={`rounded-lg border p-2.5 space-y-2 ${auditChk[m.id] ? "border-amber-300 bg-amber-50/60" : "border-slate-200 bg-white"}`}>
+                              <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={!!auditChk[m.id]} onChange={() => setAuditChk(c => ({ ...c, [m.id]: !c[m.id] }))} className="h-4 w-4 rounded accent-amber-600 shrink-0" /><span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span><span className="text-[9px] font-bold text-slate-400">Validasi</span></label>
+                              {(() => { const ph = (shipEvidence[m.id] || []).filter(e => e.slot === "venue_install"); return ph.length ? <div><span className="block text-[9px] font-bold text-slate-400 mb-1">Foto pemasangan MD:</span><div className="flex gap-1 flex-wrap">{ph.map(e => <img key={e.id} src={evidenceThumb(e.id)} alt="" className="h-10 w-10 rounded object-cover border border-slate-200" />)}</div></div> : null; })()}
+                              <div className="flex items-center gap-2">
+                                {auditPrev[m.id] ? <img src={auditPrev[m.id]} alt="" className="h-10 w-10 rounded object-cover border border-amber-300" /> : <div className="h-10 w-10 rounded border border-dashed border-slate-300 grid place-items-center text-slate-300"><Camera className="h-4 w-4" /></div>}
+                                <label className="flex-1 cursor-pointer text-[10px] font-bold text-amber-700 bg-white border border-amber-200 rounded-lg px-3 py-2 text-center hover:bg-amber-50">{auditPhoto[m.id] ? "Ganti Foto Validasi" : "Foto Validasi"} <span className="text-rose-500">*</span><input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => setAuditFile(m.id, e.target.files?.[0] || null)} /></label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                        <button type="button" onClick={submitLegAudit} disabled={shipBusy} className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Konfirmasi Audit — Venue Aktif</button>
+                      </div>
+                    ) : venueAction === "return" ? (
+                      <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Home className="h-3.5 w-3.5" /> Balik ke Gudang — Ceklis &amp; Surat Jalan</p>
+                          <button type="button" onClick={() => { setVenueAction(null); setShipError(null); }} className="text-[10px] font-semibold text-slate-400 hover:text-slate-600">batal</button>
+                        </div>
+                        <div>
+                          <div className="mb-1 flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-slate-600">Ceklis Aset Ditarik</span>
+                            <span className={`text-[10px] font-bold ${returnedChecked === shipView.members.length ? "text-emerald-600" : "text-slate-400"}`}>{returnedChecked}/{shipView.members.length} dicentang</span>
+                          </div>
+                          <div className="max-h-32 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+                            {shipView.members.map(m => (
+                              <label key={m.id} className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-slate-50 ${podChecklist[m.id] ? "bg-emerald-50" : ""}`}>
+                                <input type="checkbox" checked={!!podChecklist[m.id]} onChange={() => setPodChecklist(c => ({ ...c, [m.id]: !c[m.id] }))} className="h-4 w-4 rounded accent-emerald-600 shrink-0" />
+                                <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span>
+                                <span className="text-[9px] text-slate-400 shrink-0">{m.quantity} unit</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-white border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">No. Surat Jalan (retur)</span><span className="font-mono text-[11px] font-bold text-slate-700">{venueReturnSJ}</span></div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1"><label className="font-bold text-slate-700">Kurir / Vendor <span className="text-rose-500">*</span></label>
+                            <select value={shipForm.courier} onChange={e => setShipForm(f => ({ ...f, courier: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"><option value="">— pilih kurir —</option>{COURIERS.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                          </div>
+                          <div className="space-y-1"><label className="font-bold text-slate-700">No. Resi</label><input value={shipForm.trackingNo} onChange={e => setShipForm(f => ({ ...f, trackingNo: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="opsional" /></div>
+                        </div>
+                        <div className="space-y-1"><label className="font-bold text-slate-700">Link Tracking <span className="text-rose-500">*</span></label><input value={shipForm.trackingUrl} onChange={e => setShipForm(f => ({ ...f, trackingUrl: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://…" /></div>
+                        <div className="space-y-1"><label className="font-bold text-slate-700">Estimasi Tiba (ETA) <span className="text-rose-500">*</span></label><input value={shipForm.eta} onChange={e => setShipForm(f => ({ ...f, eta: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: 2 hari" /></div>
+                        {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                        <button type="button" onClick={submitVenueReturn} disabled={shipBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />} Kirim Kembali ke Gudang (seluruh grup)</button>
+                      </div>
+                    ) : venueAction === "next" ? (
+                      <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><ArrowRight className="h-3.5 w-3.5" /> Venue Berikutnya — Ceklis &amp; Surat Jalan</p>
+                          <button type="button" onClick={() => { setVenueAction(null); setShipError(null); }} className="text-[10px] font-semibold text-slate-400 hover:text-slate-600">batal</button>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="font-bold text-slate-700">Venue Tujuan <span className="text-rose-500">*</span></label>
+                          <select value={nextVenueId} onChange={e => setNextVenueId(e.target.value)} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
+                            <option value="">— pilih venue —</option>
+                            {venues.filter(v => String(v.id) !== String(cur?.locationId)).map(v => <option key={v.id} value={String(v.id)}>{v.name}{v.area ? ` · ${v.area}` : ""}</option>)}
+                          </select>
+                          {venues.length === 0 && <p className="text-[10px] text-amber-600">Belum ada venue untuk client ini — tambahkan di menu Proyek &amp; Lokasi.</p>}
+                        </div>
+                        <div>
+                          <div className="mb-1 flex items-center justify-between"><span className="text-[10px] font-bold text-slate-600">Ceklis Aset Dikirim</span><span className={`text-[10px] font-bold ${returnedChecked === shipView.members.length ? "text-emerald-600" : "text-slate-400"}`}>{returnedChecked}/{shipView.members.length}</span></div>
+                          <div className="max-h-32 overflow-y-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
+                            {shipView.members.map(m => (
+                              <label key={m.id} className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-slate-50 ${podChecklist[m.id] ? "bg-emerald-50" : ""}`}>
+                                <input type="checkbox" checked={!!podChecklist[m.id]} onChange={() => setPodChecklist(c => ({ ...c, [m.id]: !c[m.id] }))} className="h-4 w-4 rounded accent-emerald-600 shrink-0" />
+                                <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span>
+                                <span className="text-[9px] text-slate-400 shrink-0">{m.quantity} unit</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-white border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">No. Surat Jalan</span><span className="font-mono text-[11px] font-bold text-slate-700">{venueReturnSJ}</span></div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1"><label className="font-bold text-slate-700">Kurir / Vendor <span className="text-rose-500">*</span></label><select value={shipForm.courier} onChange={e => setShipForm(f => ({ ...f, courier: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"><option value="">— pilih kurir —</option>{COURIERS.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                          <div className="space-y-1"><label className="font-bold text-slate-700">No. Resi</label><input value={shipForm.trackingNo} onChange={e => setShipForm(f => ({ ...f, trackingNo: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="opsional" /></div>
+                        </div>
+                        <div className="space-y-1"><label className="font-bold text-slate-700">Link Tracking <span className="text-rose-500">*</span></label><input value={shipForm.trackingUrl} onChange={e => setShipForm(f => ({ ...f, trackingUrl: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="https://…" /></div>
+                        <div className="space-y-1"><label className="font-bold text-slate-700">Estimasi Tiba (ETA) <span className="text-rose-500">*</span></label><input value={shipForm.eta} onChange={e => setShipForm(f => ({ ...f, eta: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-blue-500" placeholder="contoh: 2 hari" /></div>
+                        {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
+                        <button type="button" onClick={submitVenueNext} disabled={shipBusy} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />} Kirim ke Venue Berikutnya (seluruh grup)</button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={openVenueReturn} className="rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-blue-300 hover:bg-blue-50/40">
+                          <Home className="mb-1 h-4 w-4 text-blue-600" />
+                          <span className="block text-[11px] font-extrabold text-slate-800">Balik ke Gudang</span>
+                          <span className="mt-0.5 block text-[9px] text-slate-400">Ceklis + Surat Jalan, tarik ke gudang</span>
+                        </button>
+                        <button type="button" onClick={openVenueNext} className="rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-blue-300 hover:bg-blue-50/40">
+                          <ArrowRight className="mb-1 h-4 w-4 text-blue-600" />
+                          <span className="block text-[11px] font-extrabold text-slate-800">Venue Berikutnya</span>
+                          <span className="mt-0.5 block text-[9px] text-slate-400">Relokasi + pemasangan + audit</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })() : (
                 <p className="text-[11px] text-slate-400 text-center py-2 border-t border-slate-100">Proses untuk fase ini menyusul.</p>
               )}
             </div>

@@ -1454,12 +1454,12 @@ export const ALL_STEPS_FLOW = [
   {
     step: 9,
     id: "RETRIEVAL",
-    title: "9. PENARIKAN & REDEPLOY",
-    desc: "Penarikan aset layak pindah atau lepas lokasi",
-    icon: "CornerUpLeft",
+    title: "9. VENUE / ROADSHOW",
+    desc: "Aset aktif di lokasi; relokasi antar-venue atau balik gudang",
+    icon: "Tent",
     bgColor: "bg-cyan-50 border-cyan-200 text-cyan-700",
     colorHex: "#0891b2",
-    outputs: ["Form Penarikan", "Checklist Kondisi", "WO Relokasi", "Lokasi Baru"]
+    outputs: ["Timeline Roadshow", "Surat Jalan Antar-Venue", "Checklist Kondisi", "BAST Venue"]
   },
   {
     step: 10,

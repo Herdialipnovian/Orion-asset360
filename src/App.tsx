@@ -350,6 +350,18 @@ export default function App() {
     try { const r = await api.groupAudit(p); await refresh(); return { ok: true, count: r.count }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal menyimpan audit." }; }
   };
+  const handlePodTriage = async (
+    p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string }[] }
+  ): Promise<{ ok: boolean; error?: string; accepted?: number; held?: number }> => {
+    try { const r = await api.podTriage(p); await refresh(); return { ok: true, accepted: r.accepted, held: r.held }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses penerimaan." }; }
+  };
+  const handleHold = async (
+    p: { assetIds: string[]; op: "return" | "arrive" | "release"; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }
+  ): Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }> => {
+    try { const r = await api.holdAction(p); await refresh(); return { ok: true, count: r.count, skipped: r.skipped }; }
+    catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses aset ditahan." }; }
+  };
   const handleAuditSample = async (
     assetId: string,
     samples: { locationId: number; compliant: boolean }[],
@@ -894,6 +906,8 @@ export default function App() {
                   onGroupAdvance={handleGroupAdvance}
                   onGroupVenue={handleGroupVenue}
                   onGroupAudit={handleGroupAudit}
+                  onPodTriage={handlePodTriage}
+                  onHold={handleHold}
                   onDistribute={handleDistribute}
                   onPlaceToko={handlePlaceToko}
                   onCompleteInstall={handleCompleteInstall}

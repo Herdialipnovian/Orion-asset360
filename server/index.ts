@@ -1036,6 +1036,133 @@ app.post("/api/assets/group-audit", requireAuth, wrap(async (req: AuthedReq, res
   res.json({ ok: true, count: affected.length, skipped: skipped.length, assets: (await Promise.all([...affected, ...skipped].map(id => getAsset(id)))).filter(Boolean) });
 }));
 
+// ── POD triage (Transit / stage 5): PIC marks each received asset Diterima / Rusak / Tidak Sesuai.
+//    Diterima → advance to Pemasangan (Fase 6) with the POD signature; Rusak/Tidak Sesuai → HELD at Transit
+//    (transit.hold) awaiting a return-to-Gudang or release decision. One PIC signature covers the receipt.
+//    Atomic. PIC (client-scoped) / Logistik / Admin.
+app.post("/api/assets/pod-triage", requireAuth, wrap(async (req: AuthedReq, res) => {
+  const b = req.body || {};
+  const batchId = String(b.batchId || "").trim();
+  const items: any[] = Array.isArray(b.items) ? b.items : [];
+  const sig = String(b.signatureBase64 || "");
+  if (!batchId) return res.status(400).json({ error: "Grup pengiriman (batchId) wajib." });
+  if (!items.length) return res.status(400).json({ error: "Minimal 1 aset harus dinilai." });
+  if (sig.length < 50) return res.status(422).json({ code: "signature_required", error: "Tanda tangan penerima (PIC) wajib." });
+  // Same role set that can RESOLVE a hold (/api/assets/hold) — so the role that can create a held asset can also action it.
+  if (req.user!.role !== "Admin" && !["Logistik", "PIC"].includes(req.user!.role)) return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang menerima kiriman.` });
+  const recipient = String(b.recipient || req.user!.name);
+  const podTime = String(b.podTime || new Date().toISOString().slice(0, 10));
+  const now = new Date().toISOString();
+  const byId = new Map<string, any>(items.map((it: any) => [String(it.id), it]));
+  const accepted: string[] = []; const held: string[] = []; const skipped: string[] = [];
+  try {
+    await tx(async c => {
+      const { rows } = await c.query(
+        `select id, client, current_location, stage_details from assets
+         where stage_details->'shipping'->>'batchId'=$1 and current_stage=5 and id = any($2) for update`,
+        [batchId, [...byId.keys()]]
+      );
+      if (!rows.length) throw Object.assign(new Error("Tidak ada anggota grup di Transit."), { http: 422 });
+      if (req.user!.role === "PIC" && rows.some(r => (r.client || null) !== (req.user!.client || null))) throw Object.assign(new Error("Grup ini memuat aset di luar client Anda."), { http: 403 });
+      for (const r of rows) {
+        const it = byId.get(r.id); if (!it) continue;
+        const status = String(it.status || "");
+        const sd: any = r.stage_details || {};
+        // An already-held / in-transit-return asset is NOT re-triageable — only /api/assets/hold resolves it
+        // (guards against a stale second tab flipping a held/returning asset to "installed" & wiping its retur).
+        if (sd.transit?.hold) { skipped.push(r.id); continue; }
+        if (status === "diterima") {
+          const transit: any = { ...(sd.transit || {}), podRecipient: recipient, podTime, conditionOnArrival: "Sempurna", signatureBase64: sig, podNote: String(it.note || b.note || "").trim() || undefined };
+          delete transit.hold;
+          const dep: any = { ...(sd.deployment || {}) }; delete dep.assignments; delete dep.installedQty; delete dep.fullyInstalled;
+          const loc = computeLocation(6, undefined, r.client, r.current_location || "");
+          await c.query(`update assets set current_stage=6, current_location=$3, stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, transit, deployment: dep }), loc]);
+          accepted.push(r.id);
+        } else if (status === "rusak" || status === "tidak_sesuai") {
+          const transit: any = {
+            ...(sd.transit || {}), podRecipient: recipient, podTime, signatureBase64: sig,
+            conditionOnArrival: status === "rusak" ? "Rusak Sebagian" : (sd.transit?.conditionOnArrival || undefined),
+            claimFlag: status === "rusak", // transit-level too (survives hold release/return) so the POD doc/claim signal stays consistent
+            hold: { status: "held", reason: status, note: String(it.note || "").trim() || undefined, flaggedBy: recipient, flaggedAt: now, claimFlag: status === "rusak" }
+          };
+          await c.query(`update assets set current_location=$3, stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, transit }), `Ditahan di Transit — ${status === "rusak" ? "Rusak" : "Tidak Sesuai"}`]);
+          held.push(r.id);
+        } else {
+          throw Object.assign(new Error(`Status POD tidak valid untuk ${r.id}.`), { http: 400 });
+        }
+      }
+    });
+  } catch (e: any) { if (e && e.http) return res.status(e.http).json({ error: e.message }); throw e; }
+  for (const id of accepted) { const a = await getAsset(id); await insertLog({ id: `LOG-POD-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 6, action: `POD: diterima & ditandatangani ${recipient} — masuk Pemasangan.`, operator: recipient, type: "success" }); assetChanged(id); }
+  for (const id of held) { const a = await getAsset(id); const rr = byId.get(id); await insertLog({ id: `LOG-HOLD-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 5, action: `POD: ${rr?.status === "rusak" ? "RUSAK" : "TIDAK SESUAI"} — aset DITAHAN di Transit${rr?.note ? ` (${String(rr.note).slice(0, 80)})` : ""}.`, operator: recipient, type: "warning" }); assetChanged(id); }
+  // Ids requested but not applied (already held/returning, or moved off Transit concurrently) — report so the client can warn.
+  const done = new Set([...accepted, ...held]);
+  const skippedCount = skipped.length + [...byId.keys()].filter(id => !done.has(id) && !skipped.includes(id)).length;
+  res.json({ ok: true, accepted: accepted.length, held: held.length, skipped: skippedCount, assets: (await Promise.all([...accepted, ...held].map(id => getAsset(id)))).filter(Boolean) });
+}));
+
+// ── Held-asset actions (Transit / stage 5, transit.hold set): return = ship the held asset back to Gudang
+//    (retur Surat Jalan + tracking; stays Fase 5 as "returning"); arrive = reached Gudang → Fase 3 + merge-back;
+//    release = it's actually OK → advance to Pemasangan (Fase 6). Admin / Logistik / PIC(scoped). Skips non-held.
+app.post("/api/assets/hold", requireAuth, wrap(async (req: AuthedReq, res) => {
+  const b = req.body || {};
+  const op = String(b.op || "").trim();
+  const assetIds: string[] | null = Array.isArray(b.assetIds) && b.assetIds.length ? b.assetIds.map((x: any) => String(x)) : (b.assetId ? [String(b.assetId)] : null);
+  if (!assetIds) return res.status(400).json({ error: "assetIds wajib." });
+  if (!["return", "arrive", "release"].includes(op)) return res.status(400).json({ error: "Operasi tidak dikenal." });
+  if (req.user!.role !== "Admin" && !["Logistik", "PIC"].includes(req.user!.role)) return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang.` });
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+  const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
+  if (trackingUrl && !/^https?:\/\//i.test(trackingUrl)) return res.status(400).json({ error: "Link tracking harus diawali http:// atau https://." });
+  const sharedSJ = String(b.suratJalanNo || "").trim() || `SJ/ORG/${new Date().getFullYear()}/${Math.floor(Math.random() * 90000 + 10000)}`;
+  const shipMeta: any = { courier: b.courier ? String(b.courier).trim() : undefined, trackingUrl: trackingUrl || undefined, trackingNo: b.trackingNo ? String(b.trackingNo).trim() : undefined, eta: b.eta ? String(b.eta).trim() : undefined };
+  const affected: string[] = []; const skipped: string[] = [];
+  try {
+    await tx(async c => {
+      const { rows } = await c.query(`select id, client, current_location, stage_details from assets where current_stage=5 and id = any($1) for update`, [assetIds]);
+      if (!rows.length) throw Object.assign(new Error("Aset tidak ditemukan di Transit."), { http: 422 });
+      if (req.user!.role === "PIC" && rows.some(r => (r.client || null) !== (req.user!.client || null))) throw Object.assign(new Error("Memuat aset di luar client Anda."), { http: 403 });
+      for (const r of rows) {
+        const sd: any = r.stage_details || {};
+        const transit: any = { ...(sd.transit || {}) };
+        const hold: any = transit.hold;
+        if (!hold) { skipped.push(r.id); continue; }
+        if (op === "return") {
+          if (hold.status !== "held") { skipped.push(r.id); continue; }
+          transit.hold = { ...hold, status: "returning", returnShipment: { suratJalanNo: sharedSJ, ...shipMeta, shippedAt: today, status: "transit" } };
+          await c.query(`update assets set current_location=$3, stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, transit }), "Retur (ditahan) → dalam perjalanan ke Gudang"]);
+          affected.push(r.id);
+        } else if (op === "arrive") {
+          if (hold.status !== "returning") { skipped.push(r.id); continue; }
+          // Returns to Gudang clean; the hold reason stays in the activity log + evidence for audit.
+          const dep: any = { projectId: sd.deployment?.projectId, projectName: sd.deployment?.projectName };
+          const cleared: any = { ...sd, deployment: dep }; delete cleared.transit;
+          await c.query(`update assets set current_stage=3, current_location='Gudang Utama Origin', stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify(cleared)]);
+          affected.push(r.id);
+        } else { // release
+          if (hold.status !== "held") { skipped.push(r.id); continue; }
+          delete transit.hold;
+          const dep: any = { ...(sd.deployment || {}) }; delete dep.assignments; delete dep.installedQty; delete dep.fullyInstalled;
+          const loc = computeLocation(6, undefined, r.client, r.current_location || "");
+          await c.query(`update assets set current_stage=6, current_location=$3, stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, transit, deployment: dep }), loc]);
+          affected.push(r.id);
+        }
+      }
+    });
+  } catch (e: any) { if (e && e.http) return res.status(e.http).json({ error: e.message }); throw e; }
+  const LOGH: any = { return: `Retur aset ditahan → Gudang (SJ ${sharedSJ})`, arrive: "Aset ditahan tiba di Gudang — retur selesai", release: "Aset ditahan diloloskan → Pemasangan" };
+  const stageH = op === "arrive" ? 3 : (op === "release" ? 6 : 5);
+  for (const id of affected) { const a = await getAsset(id); await insertLog({ id: `LOG-HLD-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: stageH, action: LOGH[op], operator: req.user!.name, type: op === "arrive" || op === "release" ? "success" : "info" }); assetChanged(id); }
+  let surfaceIds = affected;
+  if (op === "arrive") {
+    const surfaced = new Set<string>();
+    for (const id of affected) { const a = await getAsset(id); if (!a) continue; surfaced.add((await foldBackOnReturn(a, req.user!.name)).surfaceId); }
+    surfaceIds = [...surfaced];
+  }
+  res.json({ ok: true, count: affected.length, skipped: skipped.length, suratJalanNo: op === "return" ? sharedSJ : undefined, assets: (await Promise.all(surfaceIds.map(id => getAsset(id)))).filter(Boolean) });
+}));
+
 // ── Group venue ops: apply a roadshow action to EVERY member of a shipment group (same batchId) at the
 //    Venue menu (Fase 9) at once, sharing ONE Surat Jalan. deploy = kirim ke venue berikutnya (append leg),
 //    ship-return + arrive-warehouse = balik ke Gudang (Fase 3) + merge-back. Members not in the right

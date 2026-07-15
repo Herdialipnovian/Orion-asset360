@@ -129,6 +129,17 @@ export interface Asset {
       conditionOnArrival?: "Sempurna" | "Bagus" | "Ada Lecet" | "Rusak Sebagian";
       podNote?: string;
       claimFlag?: boolean; // true when condition-on-arrival indicates damage → needs courier claim
+      // POD triage: an asset the PIC marked Rusak / Tidak Sesuai at receipt is HELD at Transit (not
+      // advanced to Pemasangan). From "held" it can be shipped back to Gudang (2-step) or released to Fase 6.
+      hold?: {
+        status: "held" | "returning"; // held = waiting a decision · returning = retur shipment in transit
+        reason: "rusak" | "tidak_sesuai";
+        note?: string;
+        flaggedBy?: string;
+        flaggedAt?: string;
+        claimFlag?: boolean; // rusak → courier claim needed
+        returnShipment?: { suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; shippedAt?: string; arrivedAt?: string; status?: "transit" | "done" };
+      };
     };
     deployment: {
       installTeam: string; // legacy single-team field (kept for old records)

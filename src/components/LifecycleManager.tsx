@@ -376,6 +376,8 @@ interface LifecycleManagerProps {
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; perAsset?: Record<string, any>; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onGroupVenue?: (p: { batchId: string; assetIds?: string[]; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse" | "leg-arrive" | "leg-install" | "leg-audit"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string; merchandiserId?: number; auditedBy?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onGroupAudit?: (p: { batchId: string; auditedBy?: string }) => Promise<{ ok: boolean; error?: string; count?: number }>;
+  onPodTriage?: (p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string }[] }) => Promise<{ ok: boolean; error?: string; accepted?: number; held?: number }>;
+  onHold?: (p: { assetIds: string[]; op: "return" | "arrive" | "release"; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
   onCompleteInstall?: (assetId: string, p: { merchandiserId: number; doneQty?: number; note?: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -514,6 +516,8 @@ export default function LifecycleManager({
   onGroupAdvance,
   onGroupVenue,
   onGroupAudit,
+  onPodTriage,
+  onHold,
   onDistribute,
   onPlaceToko,
   onCompleteInstall,
@@ -552,7 +556,21 @@ export default function LifecycleManager({
   const [shipError, setShipError] = React.useState<string | null>(null);
   const [podForm, setPodForm] = React.useState({ podTime: "", conditionOnArrival: "Sempurna", podNote: "" });
   const [podSig, setPodSig] = React.useState("");
-  const [podChecklist, setPodChecklist] = React.useState<Record<string, boolean>>({}); // per-asset "diterima" checklist (Transit)
+  const [podChecklist, setPodChecklist] = React.useState<Record<string, boolean>>({}); // per-asset "diterima" checklist (Venue return/next)
+  // POD triage (Transit): per-asset decision Diterima / Rusak / Tidak Sesuai + note + photo (for problems).
+  const [podStatus, setPodStatus] = React.useState<Record<string, "diterima" | "rusak" | "tidak_sesuai">>({});
+  const [podNote, setPodNote] = React.useState<Record<string, string>>({});
+  const [podPhoto, setPodPhoto] = React.useState<Record<string, File>>({});
+  const [podPrev, setPodPrev] = React.useState<Record<string, string>>({});
+  const setPodFile = (id: string, f: File | null) => {
+    setPodPhoto(p => { const n = { ...p }; if (f) n[id] = f; else delete n[id]; return n; });
+    setPodPrev(p => { const n = { ...p }; if (p[id]) URL.revokeObjectURL(p[id]); if (f) n[id] = URL.createObjectURL(f); else delete n[id]; return n; });
+  };
+  // Held-asset (Transit) actions: return-to-Gudang form + per-asset busy/error.
+  const [holdBusy, setHoldBusy] = React.useState<string | null>(null);
+  const [holdError, setHoldError] = React.useState<{ id: string; msg: string } | null>(null); // scoped to the acting held card
+  const [holdReturnFor, setHoldReturnFor] = React.useState<string | null>(null); // held asset id whose retur form is open
+  const [holdForm, setHoldForm] = React.useState({ suratJalanNo: "", courier: "", trackingNo: "", trackingUrl: "", eta: "" });
   const [shipMd, setShipMd] = React.useState(""); // Proses Pemasangan: MD assigned for installation
   const [shipVenue, setShipVenue] = React.useState(""); // Proses Pemasangan: venue location for the install
   const [venueAction, setVenueAction] = React.useState<null | "return" | "next">(null); // Venue (Fase 9) sub-flow open
@@ -570,6 +588,7 @@ export default function LifecycleManager({
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
     setPodSig(""); setShipMd(""); setShipVenue(String((gg.members[0]?.stageDetails as any)?.deployment?.venue?.locationId || ""));
     setVenueAction(null); setVenueReturnSJ(""); setNextVenueId("");
+    setPodStatus({}); setPodNote({}); setPodPhoto({}); setPodPrev({});
     setInstallChk({}); setInstallPhoto({}); setInstallPrev({});
     setAuditChk({}); setAuditPhoto({}); setAuditPrev({}); setShipEvidence({});
     const chk: Record<string, boolean> = {}; gg.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
@@ -673,22 +692,63 @@ export default function LifecycleManager({
     ].filter(Boolean);
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
   };
-  const submitShipPod = async () => {
-    if (!shipView || !onGroupAdvance) return;
-    if (!shipView.members.every(m => podChecklist[m.id])) return setShipError("Checklist semua aset yang diterima dulu.");
-    if (!podForm.conditionOnArrival) return setShipError("Pilih kondisi barang saat tiba.");
+  // POD triage (Transit): per-asset Diterima → Pemasangan, Rusak/Tidak Sesuai → Ditahan. One PIC signature.
+  const submitPodTriage = async () => {
+    if (!shipView || !onPodTriage) return;
+    const members = shipView.members;
+    if (!members.every(m => podStatus[m.id])) return setShipError("Tentukan status tiap aset (Diterima / Rusak / Tidak Sesuai) dulu.");
+    const problems = members.filter(m => podStatus[m.id] === "rusak" || podStatus[m.id] === "tidak_sesuai");
+    if (!problems.every(m => (podNote[m.id] || "").trim())) return setShipError("Aset Rusak/Tidak Sesuai wajib diberi catatan.");
+    if (!problems.every(m => podPhoto[m.id])) return setShipError("Aset Rusak/Tidak Sesuai wajib difoto.");
     if (!podSig || podSig.length < 50) return setShipError("Tanda tangan penerima wajib diisi.");
-    const sh: any = shipView.members[0]?.stageDetails?.shipping || {};
+    const sh: any = members[0]?.stageDetails?.shipping || {};
     const dest = Array.isArray(sh.destinations) ? sh.destinations[0] : null;
     setShipBusy(true); setShipError(null);
-    const res = await onGroupAdvance({
-      batchId: shipView.batchId, fromStage: 5, toStage: 6, stageKey: "transit",
-      section: { podRecipient: dest?.picPenerima || "", podTime: podForm.podTime, conditionOnArrival: podForm.conditionOnArrival, podNote: podForm.podNote.trim(), signatureBase64: podSig, receivedItems: shipView.members.map(m => m.id) },
-      meta: { logAction: `POD: ${shipView.batchId} diterima (${podForm.conditionOnArrival}) & ditandatangani ${dest?.picPenerima || "penerima"}`, operator: "Admin Origin (Surat Jalan)" },
+    // Triage FIRST (atomic tx); only upload problem photos AFTER it commits — so a rolled-back triage
+    // never leaves orphaned evidence. Photos are supplementary (no server evidence-gate on the hold).
+    const res = await onPodTriage({
+      batchId: shipView.batchId,
+      recipient: dest?.picPenerima || undefined,
+      podTime: podForm.podTime,
+      signatureBase64: podSig,
+      items: members.map(m => ({ id: m.id, status: podStatus[m.id], note: (podNote[m.id] || "").trim() || undefined })),
     });
+    if (!res.ok) { setShipBusy(false); return setShipError(res.error || "Gagal memproses penerimaan."); }
+    try { for (const m of problems) if (podPhoto[m.id]) await api.uploadEvidence(m.id, "pod_problem", 5, [podPhoto[m.id]], `POD ${podStatus[m.id] === "rusak" ? "rusak" : "tidak sesuai"}: ${(podNote[m.id] || "").trim()}`); }
+    catch { /* triage already committed; a missing supplementary photo is non-fatal */ }
     setShipBusy(false);
-    if (!res.ok) return setShipError(res.error || "Gagal konfirmasi penerimaan.");
-    setShipView(null);
+    if ((res.accepted || 0) + (res.held || 0) < members.length) setShipError(`Sebagian aset tidak diproses (berubah status). Muat ulang & cek kembali.`);
+    else setShipView(null);
+  };
+  // ── Held-asset (Transit) actions: retur ke Gudang (2 langkah: kirim → tiba) atau loloskan ke Pemasangan.
+  const openHoldReturn = (assetId: string) => { setHoldError(null); setHoldForm({ suratJalanNo: genSuratJalan(), courier: "", trackingNo: "", trackingUrl: "", eta: "" }); setHoldReturnFor(assetId); };
+  const submitHoldReturn = async () => {
+    if (!onHold || !holdReturnFor) return;
+    const id = holdReturnFor;
+    if (!holdForm.courier) return setHoldError({ id, msg: "Pilih kurir/vendor dulu." });
+    if (!/^https?:\/\//i.test(holdForm.trackingUrl.trim())) return setHoldError({ id, msg: "Link tracking harus diawali http:// atau https://." });
+    if (!holdForm.eta.trim()) return setHoldError({ id, msg: "Estimasi tiba (ETA) wajib diisi." });
+    setHoldBusy(id); setHoldError(null);
+    const res = await onHold({ assetIds: [id], op: "return", suratJalanNo: holdForm.suratJalanNo || undefined, courier: holdForm.courier, trackingUrl: holdForm.trackingUrl.trim(), trackingNo: holdForm.trackingNo.trim() || undefined, eta: holdForm.eta.trim() });
+    setHoldBusy(null);
+    if (!res.ok) return setHoldError({ id, msg: res.error || "Gagal mengirim retur ke gudang." });
+    setHoldReturnFor(null);
+  };
+  const doHoldArrive = async (assetId: string) => {
+    if (!onHold || holdBusy) return;
+    if (!window.confirm("Konfirmasi aset retur sudah TIBA di gudang? Aset kembali ke Gudang & stok digabung.")) return;
+    setHoldBusy(assetId); setHoldError(null);
+    const res = await onHold({ assetIds: [assetId], op: "arrive" });
+    setHoldBusy(null);
+    if (!res.ok) setHoldError({ id: assetId, msg: res.error || "Gagal konfirmasi tiba di gudang." });
+  };
+  const doHoldRelease = async (assetId: string) => {
+    if (!onHold || holdBusy) return;
+    if (!window.confirm("Loloskan aset ini ke Pemasangan? Status ditahan akan dihapus.")) return;
+    setHoldBusy(assetId); setHoldError(null);
+    const res = await onHold({ assetIds: [assetId], op: "release" });
+    setHoldBusy(null);
+    if (!res.ok) setHoldError({ id: assetId, msg: res.error || "Gagal meloloskan aset." });
   };
   const submitShipTransit = async () => {
     if (!shipView || !onGroupAdvance) return;
@@ -1294,7 +1354,10 @@ export default function LifecycleManager({
   const shipmentBlocks = React.useMemo(() => {
     const byBatch = new Map<string, Asset[]>();
     const singles: Asset[] = [];
+    const held: Asset[] = []; // Transit assets marked Rusak/Tidak Sesuai at POD → held (own section)
     for (const a of filteredAssetsList) {
+      const h: any = (a.stageDetails as any)?.transit?.hold;
+      if (a.currentStage === 5 && h && (h.status === "held" || h.status === "returning")) { held.push(a); continue; }
       const bid = batchIdOf(a);
       if (bid && a.currentStage >= 4 && a.currentStage <= 9) {
         if (!byBatch.has(bid)) byBatch.set(bid, []);
@@ -1302,11 +1365,10 @@ export default function LifecycleManager({
       } else singles.push(a);
     }
     const groups: { batchId: string; members: Asset[] }[] = [];
-    for (const [batchId, members] of byBatch) {
-      if (members.length >= 2) groups.push({ batchId, members });
-      else singles.push(...members); // a lone group member renders as a normal card
-    }
-    return { groups, singles };
+    // Every batched shipment (Fase 4-9) renders as the manifest card — even a lone 1-asset shipment
+    // (incl. split children) — so single and grouped shipments look identical (Udin 2026-07-16).
+    for (const [batchId, members] of byBatch) groups.push({ batchId, members });
+    return { groups, singles, held };
   }, [filteredAssetsList]);
 
   // One asset card (reused for grouped members + standalone assets).
@@ -2271,6 +2333,61 @@ export default function LifecycleManager({
           </div>
         ) : (
           <>
+            {shipmentBlocks.held.length > 0 && (
+              <div className="col-span-full overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-sm">
+                <div className="flex items-center gap-3 bg-gradient-to-r from-rose-600 to-orange-500 px-4 py-3 text-white">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/25"><AlertTriangle className="h-5 w-5" /></span>
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-[0.15em] text-rose-100">Aset Ditahan</span>
+                    <h4 className="text-sm font-bold">{shipmentBlocks.held.length} aset bermasalah saat diterima</h4>
+                  </div>
+                </div>
+                <div className="space-y-3 p-3 md:p-4">
+                  {shipmentBlocks.held.map(m => {
+                    const h: any = (m.stageDetails as any)?.transit?.hold || {};
+                    const returning = h.status === "returning";
+                    const busy = holdBusy === m.id;
+                    return (
+                      <div key={m.id} className="rounded-xl border border-slate-200 p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className="block text-[12px] font-bold text-slate-800 truncate">{m.name}</span>
+                            <span className="block text-[9px] font-mono text-slate-400">{m.id} · {m.quantity} unit</span>
+                          </div>
+                          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold ${h.reason === "rusak" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{h.reason === "rusak" ? "Rusak" : "Tidak Sesuai"}</span>
+                        </div>
+                        {h.note && <p className="text-[10px] text-slate-500">Catatan: {h.note}</p>}
+                        {holdError?.id === m.id && <p className="text-[10px] font-semibold text-rose-600">{holdError.msg}</p>}
+                        {returning ? (
+                          <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5">
+                            <p className="text-[10px] font-semibold text-amber-700">Dalam perjalanan pulang ke Gudang{h.returnShipment?.suratJalanNo ? ` · SJ ${h.returnShipment.suratJalanNo}` : ""}{h.returnShipment?.courier ? ` · ${h.returnShipment.courier}` : ""}</p>
+                            {h.returnShipment?.trackingUrl && <a href={h.returnShipment.trackingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline"><MapPin className="h-3 w-3" /> Buka tracking</a>}
+                            <button type="button" onClick={() => doHoldArrive(m.id)} disabled={busy} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:bg-slate-300">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Home className="h-4 w-4" />} Konfirmasi Tiba di Gudang</button>
+                          </div>
+                        ) : holdReturnFor === m.id ? (
+                          <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50/50 p-2.5">
+                            <div className="flex items-center justify-between"><span className="text-[10px] font-extrabold text-blue-800">Kirim Balik ke Gudang</span><button type="button" onClick={() => { setHoldReturnFor(null); setHoldError(null); }} className="text-[10px] font-semibold text-slate-400 hover:text-slate-600">batal</button></div>
+                            <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">No. Surat Jalan (retur)</span><span className="font-mono text-[11px] font-bold text-slate-700">{holdForm.suratJalanNo}</span></div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1"><label className="text-[10px] font-bold text-slate-700">Kurir <span className="text-rose-500">*</span></label><select value={holdForm.courier} onChange={e => setHoldForm(f => ({ ...f, courier: e.target.value }))} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] outline-none focus:ring-1 focus:ring-blue-500"><option value="">— pilih —</option>{COURIERS.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+                              <div className="space-y-1"><label className="text-[10px] font-bold text-slate-700">No. Resi</label><input value={holdForm.trackingNo} onChange={e => setHoldForm(f => ({ ...f, trackingNo: e.target.value }))} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] outline-none focus:ring-1 focus:ring-blue-500" placeholder="opsional" /></div>
+                            </div>
+                            <input value={holdForm.trackingUrl} onChange={e => setHoldForm(f => ({ ...f, trackingUrl: e.target.value }))} className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] outline-none focus:ring-1 focus:ring-blue-500" placeholder="Link tracking https://… *" />
+                            <input value={holdForm.eta} onChange={e => setHoldForm(f => ({ ...f, eta: e.target.value }))} className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] outline-none focus:ring-1 focus:ring-blue-500" placeholder="Estimasi tiba (ETA) *" />
+                            <button type="button" onClick={submitHoldReturn} disabled={busy} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-blue-700 disabled:bg-slate-300">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />} Kirim Retur ke Gudang</button>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => openHoldReturn(m.id)} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-50"><Truck className="h-3.5 w-3.5" /> Kirim Balik ke Gudang</button>
+                            <button type="button" onClick={() => doHoldRelease(m.id)} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Check className="h-3.5 w-3.5" /> Loloskan ke Pemasangan</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {shipmentBlocks.groups.map(g => {
               const sh: any = g.members[0].stageDetails?.shipping || {};
               const dest = Array.isArray(sh.destinations) ? sh.destinations[0] : null;
@@ -2287,7 +2404,7 @@ export default function LifecycleManager({
                       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/25"><Truck className="h-5 w-5" /></span>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-100">Pengiriman Bersama</span>
+                          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-100">{g.members.length > 1 ? "Pengiriman Bersama" : "Pengiriman"}</span>
                           <span className="font-mono text-[11px] font-bold rounded bg-white/15 px-1.5 py-0.5 ring-1 ring-white/20">{g.batchId}</span>
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -2373,24 +2490,18 @@ export default function LifecycleManager({
                 <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Area</span><span className="text-[11px] font-bold text-slate-700">{dest?.area || "—"}</span></div>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">PIC</span><span className="text-[11px] font-bold text-slate-700">{dest?.picPenerima || "—"}</span></div>
               </div>
-              <div>
-                {gStage === 5 && (
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-emerald-600" /> Checklist Aset Diterima</span>
-                    <span className={`text-[10px] font-bold ${checkedCount === shipView.members.length ? "text-emerald-600" : "text-slate-400"}`}>{checkedCount}/{shipView.members.length} dicentang</span>
+              {gStage !== 5 && (
+                <div>
+                  <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 max-h-40 overflow-y-auto">
+                    {shipView.members.map(m => (
+                      <div key={m.id} className="flex items-center gap-2 px-3 py-2">
+                        <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span>
+                        <span className="text-right shrink-0"><span className="text-xs font-extrabold text-slate-700 tabular-nums">{m.quantity}</span><span className="text-[9px] text-slate-400"> unit</span></span>
+                      </div>
+                    ))}
                   </div>
-                )}
-                <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 max-h-40 overflow-y-auto">
-                  {shipView.members.map(m => (
-                    <label key={m.id} className={`flex items-center gap-2 px-3 py-2 ${gStage === 5 ? "cursor-pointer hover:bg-slate-50" : ""} ${gStage === 5 && podChecklist[m.id] ? "bg-emerald-50" : ""}`}>
-                      {gStage === 5 && <input type="checkbox" checked={!!podChecklist[m.id]} onChange={() => setPodChecklist(c => ({ ...c, [m.id]: !c[m.id] }))} className="h-4 w-4 rounded accent-emerald-600 shrink-0" />}
-                      <span className="min-w-0 flex-1"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id}</span></span>
-                      <span className="text-right shrink-0"><span className="text-xs font-extrabold text-slate-700 tabular-nums">{m.quantity}</span><span className="text-[9px] text-slate-400"> unit</span></span>
-                    </label>
-                  ))}
                 </div>
-                {gStage === 5 && <p className="mt-1 text-[9px] text-slate-400">Centang tiap aset yang benar-benar diterima sebelum menandatangani Surat Jalan.</p>}
-              </div>
+              )}
               {gStage === 4 && onGroupAdvance ? (
                 <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-3 space-y-3">
                   <p className="text-[11px] font-extrabold text-blue-800 flex items-center gap-1.5"><Compass className="h-3.5 w-3.5" /> Proses ke Transit — input tracking</p>
@@ -2424,20 +2535,40 @@ export default function LifecycleManager({
                     </div>
                   ); })()}
                   <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-3">
-                    <p className="text-[11px] font-extrabold text-emerald-800 flex items-center gap-1.5"><Check className="h-3.5 w-3.5" /> Surat Jalan Diterima & Ditandatangani (POD)</p>
+                    <p className="text-[11px] font-extrabold text-emerald-800 flex items-center gap-1.5"><Check className="h-3.5 w-3.5" /> Penerimaan (POD) — Nilai Tiap Aset</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1"><label className="font-bold text-slate-700">Diterima Oleh (PIC)</label><input value={dest?.picPenerima || "—"} readOnly className="w-full bg-slate-100 border border-slate-200 px-2.5 py-1.5 rounded-lg text-slate-600" /></div>
                       <div className="space-y-1"><label className="font-bold text-slate-700">Tanggal Terima</label><input type="date" value={podForm.podTime} onChange={e => setPodForm(f => ({ ...f, podTime: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500" /></div>
                     </div>
-                    <div className="space-y-1"><label className="font-bold text-slate-700">Kondisi Barang saat Tiba <span className="text-rose-500">*</span></label>
-                      <select value={podForm.conditionOnArrival} onChange={e => setPodForm(f => ({ ...f, conditionOnArrival: e.target.value }))} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer">
-                        {["Sempurna", "Bagus", "Ada Lecet", "Rusak Sebagian"].map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
+                    <div className="space-y-2">
+                      {shipView.members.map(m => {
+                        const st = podStatus[m.id];
+                        const problem = st === "rusak" || st === "tidak_sesuai";
+                        return (
+                          <div key={m.id} className={`rounded-lg border p-2.5 space-y-2 ${st === "diterima" ? "border-emerald-300 bg-emerald-50/40" : problem ? "border-rose-300 bg-rose-50/40" : "border-slate-200 bg-white"}`}>
+                            <span className="min-w-0 flex-1 block"><span className="block text-[11px] font-bold text-slate-800 truncate">{m.name}</span><span className="block text-[9px] text-slate-400 font-mono">{m.id} · {m.quantity} unit</span></span>
+                            <div className="grid grid-cols-3 gap-1">
+                              {([["diterima", "Diterima", "emerald"], ["rusak", "Rusak", "rose"], ["tidak_sesuai", "Tidak Sesuai", "amber"]] as const).map(([val, lbl, col]) => (
+                                <button key={val} type="button" onClick={() => setPodStatus(s => ({ ...s, [m.id]: val }))} className={`text-[10px] font-bold px-2 py-1.5 rounded-lg border transition ${st === val ? (col === "emerald" ? "bg-emerald-600 border-emerald-600 text-white" : col === "rose" ? "bg-rose-600 border-rose-600 text-white" : "bg-amber-500 border-amber-500 text-white") : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{lbl}</button>
+                              ))}
+                            </div>
+                            {problem && (
+                              <div className="space-y-2">
+                                <input value={podNote[m.id] || ""} onChange={e => setPodNote(n => ({ ...n, [m.id]: e.target.value }))} placeholder="Catatan masalah (wajib)…" className="w-full bg-white border border-rose-200 px-2.5 py-1.5 rounded-lg text-[11px] outline-none focus:ring-1 focus:ring-rose-400" />
+                                <div className="flex items-center gap-2">
+                                  {podPrev[m.id] ? <img src={podPrev[m.id]} alt="" className="h-10 w-10 rounded object-cover border border-rose-300" /> : <div className="h-10 w-10 rounded border border-dashed border-slate-300 grid place-items-center text-slate-300"><Camera className="h-4 w-4" /></div>}
+                                  <label className="flex-1 cursor-pointer text-[10px] font-bold text-rose-700 bg-white border border-rose-200 rounded-lg px-3 py-2 text-center hover:bg-rose-50">{podPhoto[m.id] ? "Ganti Foto" : "Foto Bukti"} <span className="text-rose-500">*</span><input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => setPodFile(m.id, e.target.files?.[0] || null)} /></label>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="space-y-1"><label className="font-bold text-slate-700">Catatan (opsional)</label><textarea value={podForm.podNote} onChange={e => setPodForm(f => ({ ...f, podNote: e.target.value }))} rows={2} className="w-full bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg outline-none focus:ring-1 focus:ring-emerald-500" /></div>
+                    <p className="text-[10px] text-slate-500">Aset <b>Diterima</b> lanjut ke Pemasangan; <b>Rusak / Tidak Sesuai</b> ditahan di Transit (wajib catatan + foto).</p>
                     <div className="space-y-1"><label className="font-bold text-slate-700">Tanda Tangan Penerima <span className="text-rose-500">*</span></label><SignaturePad onChange={setPodSig} /></div>
                     {shipError && <p className="text-[10px] font-semibold text-rose-600">{shipError}</p>}
-                    <button type="button" onClick={submitShipPod} disabled={shipBusy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Konfirmasi Diterima (seluruh grup)</button>
+                    <button type="button" onClick={submitPodTriage} disabled={shipBusy} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-bold px-3 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 transition">{shipBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Konfirmasi Penerimaan</button>
                   </div>
                 </div>
               ) : gStage === 6 && onAssignInstall ? (assigned ? (

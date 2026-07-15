@@ -319,6 +319,14 @@ export const api = {
   groupAudit(p: { batchId: string; auditedBy?: string }): Promise<{ ok: boolean; count: number; assets: Asset[] }> {
     return req(`/assets/group-audit`, { method: "POST", body: JSON.stringify(p) });
   },
+  // POD triage at Transit (stage 5): per-asset Diterima → Pemasangan, Rusak/Tidak Sesuai → Ditahan.
+  podTriage(p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string }[] }): Promise<{ ok: boolean; accepted: number; held: number; assets: Asset[] }> {
+    return req(`/assets/pod-triage`, { method: "POST", body: JSON.stringify(p) });
+  },
+  // Held-asset (Transit) actions: return (retur ke Gudang) / arrive (tiba di Gudang) / release (loloskan ke Pemasangan).
+  holdAction(p: { assetIds: string[]; op: "return" | "arrive" | "release"; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }): Promise<{ ok: boolean; count: number; skipped: number; suratJalanNo?: string; assets: Asset[] }> {
+    return req(`/assets/hold`, { method: "POST", body: JSON.stringify(p) });
+  },
   auditSample(id: string, samples: { locationId: number; compliant: boolean }[], meta?: { method?: "manual" | "auto"; samplePct?: number }): Promise<{ asset: Asset; coverage: any }> {
     return req(`/assets/${encodeURIComponent(id)}/audit-sample`, { method: "POST", body: JSON.stringify({ samples, ...(meta || {}) }) });
   },

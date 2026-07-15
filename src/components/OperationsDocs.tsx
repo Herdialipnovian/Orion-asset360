@@ -428,7 +428,8 @@ export default function OperationsDocs({ assets, settings }: OperationsDocsProps
                   {/* STEP 5 — POD */}
                   {selectedStep === 5 && (
                     <div className="space-y-4">
-                      {activeAssetObj?.stageDetails?.transit?.podRecipient && (
+                      {/* A HELD (Rusak/Tidak Sesuai) asset was NOT successfully received — no POD certificate. */}
+                      {activeAssetObj?.stageDetails?.transit?.podRecipient && !activeAssetObj?.stageDetails?.transit?.hold && (
                         <div className="bg-white border-2 border-emerald-500 rounded-xl p-4 space-y-3">
                           <p className="font-extrabold text-slate-900 text-sm text-center">BERITA ACARA PENERIMAAN (POD)</p>
                           <div className="grid grid-cols-2 gap-3 text-[11px]">

@@ -100,7 +100,7 @@ export async function genAssetId(client: string, exec: Exec = q): Promise<string
   const { rows } = await exec(`select id from assets where id like $1`, [prefix + "%"]);
   let max = 0;
   for (const r of rows) {
-    if (/-SJ\d+$/.test(String(r.id))) continue; // ignore partial-shipment split children
+    if (/-(SJ|R)\d+$/.test(String(r.id))) continue; // ignore split children (-SJ shipment, -R POD damage)
     const m = String(r.id).match(/(\d+)$/);
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
@@ -116,6 +116,18 @@ export async function genSplitId(originalId: string, exec: Exec = q): Promise<st
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
   return `${originalId}-SJ${max + 1}`;
+}
+
+// Generate a child ID for a POD partial-damage/mismatch split (held at Transit), e.g. DIN00001 -> DIN00001-R1.
+// Base ID stays shared so the damaged units stay visibly the same asset as the accepted units.
+export async function genHoldSplitId(originalId: string, exec: Exec = q): Promise<string> {
+  const { rows } = await exec(`select id from assets where id like $1`, [originalId + "-R%"]);
+  let max = 0;
+  for (const r of rows) {
+    const m = String(r.id).match(/-R(\d+)$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `${originalId}-R${max + 1}`;
 }
 
 export async function insertAsset(a: Asset, exec: Exec = q): Promise<void> {

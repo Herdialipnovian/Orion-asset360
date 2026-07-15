@@ -320,7 +320,7 @@ export const api = {
     return req(`/assets/group-audit`, { method: "POST", body: JSON.stringify(p) });
   },
   // POD triage at Transit (stage 5): per-asset Diterima → Pemasangan, Rusak/Tidak Sesuai → Ditahan.
-  podTriage(p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string }[] }): Promise<{ ok: boolean; accepted: number; held: number; assets: Asset[] }> {
+  podTriage(p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string; qty?: number }[] }): Promise<{ ok: boolean; accepted: number; held: number; assets: Asset[] }> {
     return req(`/assets/pod-triage`, { method: "POST", body: JSON.stringify(p) });
   },
   // Held-asset (Transit) actions: return (retur ke Gudang) / arrive (tiba di Gudang) / release (loloskan ke Pemasangan).

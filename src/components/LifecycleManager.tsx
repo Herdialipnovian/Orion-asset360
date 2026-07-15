@@ -376,7 +376,7 @@ interface LifecycleManagerProps {
   onGroupAdvance?: (p: { batchId: string; fromStage: number; toStage: number; stageKey?: string; section?: any; perAsset?: Record<string, any>; meta?: { logAction?: string; operator?: string } }) => Promise<{ ok: boolean; error?: string; count?: number }>;
   onGroupVenue?: (p: { batchId: string; assetIds?: string[]; op: "deploy" | "arrive-venue" | "ship-return" | "arrive-warehouse" | "leg-arrive" | "leg-install" | "leg-audit"; locationId?: number; pic?: string; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string; setupDate?: string; merchandiserId?: number; auditedBy?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onGroupAudit?: (p: { batchId: string; auditedBy?: string }) => Promise<{ ok: boolean; error?: string; count?: number }>;
-  onPodTriage?: (p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string }[] }) => Promise<{ ok: boolean; error?: string; accepted?: number; held?: number }>;
+  onPodTriage?: (p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string; qty?: number }[] }) => Promise<{ ok: boolean; error?: string; accepted?: number; held?: number }>;
   onHold?: (p: { assetIds: string[]; op: "return" | "arrive" | "release"; suratJalanNo?: string; courier?: string; trackingUrl?: string; trackingNo?: string; eta?: string }) => Promise<{ ok: boolean; error?: string; count?: number; skipped?: number }>;
   onDistribute?: (assetId: string, placements: { locationId: number; merchandiserId?: number; qty: number }[], projectId?: number | null) => Promise<{ ok: boolean; error?: string }>;
   onPlaceToko?: (assetId: string, p: { locationId: number; doneQty?: number; gpsLat?: number; gpsLng?: number; signatureBase64?: string; note?: string }) => Promise<{ ok: boolean; error?: string }>;
@@ -560,6 +560,7 @@ export default function LifecycleManager({
   // POD triage (Transit): per-asset decision Diterima / Rusak / Tidak Sesuai + note + photo (for problems).
   const [podStatus, setPodStatus] = React.useState<Record<string, "diterima" | "rusak" | "tidak_sesuai">>({});
   const [podNote, setPodNote] = React.useState<Record<string, string>>({});
+  const [podQty, setPodQty] = React.useState<Record<string, string>>({}); // per-asset: how many units are problematic (partial-damage split)
   const [podPhoto, setPodPhoto] = React.useState<Record<string, File>>({});
   const [podPrev, setPodPrev] = React.useState<Record<string, string>>({});
   const setPodFile = (id: string, f: File | null) => {
@@ -588,7 +589,7 @@ export default function LifecycleManager({
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
     setPodSig(""); setShipMd(""); setShipVenue(String((gg.members[0]?.stageDetails as any)?.deployment?.venue?.locationId || ""));
     setVenueAction(null); setVenueReturnSJ(""); setNextVenueId("");
-    setPodStatus({}); setPodNote({}); setPodPhoto({}); setPodPrev({});
+    setPodStatus({}); setPodNote({}); setPodQty({}); setPodPhoto({}); setPodPrev({});
     setInstallChk({}); setInstallPhoto({}); setInstallPrev({});
     setAuditChk({}); setAuditPhoto({}); setAuditPrev({}); setShipEvidence({});
     const chk: Record<string, boolean> = {}; gg.members.forEach(m => { chk[m.id] = false; }); setPodChecklist(chk);
@@ -711,7 +712,7 @@ export default function LifecycleManager({
       recipient: dest?.picPenerima || undefined,
       podTime: podForm.podTime,
       signatureBase64: podSig,
-      items: members.map(m => ({ id: m.id, status: podStatus[m.id], note: (podNote[m.id] || "").trim() || undefined })),
+      items: members.map(m => ({ id: m.id, status: podStatus[m.id], note: (podNote[m.id] || "").trim() || undefined, qty: podStatus[m.id] !== "diterima" ? (Math.max(1, Math.min(Number(podQty[m.id]) || m.quantity, m.quantity))) : undefined })),
     });
     if (!res.ok) { setShipBusy(false); return setShipError(res.error || "Gagal memproses penerimaan."); }
     try { for (const m of problems) if (podPhoto[m.id]) await api.uploadEvidence(m.id, "pod_problem", 5, [podPhoto[m.id]], `POD ${podStatus[m.id] === "rusak" ? "rusak" : "tidak sesuai"}: ${(podNote[m.id] || "").trim()}`); }
@@ -2554,6 +2555,17 @@ export default function LifecycleManager({
                             </div>
                             {problem && (
                               <div className="space-y-2">
+                                {m.quantity > 1 && (() => {
+                                  const q = Math.max(1, Math.min(Number(podQty[m.id]) || m.quantity, m.quantity));
+                                  return (
+                                    <div className="flex items-center gap-2 text-[11px]">
+                                      <span className="font-bold text-slate-700">Unit bermasalah:</span>
+                                      <input type="number" min={1} max={m.quantity} value={podQty[m.id] ?? String(m.quantity)} onChange={e => setPodQty(s => ({ ...s, [m.id]: e.target.value }))} className="w-16 bg-white border border-rose-200 px-2 py-1 rounded-lg text-[11px] outline-none focus:ring-1 focus:ring-rose-400 tabular-nums" />
+                                      <span className="text-slate-400">dari {m.quantity} unit</span>
+                                      {q < m.quantity && <span className="text-[10px] text-emerald-600 font-semibold">· {m.quantity - q} unit lanjut ke Pemasangan</span>}
+                                    </div>
+                                  );
+                                })()}
                                 <input value={podNote[m.id] || ""} onChange={e => setPodNote(n => ({ ...n, [m.id]: e.target.value }))} placeholder="Catatan masalah (wajib)…" className="w-full bg-white border border-rose-200 px-2.5 py-1.5 rounded-lg text-[11px] outline-none focus:ring-1 focus:ring-rose-400" />
                                 <div className="flex items-center gap-2">
                                   {podPrev[m.id] ? <img src={podPrev[m.id]} alt="" className="h-10 w-10 rounded object-cover border border-rose-300" /> : <div className="h-10 w-10 rounded border border-dashed border-slate-300 grid place-items-center text-slate-300"><Camera className="h-4 w-4" /></div>}

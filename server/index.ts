@@ -9,7 +9,7 @@ import type { Response, NextFunction } from "express";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { q, getAssets, getAsset, insertAsset, insertLog, updateAssetStageRow, getLogs, tx, genAssetId, genSplitId, updateAssetCore, deleteAsset, setAssetProject, logHash, rowToAsset } from "./db";
+import { q, getAssets, getAsset, insertAsset, insertLog, updateAssetStageRow, getLogs, tx, genAssetId, genSplitId, genHoldSplitId, updateAssetCore, deleteAsset, setAssetProject, logHash, rowToAsset } from "./db";
 import { requireAuth, requireAuthFlexible, requireRole, signToken, verifyPassword, hashPassword, STAGE_ROLE, type AuthedReq } from "./auth";
 import { migrate, SEED_SETTINGS } from "./migrate";
 import { computeLocation, DEFAULT_LOG, TRANSITIONS, isLegalTransition, EVIDENCE_REQUIRED } from "./lifecycle";
@@ -1055,10 +1055,13 @@ app.post("/api/assets/pod-triage", requireAuth, wrap(async (req: AuthedReq, res)
   const now = new Date().toISOString();
   const byId = new Map<string, any>(items.map((it: any) => [String(it.id), it]));
   const accepted: string[] = []; const held: string[] = []; const skipped: string[] = [];
+  const heldInfo: Record<string, { reason: string; note?: string; parentId?: string; qty?: number }> = {};
+  const splitNotes: Record<string, string> = {}; // parentId → extra note for its accepted log
   try {
     await tx(async c => {
+      const exec = (t: string, p?: any[]) => c.query(t, p);
       const { rows } = await c.query(
-        `select id, client, current_location, stage_details from assets
+        `select * from assets
          where stage_details->'shipping'->>'batchId'=$1 and current_stage=5 and id = any($2) for update`,
         [batchId, [...byId.keys()]]
       );
@@ -1079,22 +1082,52 @@ app.post("/api/assets/pod-triage", requireAuth, wrap(async (req: AuthedReq, res)
           await c.query(`update assets set current_stage=6, current_location=$3, stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, transit, deployment: dep }), loc]);
           accepted.push(r.id);
         } else if (status === "rusak" || status === "tidak_sesuai") {
-          const transit: any = {
-            ...(sd.transit || {}), podRecipient: recipient, podTime, signatureBase64: sig,
-            conditionOnArrival: status === "rusak" ? "Rusak Sebagian" : (sd.transit?.conditionOnArrival || undefined),
-            claimFlag: status === "rusak", // transit-level too (survives hold release/return) so the POD doc/claim signal stays consistent
-            hold: { status: "held", reason: status, note: String(it.note || "").trim() || undefined, flaggedBy: recipient, flaggedAt: now, claimFlag: status === "rusak" }
-          };
-          await c.query(`update assets set current_location=$3, stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, transit }), `Ditahan di Transit — ${status === "rusak" ? "Rusak" : "Tidak Sesuai"}`]);
-          held.push(r.id);
+          const total = Number(r.quantity) || 1;
+          const problemQty = Math.max(1, Math.min(Math.floor(Number(it.qty ?? total)) || total, total));
+          const noteS = String(it.note || "").trim() || undefined;
+          const holdData = { status: "held", reason: status, note: noteS, flaggedBy: recipient, flaggedAt: now, claimFlag: status === "rusak" };
+          const cond = status === "rusak" ? "Rusak Sebagian" : (sd.transit?.conditionOnArrival || undefined);
+          const locHold = `Ditahan di Transit — ${status === "rusak" ? "Rusak" : "Tidak Sesuai"}`;
+          if (problemQty >= total) {
+            // whole record held
+            const transit: any = { ...(sd.transit || {}), podRecipient: recipient, podTime, signatureBase64: sig, conditionOnArrival: cond, claimFlag: status === "rusak", hold: holdData };
+            await c.query(`update assets set current_location=$3, stage_details=$2::jsonb, updated_at=now() where id=$1`, [r.id, JSON.stringify({ ...sd, transit }), locHold]);
+            held.push(r.id); heldInfo[r.id] = { reason: status, note: noteS };
+          } else {
+            // PARTIAL: split off a child (problemQty) HELD at Transit; the remainder is accepted → Fase 6.
+            // Base id stays shared (CPP00001 + CPP00001-R1) + specs.splitFrom → visibly one asset, merge-back later.
+            const parent = rowToAsset(r);
+            const perUnit = (parent.financials?.purchaseCost || 0) / (parent.quantity || 1);
+            const perDisp = (parent.financials?.disposalValue || 0) / (parent.quantity || 1);
+            const remaining = total - problemQty;
+            const cid = await genHoldSplitId(r.id, exec);
+            const childTransit: any = { ...(sd.transit || {}), podRecipient: recipient, podTime, signatureBase64: sig, conditionOnArrival: cond, claimFlag: status === "rusak", hold: holdData };
+            const child: Asset = {
+              ...parent, id: cid, quantity: problemQty, currentStage: 5, currentLocation: locHold,
+              qrcode: `ASETIFY-${cid}`, createdAt: now, updatedAt: now,
+              specs: { ...(parent.specs || {}), splitFrom: r.id },
+              financials: { ...(parent.financials || { purchaseCost: 0, maintenanceCost: 0, disposalValue: 0 }), purchaseCost: Math.round(perUnit * problemQty), disposalValue: Math.round(perDisp * problemQty) },
+              stageDetails: { ...sd, transit: childTransit },
+            };
+            await insertAsset(child, exec);
+            const pTransit: any = { ...(sd.transit || {}), podRecipient: recipient, podTime, conditionOnArrival: "Sempurna", signatureBase64: sig };
+            delete pTransit.hold; delete pTransit.claimFlag;
+            const pDep: any = { ...(sd.deployment || {}) }; delete pDep.assignments; delete pDep.installedQty; delete pDep.fullyInstalled;
+            const loc6 = computeLocation(6, undefined, r.client, r.current_location || "");
+            await c.query(`update assets set current_stage=6, current_location=$2, quantity=$3, stage_details=$4::jsonb, financials=$5::jsonb, updated_at=now() where id=$1`,
+              [r.id, loc6, remaining, JSON.stringify({ ...sd, transit: pTransit, deployment: pDep }), JSON.stringify({ ...(parent.financials || {}), purchaseCost: Math.round(perUnit * remaining), disposalValue: Math.round(perDisp * remaining) })]);
+            accepted.push(r.id); held.push(cid);
+            heldInfo[cid] = { reason: status, note: noteS, parentId: r.id, qty: problemQty };
+            splitNotes[r.id] = `${problemQty} unit ${status === "rusak" ? "rusak" : "tidak sesuai"} dipisah ke ${cid}; ${remaining} unit diterima`;
+          }
         } else {
           throw Object.assign(new Error(`Status POD tidak valid untuk ${r.id}.`), { http: 400 });
         }
       }
     });
   } catch (e: any) { if (e && e.http) return res.status(e.http).json({ error: e.message }); throw e; }
-  for (const id of accepted) { const a = await getAsset(id); await insertLog({ id: `LOG-POD-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 6, action: `POD: diterima & ditandatangani ${recipient} — masuk Pemasangan.`, operator: recipient, type: "success" }); assetChanged(id); }
-  for (const id of held) { const a = await getAsset(id); const rr = byId.get(id); await insertLog({ id: `LOG-HOLD-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 5, action: `POD: ${rr?.status === "rusak" ? "RUSAK" : "TIDAK SESUAI"} — aset DITAHAN di Transit${rr?.note ? ` (${String(rr.note).slice(0, 80)})` : ""}.`, operator: recipient, type: "warning" }); assetChanged(id); }
+  for (const id of accepted) { const a = await getAsset(id); await insertLog({ id: `LOG-POD-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 6, action: `POD: diterima & ditandatangani ${recipient} — masuk Pemasangan${splitNotes[id] ? ` (${splitNotes[id]})` : ""}.`, operator: recipient, type: "success" }); assetChanged(id); }
+  for (const id of held) { const a = await getAsset(id); const hi = heldInfo[id]; await insertLog({ id: `LOG-HOLD-${Date.now()}-${id}`, timestamp: now, assetId: id, assetName: a?.name || id, stage: 5, action: `POD: ${hi?.reason === "rusak" ? "RUSAK" : "TIDAK SESUAI"} — ${hi?.qty ? `${hi.qty} unit ` : ""}DITAHAN di Transit${hi?.parentId ? ` (dipisah dari ${hi.parentId})` : ""}${hi?.note ? ` — ${String(hi.note).slice(0, 80)}` : ""}.`, operator: recipient, type: "warning" }); assetChanged(id); }
   // Ids requested but not applied (already held/returning, or moved off Transit concurrently) — report so the client can warn.
   const done = new Set([...accepted, ...held]);
   const skippedCount = skipped.length + [...byId.keys()].filter(id => !done.has(id) && !skipped.includes(id)).length;

@@ -351,7 +351,7 @@ export default function App() {
     catch (e: any) { return { ok: false, error: e?.message || "Gagal menyimpan audit." }; }
   };
   const handlePodTriage = async (
-    p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string }[] }
+    p: { batchId: string; recipient?: string; podTime?: string; signatureBase64: string; note?: string; items: { id: string; status: "diterima" | "rusak" | "tidak_sesuai"; note?: string; qty?: number }[] }
   ): Promise<{ ok: boolean; error?: string; accepted?: number; held?: number }> => {
     try { const r = await api.podTriage(p); await refresh(); return { ok: true, accepted: r.accepted, held: r.held }; }
     catch (e: any) { return { ok: false, error: e?.message || "Gagal memproses penerimaan." }; }

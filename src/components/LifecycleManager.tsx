@@ -562,7 +562,9 @@ export default function LifecycleManager({
     const st = g.members[0]?.currentStage;
     // Venue (Fase 9): act on the FULL batch (from the UNFILTERED asset list) so the checklist + per-asset
     // photos cover every co-batch sibling the server op will touch — never a search-narrowed subset.
-    const full = (st === 9 && g.batchId) ? assets.filter(a => batchIdOf(a) === g.batchId && a.currentStage === 9) : [];
+    // For any in-journey phase (4–9), act on the FULL batch (from the UNFILTERED asset list) so the panel
+    // shows every co-batch sibling at this stage — single-asset shipments and groups run the SAME process.
+    const full = (typeof st === "number" && st >= 4 && st <= 9 && g.batchId) ? assets.filter(a => batchIdOf(a) === g.batchId && a.currentStage === st) : [];
     const gg = { batchId: g.batchId, members: full.length ? full : g.members };
     setShipForm({ courier: "", trackingNo: "", trackingUrl: "", eta: "" });
     setPodForm({ podTime: new Date().toISOString().slice(0, 10), conditionOnArrival: "Sempurna", podNote: "" });
@@ -1378,7 +1380,7 @@ export default function LifecycleManager({
             <IconComp className="h-3.5 w-3.5" />
             <span>Fase {faseNo(asset.currentStage)}: {cleanLabel(asset.currentStage)}</span>
           </div>
-          {asset.currentStage === 9 ? (
+          {asset.currentStage >= 4 && asset.currentStage <= 9 ? (
             <button type="button" onClick={() => openShipView({ batchId: batchIdOf(asset) || asset.id, members: [asset] })} className="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-extrabold text-white transition hover:bg-blue-700">
               <Eye className="h-3 w-3" /> Lihat &amp; Proses
             </button>
@@ -2359,8 +2361,8 @@ export default function LifecycleManager({
           <div className="bg-white rounded-2xl max-w-lg w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-slate-100">
             <div className="p-5 border-b border-slate-100 flex justify-between items-start">
               <div>
-                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block">Pengiriman Bersama · Fase {faseNo(gStage)} · {cleanLabel(gStage)}</span>
-                <h3 className="text-base font-bold text-slate-950">{shipView.members.length} aset · satu Surat Jalan</h3>
+                <span className="text-[10px] font-bold text-blue-600 uppercase tracking-widest block">{shipView.members.length > 1 ? "Pengiriman Bersama" : "Pengiriman"} · Fase {faseNo(gStage)} · {cleanLabel(gStage)}</span>
+                <h3 className="text-base font-bold text-slate-950">{shipView.members.length > 1 ? `${shipView.members.length} aset · satu Surat Jalan` : (shipView.members[0]?.name || "1 aset")}</h3>
                 <p className="font-mono text-[11px] text-slate-400 mt-0.5">{shipView.batchId}</p>
               </div>
               <button onClick={() => setShipView(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>

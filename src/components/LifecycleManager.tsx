@@ -32,7 +32,8 @@ import {
   Briefcase,
   Loader2,
   Eye,
-  Camera
+  Camera,
+  Clock
 } from "lucide-react";
 import { Asset, AssetStage } from "../types";
 import { api, evidenceThumb, type AuthUser, type EvidenceView } from "../api";
@@ -389,6 +390,15 @@ interface LifecycleManagerProps {
 const formatRupiah = (val: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(val);
 
+// Last-updated (≈ when the card entered / last moved in its current phase) — so an operator can tell
+// which cards are new vs old at a glance. Compact "16 Jul 2026 · 14:30".
+const fmtDT = (s?: string) => {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) + " · " + d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+};
+
 // On-screen signature pad → PNG data URL, for Proof-of-Delivery (konfirmasi penerimaan).
 function SignaturePad({ onChange }: { value?: string; onChange: (v: string) => void }) {
   const ref = React.useRef<HTMLCanvasElement | null>(null);
@@ -547,7 +557,7 @@ export default function LifecycleManager({
   const [batchForm, setBatchForm] = React.useState({ suratJalanNo: "", deployMode: "", projectId: "", driverName: "", vehiclePlate: "", vendorShipping: "", departureTime: "", area: "", picPenerima: "", courier: "", trackingUrl: "", trackingNo: "", eta: "" });
   const [batchBusy, setBatchBusy] = React.useState(false);
   const [batchError, setBatchError] = React.useState<string | null>(null);
-  const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; tanggal: string; projectName?: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; courier?: string; trackingNo?: string; rows: { id: string; name: string; qty: number }[] } | null>(null);
+  const [batchPrint, setBatchPrint] = React.useState<{ suratJalanNo: string; tanggal: string; projectName?: string; area: string; picPenerima: string; driverName: string; vehiclePlate: string; courier?: string; trackingNo?: string; rows: { id: string; name: string; qty: number }[]; retur?: boolean } | null>(null);
   // Shipment "View + Process" panel (opened from a group card) — view the shipment + advance the whole
   // group to the next phase. Surat Jalan (Fase 2/stage 4) → Transit (stage 5) via a tracking form.
   const [shipView, setShipView] = React.useState<{ batchId: string; members: Asset[] } | null>(null);
@@ -750,6 +760,40 @@ export default function LifecycleManager({
     const res = await onHold({ assetIds: [assetId], op: "release" });
     setHoldBusy(null);
     if (!res.ok) setHoldError({ id: assetId, msg: res.error || "Gagal meloloskan aset." });
+  };
+  // Only Logistik/Admin may confirm a retur has arrived at Gudang (they physically receive it).
+  const canReceiveGudang = !!user && (user.role === "Admin" || user.role === "Logistik");
+  // Share the retur tracking (Surat Jalan + kurir/resi/link/ETA + alasan) to the recipient via WhatsApp.
+  const shareHoldReturnWA = (m: Asset) => {
+    const h: any = (m.stageDetails as any)?.transit?.hold || {};
+    const rs: any = h.returnShipment || {};
+    const lines = [
+      `Retur aset ke Gudang — ${m.name} (${m.id}, ${m.quantity} unit)`,
+      `Alasan: ${h.reason === "rusak" ? "Rusak" : "Tidak Sesuai"}${h.note ? ` — ${h.note}` : ""}`,
+      rs.suratJalanNo ? `Surat Jalan: ${rs.suratJalanNo}` : "",
+      rs.courier ? `Kurir: ${rs.courier}${rs.trackingNo ? ` · Resi: ${rs.trackingNo}` : ""}` : "",
+      rs.eta ? `Estimasi tiba: ${rs.eta}` : "",
+      rs.trackingUrl ? `Lacak: ${rs.trackingUrl}` : "",
+    ].filter(Boolean);
+    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`, "_blank");
+  };
+  // Print a Surat Jalan Retur for a held asset (reuses the shared printable-doc host).
+  const printHoldReturn = (m: Asset) => {
+    const h: any = (m.stageDetails as any)?.transit?.hold || {};
+    const rs: any = h.returnShipment || {};
+    setBatchPrint({
+      suratJalanNo: rs.suratJalanNo || "-",
+      tanggal: new Date().toLocaleDateString("id-ID", { day: "2-digit", month: "long", year: "numeric" }),
+      projectName: `Alasan: ${h.reason === "rusak" ? "Rusak" : "Tidak Sesuai"}${h.note ? ` — ${h.note}` : ""}`,
+      area: "Gudang Utama Origin",
+      picPenerima: "",
+      driverName: "",
+      vehiclePlate: "",
+      courier: rs.courier,
+      trackingNo: rs.trackingNo,
+      rows: [{ id: m.id, name: m.name, qty: m.quantity }],
+      retur: true,
+    });
   };
   const submitShipTransit = async () => {
     if (!shipView || !onGroupAdvance) return;
@@ -1404,6 +1448,10 @@ export default function LifecycleManager({
             <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border w-fit ${flow.chip}`}>
               <FlowIcon className="h-2.5 w-2.5" /> {flow.label}
             </span>
+            {asset.currentStage === 6 && ((((asset.stageDetails as any)?.deployment?.assignments) || []).length > 0
+              ? <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border w-fit bg-emerald-50 text-emerald-700 border-emerald-200"><UserCheck className="h-2.5 w-2.5" /> MD ditunjuk</span>
+              : <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border w-fit bg-amber-50 text-amber-700 border-amber-200"><AlertTriangle className="h-2.5 w-2.5" /> Belum ditunjuk MD</span>
+            )}
           </div>
           <p className="text-[11px] text-slate-500 grid grid-cols-2 gap-x-2">
             <span>Client: <strong className="font-semibold text-slate-700 truncate block">{asset.client.split(" ")[1] || asset.client}</strong></span>
@@ -1437,6 +1485,9 @@ export default function LifecycleManager({
               <p className={`font-extrabold ${asset.auditScore >= 90 ? "text-emerald-600" : asset.auditScore >= 70 ? "text-blue-600" : "text-rose-600"}`}>{asset.auditScore}/100</p>
             </div>
           ) : null}
+        </div>
+        <div className="px-5 py-1.5 border-t border-slate-50 bg-white flex items-center gap-1 text-[9px] text-slate-400" title="Terakhir diperbarui / masuk fase ini">
+          <Clock className="h-2.5 w-2.5 shrink-0" /> <span className="tabular-nums">Update: {fmtDT(asset.updatedAt)}</span>
         </div>
         <div className="p-3 border-t border-slate-50 bg-white flex items-center justify-between">
           <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full border text-[10px] font-bold ${statusColors[asset.currentStage]}`}>
@@ -2354,18 +2405,34 @@ export default function LifecycleManager({
                           <div className="min-w-0">
                             <span className="block text-[12px] font-bold text-slate-800 truncate">{m.name}</span>
                             <span className="block text-[9px] font-mono text-slate-400">{m.id} · {m.quantity} unit</span>
+                            <span className="mt-0.5 flex items-center gap-1 text-[9px] text-slate-400"><Clock className="h-2.5 w-2.5 shrink-0" /> Ditahan: {fmtDT(h.flaggedAt || m.updatedAt)}</span>
                           </div>
                           <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold ${h.reason === "rusak" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{h.reason === "rusak" ? "Rusak" : "Tidak Sesuai"}</span>
                         </div>
                         {h.note && <p className="text-[10px] text-slate-500">Catatan: {h.note}</p>}
                         {holdError?.id === m.id && <p className="text-[10px] font-semibold text-rose-600">{holdError.msg}</p>}
-                        {returning ? (
-                          <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5">
-                            <p className="text-[10px] font-semibold text-amber-700">Dalam perjalanan pulang ke Gudang{h.returnShipment?.suratJalanNo ? ` · SJ ${h.returnShipment.suratJalanNo}` : ""}{h.returnShipment?.courier ? ` · ${h.returnShipment.courier}` : ""}</p>
-                            {h.returnShipment?.trackingUrl && <a href={h.returnShipment.trackingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:underline"><MapPin className="h-3 w-3" /> Buka tracking</a>}
-                            <button type="button" onClick={() => doHoldArrive(m.id)} disabled={busy} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:bg-slate-300">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Home className="h-4 w-4" />} Konfirmasi Tiba di Gudang</button>
+                        {returning ? (() => { const rs: any = h.returnShipment || {}; return (
+                          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5">
+                            <p className="text-[10px] font-extrabold text-amber-800 flex items-center gap-1"><Truck className="h-3 w-3" /> Retur — dalam perjalanan ke Gudang</p>
+                            <div className="flex flex-wrap gap-1.5 text-[10px]">
+                              {rs.suratJalanNo && <span className="rounded-full bg-white border border-amber-200 px-2 py-0.5 font-semibold text-amber-800">SJ: {rs.suratJalanNo}</span>}
+                              {rs.courier && <span className="rounded-full bg-white border border-slate-200 px-2 py-0.5 font-semibold text-slate-600">Kurir: {rs.courier}</span>}
+                              {rs.trackingNo && <span className="rounded-full bg-white border border-slate-200 px-2 py-0.5 font-semibold text-slate-600">Resi: {rs.trackingNo}</span>}
+                              {rs.eta && <span className="rounded-full bg-white border border-slate-200 px-2 py-0.5 font-semibold text-slate-600">ETA: {rs.eta}</span>}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {rs.trackingUrl ? <a href={rs.trackingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-2.5 py-1.5"><MapPin className="h-3 w-3" /> Buka Tracking</a> : <span className="text-[9px] text-slate-400 py-1.5">Link tracking belum ada</span>}
+                              <button type="button" onClick={() => shareHoldReturnWA(m)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1.5"><UserCheck className="h-3 w-3" /> Share ke WA</button>
+                              <button type="button" onClick={() => printHoldReturn(m)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[10px] font-bold px-2.5 py-1.5"><FileText className="h-3 w-3" /> Cetak Surat Jalan</button>
+                            </div>
+                            {canReceiveGudang ? (
+                              <button type="button" onClick={() => doHoldArrive(m.id)} disabled={busy} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 disabled:bg-slate-300">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Home className="h-4 w-4" />} Konfirmasi Tiba di Gudang</button>
+                            ) : (
+                              <p className="text-[10px] text-slate-500 italic text-center py-1">Menunggu <b>Logistik</b> konfirmasi barang tiba di gudang.</p>
+                            )}
                           </div>
-                        ) : holdReturnFor === m.id ? (
+                        ); })()
+                        : holdReturnFor === m.id ? (
                           <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50/50 p-2.5">
                             <div className="flex items-center justify-between"><span className="text-[10px] font-extrabold text-blue-800">Kirim Balik ke Gudang</span><button type="button" onClick={() => { setHoldReturnFor(null); setHoldError(null); }} className="text-[10px] font-semibold text-slate-400 hover:text-slate-600">batal</button></div>
                             <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5"><span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">No. Surat Jalan (retur)</span><span className="font-mono text-[11px] font-bold text-slate-700">{holdForm.suratJalanNo}</span></div>
@@ -2396,6 +2463,11 @@ export default function LifecycleManager({
               // ONE contained shipment box: header + all member cards nested inside, so a consolidated
               // dispatch reads as a single shipment (of N assets) — not as loose, separate-looking cards.
               const chip = "inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white ring-1 ring-white/20";
+              // Proses Pemasangan (Fase 6): flag whether an MD has been assigned yet, so assigned vs
+              // not-yet-assigned shipments are distinguishable at a glance (Udin 2026-07-16).
+              const gst = g.members[0]?.currentStage;
+              const mdAssignedCount = g.members.filter(m => (((m.stageDetails as any)?.deployment?.assignments) || []).length > 0).length;
+              const mdNames = [...new Set(g.members.flatMap(m => (((m.stageDetails as any)?.deployment?.assignments) || []).map((a: any) => a.merchandiser).filter(Boolean)))];
               return (
                 <div key={"grp-" + g.batchId} className="col-span-full overflow-hidden rounded-2xl border border-indigo-200/70 bg-white shadow-sm">
                   {/* Gradient shipment manifest header */}
@@ -2413,6 +2485,12 @@ export default function LifecycleManager({
                           {sh.driverName && <span className={chip}><UserCheck className="h-3 w-3" /> {sh.driverName}</span>}
                           {sh.vehiclePlate && <span className={chip}>{sh.vehiclePlate}</span>}
                           {dest?.area && <span className={chip}><MapPin className="h-3 w-3" /> {dest.area}</span>}
+                          <span className={chip} title="Terakhir diperbarui / masuk fase ini"><Clock className="h-3 w-3" /> {fmtDT(g.members[0]?.updatedAt)}</span>
+                          {(() => { const ph = g.members[0]?.currentStage; return typeof ph === "number" ? <span className={chip}>Fase {faseNo(ph)} · {cleanLabel(ph)}</span> : null; })()}
+                          {gst === 6 && (mdAssignedCount === g.members.length
+                            ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400 px-2 py-0.5 text-[10px] font-bold text-emerald-950 ring-1 ring-emerald-200"><UserCheck className="h-3 w-3" /> MD: {mdNames.join(", ") || "ditunjuk"}</span>
+                            : <span className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-bold text-amber-950 ring-1 ring-amber-200"><AlertTriangle className="h-3 w-3" /> {mdAssignedCount === 0 ? "Belum ditunjuk MD" : `MD sebagian (${mdAssignedCount}/${g.members.length})`}</span>
+                          )}
                         </div>
                       </div>
                       <button
@@ -2959,10 +3037,10 @@ export default function LifecycleManager({
             <div id="printable-doc" className="p-8 text-slate-800">
               <div className="flex justify-between items-start border-b-2 border-slate-800 pb-3 mb-4">
                 <div><h1 className="text-lg font-extrabold">{settings?.company_name || "PT Origin Connect"}</h1><p className="text-[11px] text-slate-500">{settings?.company_address || ""}</p></div>
-                <div className="text-right"><h2 className="text-base font-extrabold tracking-widest">SURAT JALAN</h2><p className="text-[11px] font-mono">{batchPrint.suratJalanNo}</p><p className="text-[11px] text-slate-500">Tanggal: <strong className="text-slate-700">{batchPrint.tanggal}</strong></p></div>
+                <div className="text-right"><h2 className="text-base font-extrabold tracking-widest">{batchPrint.retur ? "SURAT JALAN RETUR" : "SURAT JALAN"}</h2><p className="text-[11px] font-mono">{batchPrint.suratJalanNo}</p><p className="text-[11px] text-slate-500">Tanggal: <strong className="text-slate-700">{batchPrint.tanggal}</strong></p></div>
               </div>
               <div className="grid grid-cols-2 gap-3 text-[11px] mb-4">
-                <div>{batchPrint.projectName ? <>Proyek: <strong>{batchPrint.projectName}</strong><br /></> : null}Tujuan: <strong>{batchPrint.area || "—"}</strong>{batchPrint.picPenerima ? <> · PIC: <strong>{batchPrint.picPenerima}</strong></> : null}</div>
+                <div>{batchPrint.projectName ? <>{batchPrint.retur ? null : "Proyek: "}<strong>{batchPrint.projectName}</strong><br /></> : null}{batchPrint.retur ? "Kembali ke: " : "Tujuan: "}<strong>{batchPrint.area || "—"}</strong>{batchPrint.picPenerima ? <> · PIC: <strong>{batchPrint.picPenerima}</strong></> : null}</div>
                 <div className="text-right">{batchPrint.driverName ? <>Driver: <strong>{batchPrint.driverName}</strong>{batchPrint.vehiclePlate ? <> · {batchPrint.vehiclePlate}</> : null}</> : batchPrint.courier ? <>Kurir: <strong>{batchPrint.courier}</strong>{batchPrint.trackingNo ? <> · Resi {batchPrint.trackingNo}</> : null}</> : null}</div>
               </div>
               <table className="w-full text-[11px] border-collapse">
@@ -2970,8 +3048,8 @@ export default function LifecycleManager({
                 <tbody>{batchPrint.rows.map((r, i) => (<tr key={r.id}><td className="border border-slate-300 px-2 py-1">{i + 1}</td><td className="border border-slate-300 px-2 py-1 font-mono">{r.id}</td><td className="border border-slate-300 px-2 py-1">{r.name}</td><td className="border border-slate-300 px-2 py-1 text-right">{r.qty}</td></tr>))}</tbody>
               </table>
               <div className="grid grid-cols-2 gap-8 mt-12 text-[11px] text-center">
-                <div>Pengirim / Gudang<div className="mt-12 border-t border-slate-400 pt-1">(_______________)</div></div>
-                <div>Penerima{batchPrint.picPenerima ? ` (${batchPrint.picPenerima})` : ""}<div className="mt-12 border-t border-slate-400 pt-1">(_______________)</div></div>
+                <div>{batchPrint.retur ? "Pengirim (PIC / Lokasi)" : "Pengirim / Gudang"}<div className="mt-12 border-t border-slate-400 pt-1">(_______________)</div></div>
+                <div>{batchPrint.retur ? "Penerima (Gudang / Logistik)" : `Penerima${batchPrint.picPenerima ? ` (${batchPrint.picPenerima})` : ""}`}<div className="mt-12 border-t border-slate-400 pt-1">(_______________)</div></div>
               </div>
             </div>
           </div>

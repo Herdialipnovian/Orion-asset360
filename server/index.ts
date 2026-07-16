@@ -1143,7 +1143,10 @@ app.post("/api/assets/hold", requireAuth, wrap(async (req: AuthedReq, res) => {
   const assetIds: string[] | null = Array.isArray(b.assetIds) && b.assetIds.length ? b.assetIds.map((x: any) => String(x)) : (b.assetId ? [String(b.assetId)] : null);
   if (!assetIds) return res.status(400).json({ error: "assetIds wajib." });
   if (!["return", "arrive", "release"].includes(op)) return res.status(400).json({ error: "Operasi tidak dikenal." });
-  if (req.user!.role !== "Admin" && !["Logistik", "PIC"].includes(req.user!.role)) return res.status(403).json({ error: `Role '${req.user!.role}' tidak berwenang.` });
+  // Confirming receipt at Gudang (arrive) = Logistik/Admin only (the warehouse receives). Ship-back /
+  // release (from the field) = Logistik/PIC/Admin.
+  const roleOk = req.user!.role === "Admin" || (op === "arrive" ? req.user!.role === "Logistik" : ["Logistik", "PIC"].includes(req.user!.role));
+  if (!roleOk) return res.status(403).json({ error: op === "arrive" ? "Hanya Logistik/Admin yang boleh konfirmasi barang tiba di gudang." : `Role '${req.user!.role}' tidak berwenang.` });
   const now = new Date().toISOString();
   const today = now.slice(0, 10);
   const trackingUrl = b.trackingUrl ? String(b.trackingUrl).trim() : "";
